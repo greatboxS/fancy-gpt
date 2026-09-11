@@ -28,6 +28,29 @@ async function sendToContent(tabId, message, retries = 50) {
   throw lastError ?? new Error("site content adapter didn't become ready");
 }
 
+function whenTabCloses(tabId) {
+  return new Promise(resolve => {
+    const listener = closedId => {
+      if (closedId === tabId) {
+        ext.tabs.onRemoved.removeListener(listener);
+        resolve();
+      }
+    };
+    ext.tabs.onRemoved.addListener(listener);
+  });
+}
+
+// ext.tabs.sendMessage() does not reliably reject when the receiving tab is
+// closed mid-execution (the content script's context is just destroyed), so
+// a manually or externally closed task tab can otherwise hang the whole job
+// until its full timeout instead of failing fast.
+async function sendToContentOrTabClose(tabId, message) {
+  const closed = whenTabCloses(tabId).then(() => {
+    throw new Error("site task tab was closed before the turn completed");
+  });
+  return Promise.race([sendToContent(tabId, message), closed]);
+}
+
 const CONVERSATION_ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
 
 function taskUrlFor(conversation) {
@@ -46,7 +69,7 @@ async function executeJob(job) {
     if (job.site !== "chatgpt") throw new Error(`unsupported site: ${job.site}`);
     tab = await ext.tabs.create({url: taskUrlFor(job.conversation), active: false});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
-    const result = await sendToContent(tab.id, {
+    const result = await sendToContentOrTabClose(tab.id, {
       type: "fancy_execute_turn",
       site: job.site,
       prompt: job.prompt,
