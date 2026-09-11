@@ -131,6 +131,50 @@ exit 0
     assert "--with playwright>=1.55,<2" in log.read_text(encoding="utf-8")
 
 
+def test_remote_edge_preset_creates_private_bundle_and_registers_codex(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    log = tmp_path / "calls.log"
+    fake_uv = tmp_path / "uv"
+    fake_uv.write_text(
+        """#!/usr/bin/env bash
+set -eu
+if [[ "$1 $2 $3" == "tool dir --bin" ]]; then echo "$FAKE_BIN"; exit 0; fi
+if [[ "$1 $2" == "tool install" ]]; then
+  cat > "$FAKE_BIN/fancy-gpt" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+if [[ "$1" == bridge ]]; then echo '{"pair_token":"preset-secret"}'; fi
+if [[ "$1 $2" == "extension export" ]]; then mkdir -p "$4"; echo '{}' > "$4/manifest.json"; fi
+EOF
+  chmod +x "$FAKE_BIN/fancy-gpt"
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+    fake_codex = fake_bin / "codex"
+    fake_codex.write_text("#!/usr/bin/env bash\necho \"codex:$*\" >> \"$FAKE_LOG\"\nif [[ \"$2\" == get ]]; then exit 1; fi\nexit 0\n", encoding="utf-8")
+    fake_codex.chmod(0o755)
+    wheel = tmp_path / "fancy_gpt-0.7.0-py3-none-any.whl"
+    wheel.write_bytes(b"fake")
+    bundle = tmp_path / "bundle"
+    env = os.environ | {
+        "FANCY_GPT_UV_BIN": str(fake_uv), "FANCY_GPT_INSTALL_SOURCE": str(wheel),
+        "FANCY_GPT_EDGE_BUNDLE_DIR": str(bundle), "FAKE_BIN": str(fake_bin),
+        "FAKE_LOG": str(log), "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+    result = subprocess.run(["bash", "install.sh", "--preset", "remote-edge", "--skip-verify"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
+    assert "preset-secret" not in result.stdout
+    assert "preset-secret" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
+    assert (bundle / "PAIRING.txt").stat().st_mode & 0o777 == 0o600
+    assert (bundle / "extension" / "manifest.json").is_file()
+    assert "mcp add fancy-gpt" in log.read_text(encoding="utf-8")
+
+
 def test_native_config_derives_browser_specific_tunnel(monkeypatch, tmp_path: Path) -> None:
     import json
 
