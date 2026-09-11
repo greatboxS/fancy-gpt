@@ -6,5 +6,11 @@ htmlcov/
 .fancy-gpt/
 /dist/
 /build/
+/extension/build/
 *.pyc
 PAIRING.txt
+PROJECT_TREE.txt
+RELEASE_CHECKSUMS.sha256
+RELEASE_MANIFEST.json
+catalog-summary.json
+release-gate.json

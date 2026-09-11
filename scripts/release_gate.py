@@ -93,7 +93,9 @@ checks["pass"] = (
     and not wheel_errors and checks["schemas_exist"] and checks["example_files_exist"]
     and checks["tunnel_architecture_doc"]
 )
-(root / "release-gate.json").write_text(json.dumps(checks, indent=2), encoding="utf-8")
+output = root / "dist" / "release-gate.json"
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps(checks, indent=2), encoding="utf-8")
 print(json.dumps(checks, indent=2))
 if not checks["pass"]:
     raise SystemExit(1)

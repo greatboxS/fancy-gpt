@@ -38,7 +38,6 @@ def expected_files(family: str) -> dict[str, bytes]:
 
 def targets(family: str) -> list[Path]:
     return [
-        ROOT / "extension" / "build" / family,
         ROOT / "src" / "fancy_gpt" / "extension_assets" / family,
     ]
 
