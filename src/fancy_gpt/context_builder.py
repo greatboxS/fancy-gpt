@@ -212,11 +212,16 @@ class ContextBuilder:
         candidates: dict[Path, Priority],
         excluded_candidate_paths: set[str],
     ) -> None:
-        if Path(value).is_absolute() or ".." in Path(value).parts:
+        # A leading "/" is a common gitignore-style "repo-root anchored" path,
+        # not a filesystem-absolute one; treat it as root-relative rather than
+        # rejecting it outright. `..` traversal is still hard-rejected, and
+        # `_safe_path` below independently re-enforces containment in `root`.
+        normalized = value.lstrip("/")
+        if not normalized or ".." in Path(normalized).parts:
             raise ContextSecurityError(f"unsafe exact path: {value}")
-        if self._is_candidate(value, excluded_candidate_paths):
+        if self._is_candidate(normalized, excluded_candidate_paths):
             return
-        raw = root / value
+        raw = root / normalized
         if raw.is_symlink():
             resolved = self._safe_path(root, raw)
             if not resolved.is_file():
@@ -236,9 +241,11 @@ class ContextBuilder:
         candidates: dict[Path, Priority],
         excluded_candidate_paths: set[str],
     ) -> None:
-        if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
+        # Same root-anchored-vs-absolute distinction as _collect_exact.
+        normalized = pattern.lstrip("/")
+        if not normalized or ".." in Path(normalized).parts:
             raise ContextSecurityError(f"unsafe include pattern: {pattern}")
-        for path in root.glob(pattern):
+        for path in root.glob(normalized):
             if path.is_symlink():
                 continue
             if path.is_file() and not self._excluded(root, path, excludes):
@@ -332,9 +339,10 @@ class ContextBuilder:
                     break
             if not matched:
                 for pattern in req.patterns:
-                    variants = [pattern]
-                    if "**/" in pattern:
-                        variants.append(pattern.replace("**/", ""))
+                    normalized_pattern = pattern.lstrip("/")
+                    variants = [pattern, normalized_pattern]
+                    if "**/" in normalized_pattern:
+                        variants.append(normalized_pattern.replace("**/", ""))
                     if any(any(fnmatch.fnmatch(path, variant) for variant in variants) for path in paths):
                         matched = True
                         break

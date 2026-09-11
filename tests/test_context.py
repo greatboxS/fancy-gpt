@@ -61,3 +61,31 @@ def test_required_context_fails_after_filter(tmp_path: Path):
     p["local_context_requirements"]=[{"id":"LC1","description":"candidate","patterns":["candidate.md"],"exact_paths":[],"search_terms":[],"priority":"P0","required":True}]
     req=RawRequest(mode="design",objective="design",repo_root=str(tmp_path),artifacts=[ArtifactSpec(path="candidate.md",role=ArtifactRole.CANDIDATE_SOLUTION)])
     with pytest.raises(ContextRequirementError): ContextBuilder().build(req,ResearchManifest.model_validate(p))
+
+
+def test_root_anchored_slash_patterns_are_treated_as_repo_relative(tmp_path: Path):
+    # Reproduces a real fancy-gpt failure: the planner emitted a gitignore-style
+    # root-anchored pattern ("/CMakeLists.txt") which used to be misread as a
+    # filesystem-absolute path and rejected outright, crashing the whole run.
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    pack = ContextBuilder().build(
+        RawRequest(mode="review", objective="review build", repo_root=str(tmp_path)),
+        manifest(pattern="/CMakeLists.txt"),
+    )
+    assert pack.artifacts[0].path == "CMakeLists.txt"
+
+
+def test_root_anchored_slash_exact_path_is_treated_as_repo_relative(tmp_path: Path):
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    p = planner_payload()
+    p["online_research"] = []
+    p["tool_plan"] = [{"capability": "repo.read", "purpose": "read", "required": True}]
+    p["local_context_requirements"] = [{
+        "id": "LC1", "description": "build file", "patterns": [], "exact_paths": ["/CMakeLists.txt"],
+        "search_terms": [], "priority": "P0", "required": True,
+    }]
+    pack = ContextBuilder().build(
+        RawRequest(mode="review", objective="review build", repo_root=str(tmp_path)),
+        ResearchManifest.model_validate(p),
+    )
+    assert pack.artifacts[0].path == "CMakeLists.txt"
