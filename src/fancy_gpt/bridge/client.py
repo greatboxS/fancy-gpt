@@ -15,6 +15,8 @@ from .protocol import PROTOCOL_VERSION, dumps, hello, loads
 @dataclass
 class _PendingTurn:
     prompt: str | None = None
+    conversation_id: str | None = None
+    conversation_mode: str = "temporary"
 
 
 class BridgeBrowserDriver:
@@ -66,10 +68,23 @@ class BridgeBrowserDriver:
             raise RuntimeError(f"browser bridge unavailable for {self.tunnel_id}")
         _ = time.monotonic() - started
 
-    def begin_turn(self, *, request_id: str, stage: str) -> BrowserTurn:
+    def begin_turn(
+        self,
+        *,
+        request_id: str,
+        stage: str,
+        conversation_id: str | None = None,
+        conversation_mode: str = "temporary",
+    ) -> BrowserTurn:
         turn_id = f"bridge-{uuid.uuid4().hex}"
-        self._turns[turn_id] = _PendingTurn()
-        return BrowserTurn(turn_id=turn_id, request_id=request_id, stage=stage)
+        self._turns[turn_id] = _PendingTurn(conversation_id=conversation_id, conversation_mode=conversation_mode)
+        return BrowserTurn(
+            turn_id=turn_id,
+            request_id=request_id,
+            stage=stage,
+            conversation_id=conversation_id,
+            conversation_mode=conversation_mode,
+        )
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:
         pending = self._turns.get(turn.turn_id)
@@ -78,6 +93,12 @@ class BridgeBrowserDriver:
         if pending.prompt is not None:
             raise RuntimeError("bridge turn already submitted")
         pending.prompt = prompt
+        if pending.conversation_id:
+            conversation = {"mode": "continue", "conversation_id": pending.conversation_id}
+        elif pending.conversation_mode == "persistent":
+            conversation = {"mode": "persistent"}
+        else:
+            conversation = {"mode": "fresh"}
         self._conn().send(dumps({
             "type": "job",
             "job_id": turn.turn_id,
@@ -87,7 +108,7 @@ class BridgeBrowserDriver:
             "request_id": turn.request_id,
             "stage": turn.stage,
             "prompt": prompt,
-            "conversation": {"mode": "fresh"},
+            "conversation": conversation,
             "timeout_s": self.job_timeout_s,
         }))
 
@@ -104,10 +125,12 @@ class BridgeBrowserDriver:
         text = str(result.get("text", ""))
         if not text:
             raise RuntimeError("bridge response is empty")
+        conversation_id = result.get("conversation_id")
         return BrowserResponse(
             turn_id=turn.turn_id,
             text=text,
             response_identity=str(result.get("response_identity") or result.get("assistant_turn_id") or turn.turn_id),
+            conversation_id=str(conversation_id) if conversation_id else None,
         )
 
     def close_turn(self, turn: BrowserTurn) -> None:

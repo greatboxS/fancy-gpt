@@ -28,12 +28,23 @@ async function sendToContent(tabId, message, retries = 50) {
   throw lastError ?? new Error("site content adapter didn't become ready");
 }
 
+const CONVERSATION_ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
+
+function taskUrlFor(conversation) {
+  const mode = conversation?.mode;
+  if (mode === "continue" && CONVERSATION_ID_PATTERN.test(String(conversation.conversation_id ?? ""))) {
+    return `https://chatgpt.com/c/${conversation.conversation_id}`;
+  }
+  if (mode === "persistent") return "https://chatgpt.com/";
+  return "https://chatgpt.com/?temporary-chat=true";
+}
+
 async function executeJob(job) {
   let tab = null;
   try {
     if (job.operation !== "model.turn") throw new Error(`unsupported operation: ${job.operation}`);
     if (job.site !== "chatgpt") throw new Error(`unsupported site: ${job.site}`);
-    tab = await ext.tabs.create({url: "https://chatgpt.com/?temporary-chat=true", active: false});
+    tab = await ext.tabs.create({url: taskUrlFor(job.conversation), active: false});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
     const result = await sendToContent(tab.id, {
       type: "fancy_execute_turn",
@@ -48,7 +59,8 @@ async function executeJob(job) {
       job_id: job.job_id,
       text: result.text,
       assistant_turn_id: result.responseIdentity,
-      response_identity: result.responseIdentity
+      response_identity: result.responseIdentity,
+      conversation_id: result.conversationId ?? null
     });
   } catch (error) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});

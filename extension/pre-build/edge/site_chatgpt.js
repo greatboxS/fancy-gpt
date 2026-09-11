@@ -73,6 +73,11 @@
     }) ?? null;
   }
 
+  function currentConversationId() {
+    const match = location.pathname.match(/^\/c\/([a-zA-Z0-9-]+)/);
+    return match ? match[1] : null;
+  }
+
   function looksLikeCompleteJson(text) {
     const trimmed = text.trim();
     if (!trimmed) return false;
@@ -131,7 +136,7 @@
         if (text && text === stableText && !streaming && complete) stableCount += 1;
         else stableCount = 0;
         stableText = text;
-        if (text && stableCount >= 3) return {text, responseIdentity: boundId};
+        if (text && stableCount >= 3) return {text, responseIdentity: boundId, conversationId: currentConversationId()};
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }

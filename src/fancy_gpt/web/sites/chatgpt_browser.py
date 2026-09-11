@@ -109,7 +109,16 @@ class ChatGPTSiteDriver:
             raise BrowserUiDriftError("cannot inspect logical ChatGPT turn identities") from exc
         return [str(value) for value in values]
 
-    def begin_turn(self, *, request_id: str, stage: str) -> BrowserTurn:
+    def begin_turn(
+        self,
+        *,
+        request_id: str,
+        stage: str,
+        conversation_id: str | None = None,
+        conversation_mode: str = "temporary",
+    ) -> BrowserTurn:
+        # Playwright driver only supports fresh temporary conversations today;
+        # continuation/persistent mode is an extension-bridge-only feature.
         if len(self._leases) >= self.max_concurrent_turns:
             raise BrowserCapacityError("maximum concurrent ChatGPT Web turns reached")
         page = self.runtime.new_page()

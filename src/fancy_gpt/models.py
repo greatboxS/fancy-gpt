@@ -102,6 +102,8 @@ class RawRequest(StrictModel):
     max_context_bytes: int = Field(default=180_000, ge=4096, le=50_000_000)
     tunnel: str | None = None
     tunnel_policy: str = "auto"
+    conversation_id: str | None = None
+    conversation_mode: Literal["temporary", "persistent"] = "persistent"
 
     @field_validator("domains")
     @classmethod
@@ -303,6 +305,7 @@ class AutomatedModelResponse(StrictModel):
     provider: str
     raw_text: str
     response_identity: str
+    conversation_id: str | None = None
 
 
 class EvidenceRef(StrictModel):
@@ -462,3 +465,4 @@ class RequestStatus(StrictModel):
     error: str | None = None
     partial_text: str | None = None
     partial_text_updated_at: str | None = None
+    conversation_id: str | None = None

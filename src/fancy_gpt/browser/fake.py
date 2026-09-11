@@ -53,7 +53,14 @@ class FakeBrowserDriver:
             raise BrowserNotAuthenticatedError("fake ChatGPT profile is not authenticated")
         self.events.append(("health", "", ""))
 
-    def begin_turn(self, *, request_id: str, stage: str) -> BrowserTurn:
+    def begin_turn(
+        self,
+        *,
+        request_id: str,
+        stage: str,
+        conversation_id: str | None = None,
+        conversation_mode: str = "temporary",
+    ) -> BrowserTurn:
         self.health_check()
         if len(self._active) >= self.max_concurrent_turns:
             raise BrowserCapacityError("browser turn capacity exhausted")
@@ -62,6 +69,8 @@ class FakeBrowserDriver:
             turn_id=f"fake-turn-{self._turn_counter}",
             request_id=request_id,
             stage=stage,
+            conversation_id=conversation_id,
+            conversation_mode=conversation_mode,
         )
         self._active[turn.turn_id] = turn
         self.events.append(("begin", request_id, stage))
@@ -88,10 +97,14 @@ class FakeBrowserDriver:
         scripted = self._responses.popleft()
         text = scripted(turn) if callable(scripted) else scripted
         self.events.append(("response", turn.request_id, turn.stage))
+        resolved_conversation_id = turn.conversation_id
+        if resolved_conversation_id is None and turn.conversation_mode == "persistent":
+            resolved_conversation_id = f"fake-conv-{turn.request_id}"
         return BrowserResponse(
             turn_id=turn.turn_id,
             text=text,
             response_identity=f"fake-response-{self._turn_counter}",
+            conversation_id=resolved_conversation_id,
         )
 
     def close_turn(self, turn: BrowserTurn) -> None:

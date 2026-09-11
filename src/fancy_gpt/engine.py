@@ -258,6 +258,7 @@ class ReviewEngine:
                 RequestState.COMPLETE,
                 final_response_file=str(final_response_path),
                 result_file=str(result_path),
+                conversation_id=final_response.conversation_id,
             )
             return report
         except Exception as exc:

@@ -63,7 +63,12 @@ class ChatGPTWebAutomationProvider:
                 f"compiled prompt has {len(request.prompt)} characters; "
                 f"configured browser limit is {self.max_prompt_chars}"
             )
-        turn = self.driver.begin_turn(request_id=request.request_id, stage=request.stage)
+        turn = self.driver.begin_turn(
+            request_id=request.request_id,
+            stage=request.stage,
+            conversation_id=request.metadata.get("conversation_id"),
+            conversation_mode=request.metadata.get("conversation_mode", "temporary"),
+        )
         poller = self._start_progress_poller(turn.turn_id, on_progress)
         try:
             self.driver.submit(turn, request.prompt)
@@ -76,6 +81,7 @@ class ChatGPTWebAutomationProvider:
                 provider=self.name,
                 raw_text=response.text,
                 response_identity=response.response_identity,
+                conversation_id=response.conversation_id,
             )
         finally:
             if poller is not None:

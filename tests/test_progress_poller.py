@@ -23,7 +23,14 @@ class _DriverWithProgress:
     def health_check(self) -> None:
         return None
 
-    def begin_turn(self, *, request_id: str, stage: str) -> BrowserTurn:
+    def begin_turn(
+        self,
+        *,
+        request_id: str,
+        stage: str,
+        conversation_id: str | None = None,
+        conversation_mode: str = "temporary",
+    ) -> BrowserTurn:
         return BrowserTurn(turn_id=f"t-{stage}", request_id=request_id, stage=stage)
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:

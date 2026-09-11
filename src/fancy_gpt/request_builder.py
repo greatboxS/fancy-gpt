@@ -5,6 +5,13 @@ from .planner import PreRequestPlanner
 from .prompt_compiler import FinalPromptCompiler
 
 
+def _conversation_metadata(request: RawRequest) -> dict[str, object]:
+    metadata: dict[str, object] = {"conversation_mode": request.conversation_mode}
+    if request.conversation_id:
+        metadata["conversation_id"] = request.conversation_id
+    return metadata
+
+
 class PlannerRequestBuilder:
     def __init__(self, planner: PreRequestPlanner | None = None) -> None:
         self.planner = planner or PreRequestPlanner()
@@ -21,6 +28,7 @@ class PlannerRequestBuilder:
                 "route_name": route.route_name,
                 "skill": route.primary_skill,
                 "mode": request.mode.value,
+                **_conversation_metadata(request),
             },
         )
 
@@ -49,5 +57,6 @@ class FinalRequestBuilder:
                 "skill": route.primary_skill,
                 "mode": request.mode.value,
                 "context_hash": context.context_hash,
+                **_conversation_metadata(request),
             },
         )
