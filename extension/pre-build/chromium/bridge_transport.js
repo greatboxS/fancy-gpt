@@ -7,12 +7,19 @@
   let reconnectTimer = null;
   let handler = async () => {};
 
-  function scheduleReconnect(connectFn) {
+  function scheduleReconnect(connectFn, config) {
     if (reconnectTimer) return;
+    if (config.autoConnect === false) return;
+    if (!config.token) return;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      connectFn().catch(() => scheduleReconnect(connectFn));
-    }, 2000);
+      connectFn().catch(() => scheduleReconnect(connectFn, config));
+    }, config.reconnectIntervalMs || 2000);
+  }
+
+  function cancelReconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
   }
 
   function send(message) {
@@ -48,7 +55,7 @@
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = null;
       socket = null;
-      scheduleReconnect(reconnect);
+      scheduleReconnect(reconnect, config);
     };
   }
 
@@ -57,7 +64,7 @@
     nativePort.onMessage.addListener(message => handler(message).catch(console.error));
     nativePort.onDisconnect.addListener(() => {
       nativePort = null;
-      scheduleReconnect(reconnect);
+      scheduleReconnect(reconnect, config);
     });
   }
 
@@ -69,6 +76,7 @@
   }
 
   function disconnect() {
+    cancelReconnect();
     try { socket?.close(); } catch (_) {}
     try { nativePort?.disconnect(); } catch (_) {}
     socket = null;

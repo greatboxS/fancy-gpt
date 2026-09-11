@@ -9,7 +9,9 @@ const DEFAULTS = {
   token: "",
   tunnelId: "firefox-extension-ws-remote",
   browserName: "firefox",
-  nativeHost: "com.fancygpt.bridge"
+  nativeHost: "com.fancygpt.bridge",
+  autoConnect: true,
+  reconnectIntervalMs: 2000
 };
 
 async function getConfig() {

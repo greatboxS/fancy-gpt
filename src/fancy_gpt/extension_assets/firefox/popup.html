@@ -1,12 +1,80 @@
 <!doctype html><html><head><meta charset="utf-8"><style>
-body{font:13px system-ui;width:360px;padding:12px}label{display:block;margin:8px 0 3px}input,select{width:100%;box-sizing:border-box}button{margin-top:12px}pre{white-space:pre-wrap}
+:root{
+  --bg:#0f1220;--panel:#171b2e;--panel-2:#1e2338;--border:#2a3050;
+  --text:#e8eaf6;--muted:#9aa3c7;--accent:#7c8cff;--accent-2:#5865f2;
+  --ok:#3ddc97;--bad:#ff6b81;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;width:340px;padding:16px;
+  font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  background:linear-gradient(160deg,var(--bg),#141830);color:var(--text);
+}
+.brand{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+.brand strong{font-size:14px;letter-spacing:.2px}
+.brand span{color:var(--muted);font-size:11px;margin-left:auto}
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:12px;
+  padding:14px;margin-bottom:12px;
+}
+label{display:block;margin:0 0 4px;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+.field+.field{margin-top:10px}
+input,select{
+  width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);
+  background:var(--panel-2);color:var(--text);font-size:13px;outline:none;
+  transition:border-color .15s ease;
+}
+input:focus,select:focus{border-color:var(--accent)}
+.row{display:flex;gap:10px}
+.row .field{flex:1}
+label.inline{
+  display:flex;align-items:center;gap:8px;margin:12px 0 0;padding:8px 10px;
+  border-radius:8px;background:var(--panel-2);border:1px solid var(--border);
+  text-transform:none;font-size:12px;color:var(--text);cursor:pointer;
+}
+label.inline input{width:16px;height:16px;accent-color:var(--accent);cursor:pointer}
+button{
+  width:100%;margin-top:14px;padding:10px 12px;border:none;border-radius:10px;
+  background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;
+  font-weight:600;font-size:13px;cursor:pointer;letter-spacing:.2px;
+  box-shadow:0 6px 16px -6px rgba(88,101,242,.6);
+  transition:transform .1s ease,box-shadow .15s ease;
+}
+button:hover{transform:translateY(-1px);box-shadow:0 8px 20px -6px rgba(88,101,242,.75)}
+button:active{transform:translateY(0)}
+.status-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.status-head .badge{
+  width:8px;height:8px;border-radius:50%;background:var(--muted);
+}
+.status-head .badge.connected{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.status-head .badge.disconnected{background:var(--bad);box-shadow:0 0 6px var(--bad)}
+.status-head span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+pre{
+  white-space:pre-wrap;word-break:break-word;margin:0;font:11px/1.5 ui-monospace,Menlo,Consolas,monospace;
+  color:var(--muted);max-height:120px;overflow:auto;
+}
 </style></head><body>
-<strong>FancyGPT Tunnel</strong>
-<label>Transport</label><select id="transport"><option value="websocket">WebSocket / SSH</option><option value="native">Native Messaging</option></select>
-<label>Bridge endpoint</label><input id="endpoint" value="ws://127.0.0.1:8765">
-<label>Pair token</label><input id="token" type="password">
-<label>Tunnel ID</label><input id="tunnelId" value="firefox-extension-ws-remote">
-<label>Browser name</label><input id="browserName" value="firefox">
-<button id="save">Save & reconnect</button>
-<pre id="status"></pre>
+<div class="brand"><span class="dot"></span><strong>FancyGPT Tunnel</strong><span>v1</span></div>
+
+<div class="card">
+  <div class="field">
+    <label>Transport</label>
+    <select id="transport"><option value="websocket">WebSocket / SSH</option><option value="native">Native Messaging</option></select>
+  </div>
+  <div class="field"><label>Bridge endpoint</label><input id="endpoint" value="ws://127.0.0.1:8765"></div>
+  <div class="field"><label>Pair token</label><input id="token" type="password" placeholder="paste pairing token"></div>
+  <div class="row">
+    <div class="field"><label>Tunnel ID</label><input id="tunnelId" value="firefox-extension-ws-remote"></div>
+    <div class="field"><label>Browser</label><input id="browserName" value="firefox"></div>
+  </div>
+  <label class="inline"><input id="autoConnect" type="checkbox" checked> Auto reconnect when disconnected</label>
+  <button id="save">Save &amp; reconnect</button>
+</div>
+
+<div class="card">
+  <div class="status-head"><span class="badge" id="statusBadge"></span><span>Status</span></div>
+  <pre id="status">…</pre>
+</div>
+
 <script src="popup.js"></script></body></html>

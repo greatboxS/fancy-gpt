@@ -7,9 +7,11 @@ const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
   token: "",
-  tunnelId: "edge-extension-ws-remote",
-  browserName: "edge",
-  nativeHost: "com.fancygpt.bridge"
+  tunnelId: "chrome-extension-ws-remote",
+  browserName: "chrome",
+  nativeHost: "com.fancygpt.bridge",
+  autoConnect: true,
+  reconnectIntervalMs: 2000
 };
 
 async function getConfig() {

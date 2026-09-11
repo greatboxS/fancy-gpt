@@ -63,6 +63,26 @@
     composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
   }
 
+  function findButtonByText(pattern) {
+    const buttons = [...document.querySelectorAll("button")];
+    return buttons.find(btn => {
+      const rect = btn.getBoundingClientRect();
+      const style = getComputedStyle(btn);
+      if (!(rect.width > 0 && rect.height > 0) || style.visibility === "hidden" || style.display === "none") return false;
+      return pattern.test((btn.innerText || "").trim());
+    }) ?? null;
+  }
+
+  function looksLikeCompleteJson(text) {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    const first = trimmed[0];
+    if (first !== "{" && first !== "[") return true;
+    const opens = (trimmed.match(/[{[]/g) || []).length;
+    const closes = (trimmed.match(/[}\]]/g) || []).length;
+    return opens === closes;
+  }
+
   async function healthCheck() {
     if (location.hostname !== "chatgpt.com") return {ok: false, reason: "unexpected-host"};
     const composer = firstVisible(SELECTORS.composer);
@@ -82,6 +102,13 @@
     let stableText = null;
     let stableCount = 0;
     while (Date.now() < deadline) {
+      const continueButton = findButtonByText(/continue generating/i);
+      if (continueButton) {
+        continueButton.click();
+        stableCount = 0;
+        await new Promise(resolve => setTimeout(resolve, 500));
+        continue;
+      }
       const candidates = [];
       for (const id of turnIds()) {
         if (baseline.has(id)) continue;
@@ -95,7 +122,8 @@
       if (boundId != null) {
         const text = assistantText(boundId);
         const streaming = Boolean(firstVisible(SELECTORS.stop));
-        if (text && text === stableText && !streaming) stableCount += 1;
+        const complete = text != null && looksLikeCompleteJson(text);
+        if (text && text === stableText && !streaming && complete) stableCount += 1;
         else stableCount = 0;
         stableText = text;
         if (text && stableCount >= 3) return {text, responseIdentity: boundId};
