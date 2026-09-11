@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from fancy_gpt.cli import app
@@ -10,7 +11,7 @@ runner = CliRunner()
 
 
 def test_tunnel_components_command_reports_independent_layers() -> None:
-    result = runner.invoke(app, ["tunnels", "components"])
+    result = runner.invoke(app, ["tunnels", "components", "--json"])
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert {item["id"] for item in payload["sites"]} == {"chatgpt"}
@@ -18,9 +19,30 @@ def test_tunnel_components_command_reports_independent_layers() -> None:
     assert {item["id"] for item in payload["transports"]} >= {"native-messaging", "websocket", "local-process", "cdp"}
 
 
+def test_tunnel_components_command_default_output_is_a_readable_table() -> None:
+    result = runner.invoke(app, ["tunnels", "components"])
+    assert result.exit_code == 0, result.stdout
+    assert "SITES" in result.stdout
+    assert "chatgpt" in result.stdout
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.stdout)
+
+
 def test_tunnel_explain_reports_layered_health() -> None:
-    result = runner.invoke(app, ["tunnels", "explain", "playwright-chromium-local"])
+    result = runner.invoke(app, ["tunnels", "explain", "playwright-chromium-local", "--json"])
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert payload["spec"]["runtime"] == "playwright"
     assert {item["layer"] for item in payload["layers"]} == {"site", "runtime", "transport", "composition"}
+
+
+def test_tunnel_list_and_health_default_output_is_a_readable_table() -> None:
+    list_result = runner.invoke(app, ["tunnels", "list"])
+    assert list_result.exit_code == 0, list_result.stdout
+    assert "RUNTIME" in list_result.stdout
+    assert "interactive-manual" in list_result.stdout
+
+    health_result = runner.invoke(app, ["tunnels", "health"])
+    assert health_result.exit_code == 0, health_result.stdout
+    assert "STATE" in health_result.stdout
+    assert "interactive-manual" in health_result.stdout

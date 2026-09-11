@@ -25,6 +25,32 @@ from .web.transport import TransportRegistry
 from .self_test import run_self_test
 from . import __version__
 
+
+def _table(headers: list[str], rows: list[list[str]]) -> str:
+    if not rows:
+        return "(none)"
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+    def fmt(row: list[str]) -> str:
+        return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row))
+    lines = [fmt(headers), "  ".join("-" * w for w in widths)]
+    lines.extend(fmt(row) for row in rows)
+    return "\n".join(lines)
+
+
+def _bridge_summary(metadata: dict) -> str:
+    bridge = metadata.get("bridge") if isinstance(metadata, dict) else None
+    if not isinstance(bridge, dict):
+        return "-"
+    stats = bridge.get("stats") or {}
+    workers = bridge.get("workers") or []
+    connected = stats.get("connected_workers", sum(1 for w in workers if w.get("alive")))
+    jobs_ok = stats.get("total_jobs_succeeded", "-")
+    jobs_failed = stats.get("total_jobs_failed", "-")
+    return f"workers={connected} jobs_ok={jobs_ok} jobs_failed={jobs_failed}"
+
 app = typer.Typer(help="fancy-gpt independent technical reasoning toolkit")
 catalogs_app = typer.Typer(help="Inspect skills, workflows, domains, and routing")
 validate_app = typer.Typer(help="Validate structured payloads")
@@ -379,38 +405,90 @@ def validate_result(path: Annotated[Path, typer.Argument(exists=True, dir_okay=F
 
 
 @tunnels_app.command("components")
-def tunnels_components() -> None:
+def tunnels_components(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     """Show independently testable site/runtime/transport layer contracts."""
     payload = {
         "sites": [item.model_dump(mode="json") for item in SiteRegistry().all()],
         "runtimes": [item.model_dump(mode="json") for item in RuntimeRegistry().all()],
         "transports": [item.model_dump(mode="json") for item in TransportRegistry().all()],
     }
-    typer.echo(json.dumps(payload, indent=2))
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2))
+        return
+    typer.echo("SITES")
+    typer.echo(_table(["ID", "HOSTS"], [[s["id"], ", ".join(s.get("hosts", []))] for s in payload["sites"]]))
+    typer.echo("\nRUNTIMES")
+    typer.echo(_table(["ID", "AUTOMATIC", "REQUIRES_EXTENSION"], [
+        [r["id"], str(r.get("automatic", "")), str(r.get("requires_extension", ""))] for r in payload["runtimes"]
+    ]))
+    typer.echo("\nTRANSPORTS")
+    typer.echo(_table(["ID", "REMOTE_CAPABLE", "REQUIRES_BRIDGE"], [
+        [t["id"], str(t.get("remote_capable", "")), str(t.get("requires_bridge", ""))] for t in payload["transports"]
+    ]))
 
 
 @tunnels_app.command("explain")
-def tunnels_explain(tunnel_id: Annotated[str, typer.Argument()]) -> None:
+def tunnels_explain(
+    tunnel_id: Annotated[str, typer.Argument()],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
     """Explain one tunnel composition and health of every layer."""
     manager = TunnelManager()
     spec = manager.registry.get(tunnel_id)
-    typer.echo(json.dumps({
-        "spec": spec.model_dump(mode="json"),
-        "layers": [item.model_dump(mode="json") for item in TunnelLayerInspector().inspect(spec)],
-        "health": manager.probe(spec).model_dump(mode="json"),
-    }, indent=2))
+    layers = TunnelLayerInspector().inspect(spec)
+    health = manager.probe(spec)
+    if json_output:
+        typer.echo(json.dumps({
+            "spec": spec.model_dump(mode="json"),
+            "layers": [item.model_dump(mode="json") for item in layers],
+            "health": health.model_dump(mode="json"),
+        }, indent=2))
+        return
+    typer.echo(f"{spec.id}  ({spec.runtime.value}/{spec.transport.value}, browser={spec.browser})")
+    typer.echo(spec.description)
+    typer.echo("")
+    typer.echo(_table(["LAYER", "COMPONENT", "STATE", "DETAIL"], [
+        [item.layer.value, item.component, item.state, item.detail] for item in layers
+    ]))
+    typer.echo("")
+    typer.echo(f"health: {health.state.value} — {health.detail}")
+    if health.latency_ms is not None:
+        typer.echo(f"latency: {health.latency_ms:.1f}ms")
+    if health.metadata.get("bridge"):
+        typer.echo(f"bridge: {_bridge_summary(health.metadata)}")
 
 
 @tunnels_app.command("list")
-def tunnels_list() -> None:
+def tunnels_list(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     manager = TunnelManager()
-    typer.echo(json.dumps([item.model_dump(mode="json") for item in manager.registry.all()], indent=2))
+    specs = manager.registry.all()
+    if json_output:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in specs], indent=2))
+        return
+    typer.echo(_table(["ID", "RUNTIME", "TRANSPORT", "BROWSER", "AUTOMATIC", "ENABLED"], [
+        [s.id, s.runtime.value, s.transport.value, s.browser, str(s.capabilities.automatic), str(s.enabled)]
+        for s in specs
+    ]))
 
 
 @tunnels_app.command("health")
-def tunnels_health() -> None:
+def tunnels_health(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
     manager = TunnelManager()
-    typer.echo(json.dumps([item.model_dump(mode="json") for item in manager.health()], indent=2))
+    healths = manager.health()
+    if json_output:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in healths], indent=2))
+        return
+    typer.echo(_table(["ID", "STATE", "BROWSER_CONNECTED", "LATENCY_MS", "BRIDGE", "DETAIL"], [
+        [
+            h.tunnel_id,
+            h.state.value,
+            "-" if h.browser_connected is None else str(h.browser_connected),
+            "-" if h.latency_ms is None else f"{h.latency_ms:.1f}",
+            _bridge_summary(h.metadata),
+            h.detail,
+        ]
+        for h in healths
+    ]))
 
 
 @tunnels_app.command("select")
