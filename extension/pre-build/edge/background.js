@@ -75,6 +75,10 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (message?.type === "fancy_status") sendResponse(globalThis.FancyGPTTransport.status());
+  if (message?.type === "fancy_progress" && message.jobId) {
+    try { globalThis.FancyGPTTransport.send({type: "job_progress", job_id: message.jobId, text: String(message.text ?? "")}); }
+    catch (_) {}
+  }
 });
 
 connectBridge().catch(console.error);

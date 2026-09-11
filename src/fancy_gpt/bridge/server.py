@@ -85,6 +85,8 @@ class BridgeHub:
         self._total_jobs_succeeded = 0
         self._total_jobs_failed = 0
         self._total_probes = 0
+        self._progress: dict[str, tuple[float, str]] = {}
+        self._progress_cap = 200
 
     def register(self, worker: BrowserWorker) -> None:
         with self._lock:
@@ -105,6 +107,25 @@ class BridgeHub:
                 self._total_jobs_succeeded += 1
             else:
                 self._total_jobs_failed += 1
+
+    def record_progress(self, job_id: str, text: str) -> None:
+        with self._lock:
+            self._progress[job_id] = (time.time(), text)
+            if len(self._progress) > self._progress_cap:
+                oldest = min(self._progress, key=lambda key: self._progress[key][0])
+                self._progress.pop(oldest, None)
+
+    def get_progress(self, job_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            entry = self._progress.get(job_id)
+        if entry is None:
+            return None
+        updated_at, text = entry
+        return {"job_id": job_id, "text": text, "updated_at": updated_at}
+
+    def clear_progress(self, job_id: str) -> None:
+        with self._lock:
+            self._progress.pop(job_id, None)
 
     def unregister(self, worker: BrowserWorker) -> None:
         worker.alive = False
@@ -214,6 +235,10 @@ class BridgeServer:
                     continue
                 if message.get("type") in {"job_result", "job_error"}:
                     worker.dispatch(message)
+                elif message.get("type") == "job_progress":
+                    job_id = str(message.get("job_id", ""))
+                    if job_id:
+                        self.hub.record_progress(job_id, str(message.get("text", "")))
         except Exception:
             pass
         finally:
@@ -255,11 +280,17 @@ class BridgeServer:
                 except Exception as exc:
                     response = {"type": "job_error", "job_id": message.get("job_id"), "error": str(exc)}
                     self.hub.record_job_result(False)
+                finally:
+                    self.hub.clear_progress(str(message.get("job_id", "")))
                 connection.send(dumps(response))
             elif msg_type == "workers":
                 connection.send(dumps({"type": "workers_result", "workers": self.hub.snapshot()}))
             elif msg_type == "stats":
                 connection.send(dumps({"type": "stats_result", "stats": self.hub.stats(), "workers": self.hub.snapshot()}))
+            elif msg_type == "progress":
+                job_id = str(message.get("job_id", ""))
+                progress = self.hub.get_progress(job_id)
+                connection.send(dumps({"type": "progress_result", "job_id": job_id, "progress": progress}))
             else:
                 connection.send(dumps({"type": "error", "error": f"unsupported controller message: {msg_type}"}))
 

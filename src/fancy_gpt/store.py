@@ -120,6 +120,28 @@ class RequestStore:
             self._atomic_write(path, updated.model_dump_json(indent=2))
             return updated
 
+    def update_progress(self, request_id: str, text: str) -> None:
+        """Best-effort snapshot of in-flight model output for live monitoring.
+
+        Never raises and never touches `state`/`updated_at`: this is called
+        from a background poller thread while the main thread is still
+        blocked waiting on the provider, so it must not interfere with the
+        authoritative state transitions happening on request completion.
+        """
+        path = self.request_dir(request_id) / "status.json"
+        try:
+            with exclusive_file_lock(self._lock_path(request_id)):
+                current = RequestStatus.model_validate_json(path.read_text(encoding="utf-8"))
+                if current.state not in (RequestState.RUNNING_PLANNER, RequestState.RUNNING_FINAL):
+                    return
+                payload = current.model_dump()
+                payload["partial_text"] = text
+                payload["partial_text_updated_at"] = _now()
+                updated = RequestStatus.model_validate(payload)
+                self._atomic_write(path, updated.model_dump_json(indent=2))
+        except Exception:
+            pass
+
     def fail(self, request_id: str, error: str) -> RequestStatus:
         path = self.request_dir(request_id) / "status.json"
         with exclusive_file_lock(self._lock_path(request_id)):

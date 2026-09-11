@@ -104,6 +104,75 @@ def test_bridge_driver_routes_to_exact_registered_tunnel() -> None:
         thread.join(timeout=2)
 
 
+def test_bridge_driver_poll_progress_reads_in_flight_text() -> None:
+    token = "test-token"
+    server = BridgeServer("127.0.0.1", 0, token)
+    server.start_background()
+    endpoint = f"ws://127.0.0.1:{server.port}"
+    stop = threading.Event()
+    release_final = threading.Event()
+
+    def browser_worker() -> None:
+        connection = connect(endpoint)
+        connection.send(dumps(hello(
+            role="browser", token=token,
+            tunnel_ids=["chrome-extension-ws-remote"], browser="chrome"
+        )))
+        assert loads(connection.recv(timeout=5))["type"] == "hello_ack"
+        try:
+            while not stop.is_set():
+                message = loads(connection.recv(timeout=5))
+                if message.get("type") == "job":
+                    connection.send(dumps({"type": "job_progress", "job_id": message["job_id"], "text": "typing…"}))
+                    release_final.wait(timeout=5)
+                    connection.send(dumps({
+                        "type": "job_result",
+                        "job_id": message["job_id"],
+                        "text": "done",
+                        "response_identity": "assistant-turn-1",
+                    }))
+        except Exception:
+            pass
+        finally:
+            connection.close()
+
+    thread = threading.Thread(target=browser_worker, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 2
+    while server.hub.worker_for("chrome-extension-ws-remote") is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    driver = BridgeBrowserDriver(endpoint, token, "chrome-extension-ws-remote")
+    try:
+        driver.start()
+        driver.health_check()
+        turn = driver.begin_turn(request_id="r1", stage="planner")
+        driver.submit(turn, "hello")
+
+        # give the worker time to publish progress before it sends job_result
+        progress_deadline = time.monotonic() + 3
+        seen = None
+        while time.monotonic() < progress_deadline:
+            seen = driver.poll_progress(turn.turn_id)
+            if seen == "typing…":
+                break
+            time.sleep(0.05)
+        assert seen == "typing…"
+
+        release_final.set()
+        response = driver.wait_for_response(turn, timeout_s=5)
+        assert response.text == "done"
+
+        # progress is cleared once the job completes
+        assert driver.poll_progress(turn.turn_id) is None
+        driver.close_turn(turn)
+    finally:
+        driver.stop()
+        stop.set()
+        server.shutdown()
+        thread.join(timeout=2)
+
+
 def test_bridge_driver_rejects_unregistered_tunnel() -> None:
     token = "test-token"
     server = BridgeServer("127.0.0.1", 0, token)

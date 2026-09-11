@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from fancy_gpt.models import AutomatedModelResponse, InteractionRequired, ModelRequest
 
@@ -27,5 +27,10 @@ class AutomaticModelProvider(Protocol):
     def stop(self) -> None:
         ...
 
-    def execute(self, request: ModelRequest) -> AutomatedModelResponse:
+    def execute(
+        self,
+        request: ModelRequest,
+        *,
+        on_progress: Callable[[str], None] | None = None,
+    ) -> AutomatedModelResponse:
         ...

@@ -460,3 +460,5 @@ class RequestStatus(StrictModel):
     final_response_file: str | None = None
     result_file: str | None = None
     error: str | None = None
+    partial_text: str | None = None
+    partial_text_updated_at: str | None = None

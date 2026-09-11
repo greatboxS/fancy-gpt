@@ -221,7 +221,9 @@ class ReviewEngine:
 
             provider.start()
             provider_started = True
-            planner_response = provider.execute(planner_request)
+            planner_response = provider.execute(
+                planner_request, on_progress=lambda text: self.store.update_progress(request_id, text)
+            )
             planner_response_path = self.store.write_model(request_id, "planner-response.json", planner_response)
             manifest = self._validate_manifest(parse_json_object(planner_response.raw_text), route)
             self.store.write_model(request_id, "research-manifest.json", manifest)
@@ -238,7 +240,9 @@ class ReviewEngine:
                 final_prompt_file=str(final_prompt_path),
             )
 
-            final_response = provider.execute(final_request)
+            final_response = provider.execute(
+                final_request, on_progress=lambda text: self.store.update_progress(request_id, text)
+            )
             final_response_path = self.store.write_model(request_id, "final-response.json", final_response)
             report = self._validate_report(
                 request_id,

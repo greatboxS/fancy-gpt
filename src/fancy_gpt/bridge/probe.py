@@ -46,6 +46,29 @@ def probe_bridge_stats(endpoint: str, token: str, *, open_timeout_s: float = 1.0
         connection.close()
 
 
+def fetch_job_progress(endpoint: str, token: str, job_id: str, *, open_timeout_s: float = 1.0) -> dict | None:
+    """Return the latest in-flight text for `job_id`, or None if no progress recorded yet.
+
+    Uses its own short-lived connection so it never contends with the
+    long-running controller connection that is blocked waiting on the job's
+    final result.
+    """
+    connection = connect(endpoint, open_timeout=open_timeout_s, max_size=8 * 1024 * 1024)
+    try:
+        connection.send(dumps(hello(role="controller", token=token)))
+        ack = loads(connection.recv(timeout=open_timeout_s))
+        if ack.get("type") != "hello_ack":
+            raise RuntimeError(f"bridge refused progress controller: {ack}")
+        connection.send(dumps({"type": "progress", "job_id": job_id}))
+        result = loads(connection.recv(timeout=open_timeout_s))
+        if result.get("type") != "progress_result":
+            raise RuntimeError(f"unexpected bridge progress response: {result}")
+        progress = result.get("progress")
+        return progress if isinstance(progress, dict) else None
+    finally:
+        connection.close()
+
+
 def available_tunnels(workers: list[dict]) -> set[str]:
     result: set[str] = set()
     for worker in workers:

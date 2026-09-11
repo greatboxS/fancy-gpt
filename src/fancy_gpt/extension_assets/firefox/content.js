@@ -11,7 +11,11 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   const task = message.type === "fancy_site_health"
     ? adapter.healthCheck()
-    : adapter.executeTurn(String(message.prompt ?? ""), Number(message.timeoutMs ?? 300000));
+    : adapter.executeTurn(
+        String(message.prompt ?? ""),
+        Number(message.timeoutMs ?? 300000),
+        text => ext.runtime.sendMessage({type: "fancy_progress", jobId: message.jobId, text}).catch(() => {}),
+      );
   Promise.resolve(task)
     .then(result => sendResponse({ok: true, ...result}))
     .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}));

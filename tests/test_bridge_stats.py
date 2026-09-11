@@ -96,3 +96,31 @@ def test_hub_stats_aggregates_across_worker_lifecycle():
     assert stats["total_probe_requests"] == 1
     assert stats["connected_workers"] == 0
     assert stats["uptime_seconds"] >= 0
+
+
+def test_hub_progress_round_trip():
+    hub = BridgeHub(token="t")
+    assert hub.get_progress("job-1") is None
+
+    hub.record_progress("job-1", "partial answer so far")
+    progress = hub.get_progress("job-1")
+    assert progress is not None
+    assert progress["text"] == "partial answer so far"
+    assert progress["job_id"] == "job-1"
+
+    hub.record_progress("job-1", "partial answer so far, more")
+    assert hub.get_progress("job-1")["text"] == "partial answer so far, more"
+
+    hub.clear_progress("job-1")
+    assert hub.get_progress("job-1") is None
+
+
+def test_hub_progress_evicts_oldest_beyond_cap():
+    hub = BridgeHub(token="t")
+    hub._progress_cap = 3
+    for i in range(5):
+        hub.record_progress(f"job-{i}", f"text-{i}")
+    assert len(hub._progress) == 3
+    # the earliest jobs should have been evicted, most recent kept
+    assert hub.get_progress("job-4") is not None
+    assert hub.get_progress("job-0") is None

@@ -8,6 +8,7 @@ from websockets.sync.client import ClientConnection, connect
 
 from fancy_gpt.browser.base import BrowserResponse, BrowserTurn
 
+from .probe import fetch_job_progress
 from .protocol import PROTOCOL_VERSION, dumps, hello, loads
 
 
@@ -111,3 +112,17 @@ class BridgeBrowserDriver:
 
     def close_turn(self, turn: BrowserTurn) -> None:
         self._turns.pop(turn.turn_id, None)
+
+    def poll_progress(self, turn_id: str) -> str | None:
+        """Best-effort snapshot of the in-flight response text for `turn_id`.
+
+        Opens its own short-lived connection so it never contends with the
+        primary controller connection blocked in wait_for_response().
+        Returns None on any failure (bridge busy, no progress yet, etc.);
+        this is a monitoring aid, never allowed to affect the actual turn.
+        """
+        try:
+            progress = fetch_job_progress(self.endpoint, self.token, turn_id, open_timeout_s=1.0)
+        except Exception:
+            return None
+        return progress.get("text") if progress else None

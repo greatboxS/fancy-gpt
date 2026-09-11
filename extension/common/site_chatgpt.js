@@ -89,7 +89,7 @@
     return {ok: Boolean(composer), reason: composer ? "ready" : "composer-unavailable"};
   }
 
-  async function executeTurn(prompt, timeoutMs) {
+  async function executeTurn(prompt, timeoutMs, onProgress) {
     if (location.hostname !== "chatgpt.com") throw new Error("FancyGPT ChatGPT adapter loaded on unexpected host");
     const composer = await waitFor(() => firstVisible(SELECTORS.composer), 20000, "ChatGPT composer unavailable; sign in first");
     const baseline = new Set(turnIds());
@@ -101,6 +101,7 @@
     let boundId = null;
     let stableText = null;
     let stableCount = 0;
+    let lastReported = null;
     while (Date.now() < deadline) {
       const continueButton = findButtonByText(/continue generating/i);
       if (continueButton) {
@@ -121,6 +122,10 @@
       }
       if (boundId != null) {
         const text = assistantText(boundId);
+        if (text && text !== lastReported) {
+          lastReported = text;
+          try { onProgress?.(text); } catch (_) {}
+        }
         const streaming = Boolean(firstVisible(SELECTORS.stop));
         const complete = text != null && looksLikeCompleteJson(text);
         if (text && text === stableText && !streaming && complete) stableCount += 1;
