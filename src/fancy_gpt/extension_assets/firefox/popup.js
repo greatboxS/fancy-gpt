@@ -16,10 +16,27 @@ function normalizeTunnel() {
 }
 
 function renderStatus(status) {
-  document.getElementById("status").textContent = JSON.stringify(status ?? {}, null, 2);
+  const badge = document.getElementById("statusBadge");
+  const text = document.getElementById("statusText");
+  const detail = document.getElementById("statusDetail");
+  badge.classList.remove("connected", "disconnected", "connecting");
+  if (status?.connected) {
+    badge.classList.add("connected");
+    text.textContent = "Connected";
+    detail.textContent = status.websocket ? "via WebSocket" : status.native ? "via Native Messaging" : "";
+  } else {
+    badge.classList.add("disconnected");
+    text.textContent = "Disconnected";
+    detail.textContent = "";
+  }
+}
+
+function renderConnecting() {
   const badge = document.getElementById("statusBadge");
   badge.classList.remove("connected", "disconnected");
-  badge.classList.add(status?.connected ? "connected" : "disconnected");
+  badge.classList.add("connecting");
+  document.getElementById("statusText").textContent = "Connecting…";
+  document.getElementById("statusDetail").textContent = "";
 }
 
 (async () => {
@@ -38,5 +55,6 @@ document.getElementById("save").onclick = async () => {
   for (const id of ids) value[id] = document.getElementById(id).value;
   for (const id of checkboxIds) value[id] = document.getElementById(id).checked;
   await ext.storage.local.set(value);
+  renderConnecting();
   ext.runtime.sendMessage({type:"fancy_reconnect"}, renderStatus);
 };
