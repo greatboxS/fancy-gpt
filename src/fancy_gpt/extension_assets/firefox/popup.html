@@ -23,14 +23,26 @@ button{
   background:var(--accent);color:#fff;font-size:11px;font-family:inherit;cursor:pointer;
 }
 button:hover{opacity:.9}
+button:active{transform:scale(.98)}
+button:disabled{opacity:.6;cursor:default}
 hr{border:none;border-top:1px solid var(--border);margin:10px 0}
-.status-row{display:flex;align-items:center;gap:6px}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--muted);flex:none}
-.dot.connected{background:var(--ok)}
-.dot.disconnected{background:var(--bad)}
-.dot.connecting{background:var(--warn)}
-#statusText{font-size:11px;font-weight:600;color:var(--text)}
-#statusDetail{margin:2px 0 0 12px;font-size:10px;color:var(--muted)}
+.status-row{display:flex;align-items:center;gap:7px}
+.indicator{position:relative;width:8px;height:8px;flex:none}
+.dot{position:absolute;inset:1px;border-radius:50%;background:var(--muted);transition:background .2s ease}
+.dot.connected{background:var(--ok);box-shadow:0 0 5px var(--ok)}
+.dot.disconnected{background:var(--muted)}
+.dot.failed{background:var(--bad);box-shadow:0 0 5px var(--bad)}
+.spinner{position:absolute;inset:0;border-radius:50%;border:1.5px solid transparent;border-top-color:var(--warn);display:none}
+.spinner.active{display:block;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shake{
+  10%,90%{transform:translateX(-1px)} 20%,80%{transform:translateX(2px)}
+  30%,50%,70%{transform:translateX(-3px)} 40%,60%{transform:translateX(3px)}
+}
+.status-row.shake{animation:shake .4s ease}
+#statusText{font-size:11px;font-weight:600;color:var(--text);transition:color .2s ease}
+#statusText.failed{color:var(--bad)}
+#statusDetail{margin:2px 0 0 15px;font-size:10px;color:var(--muted);min-height:12px}
 </style></head><body>
 <h1>FancyGPT Tunnel</h1>
 
@@ -44,7 +56,10 @@ hr{border:none;border-top:1px solid var(--border);margin:10px 0}
 <button id="save">Save &amp; reconnect</button>
 
 <hr>
-<div class="status-row"><span class="dot" id="statusBadge"></span><span id="statusText">Checking…</span></div>
+<div class="status-row" id="statusRow">
+  <span class="indicator"><span class="spinner" id="statusSpinner"></span><span class="dot" id="statusBadge"></span></span>
+  <span id="statusText">Checking…</span>
+</div>
 <div id="statusDetail"></div>
 
 <script src="popup.js"></script></body></html>
