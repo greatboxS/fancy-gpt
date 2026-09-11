@@ -35,12 +35,12 @@ fancy-gpt tunnels explain <browser>-extension-ws-remote
 Use this only when the browser and FancyGPT run on the same operating system:
 
 ```bash
-fancy-gpt extension export <browser> ~/.local/share/fancy-gpt/extension-<browser>
-fancy-gpt extension native-config --browser <browser>
+./install.sh --preset local-extension --browser <browser>
 ```
 
-Load the extension, obtain its extension ID, then install the browser-specific
-native manifest:
+This creates `~/.local/share/fancy-gpt/local-<browser>/extension` and the private
+native-host config. Load the extension, obtain its extension ID, then run the
+final command printed by the installer:
 
 ```bash
 fancy-gpt extension native-manifest --browser <browser> --extension-id <id>

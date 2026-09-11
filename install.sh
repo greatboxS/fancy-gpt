@@ -21,6 +21,8 @@ Options:
   --skip-verify         Skip post-install offline self-test.
   --preset remote-extension
                         Install a portable browser/SSH bundle and register Codex MCP.
+  --preset local-extension
+                        Install a same-machine Native Messaging bundle and config.
   --preset remote-edge Backward-compatible alias for --preset remote-extension --browser edge.
   --browser NAME        Browser for remote-extension: chrome, edge, or firefox (default: edge).
   -h, --help            Show this help.
@@ -35,7 +37,7 @@ while (($#)); do
     --preset)
       shift
       case "${1:-}" in
-        remote-extension) PRESET="remote-extension" ;;
+        remote-extension|local-extension) PRESET="$1" ;;
         remote-edge) PRESET="remote-extension"; PRESET_BROWSER="edge" ;;
         *) echo "Supported presets: remote-extension, remote-edge" >&2; exit 2 ;;
       esac
@@ -114,6 +116,15 @@ target.write_text(
 )
 os.chmod(target, 0o600)
 PY
+fi
+
+if [[ "$PRESET" == "local-extension" ]]; then
+  BUNDLE_DIR="${FANCY_GPT_EXTENSION_BUNDLE_DIR:-${HOME}/.local/share/fancy-gpt/local-${PRESET_BROWSER}}"
+  "$FG" extension export "$PRESET_BROWSER" "$BUNDLE_DIR/extension" >/dev/null
+  "$FG" extension native-config --browser "$PRESET_BROWSER" >/dev/null
+fi
+
+if [[ -n "$PRESET" ]]; then
   if command -v codex >/dev/null 2>&1; then
     if codex mcp get fancy-gpt >/dev/null 2>&1; then
       MCP_STATUS="already registered"
@@ -128,8 +139,10 @@ fi
 echo
 if [[ -z "$PRESET" ]]; then
   echo "$TOKEN_INFO"
-else
+elif [[ "$PRESET" == "remote-extension" ]]; then
   echo "Bridge pairing token written to the private preset bundle."
+else
+  echo "Bridge pairing token stored in the private native-host configuration."
 fi
 echo
 echo "FancyGPT 0.7.0 installed successfully."
@@ -147,4 +160,13 @@ if [[ "$PRESET" == "remote-extension" ]]; then
   echo "Codex MCP: $MCP_STATUS"
   echo "Start bridge: $FG bridge serve"
   echo "Windows: copy $BUNDLE_DIR/extension, establish SSH LocalForward 8765, then Load unpacked in Edge."
+fi
+if [[ "$PRESET" == "local-extension" ]]; then
+  echo
+  echo "Local $PRESET_BROWSER extension preset ready."
+  echo "Load unpacked: $BUNDLE_DIR/extension"
+  echo "Codex MCP: $MCP_STATUS"
+  echo "After loading, finalize the native host with:"
+  echo "  $FG extension native-manifest --browser $PRESET_BROWSER --extension-id <ID_FROM_BROWSER>"
+  echo "Then start the loopback-only bridge: $FG bridge serve"
 fi

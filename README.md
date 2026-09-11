@@ -1,5 +1,9 @@
 # fancy-gpt 0.7.0
 
+Use [QUICKSTART.md](QUICKSTART.md) to choose among all ten built-in tunnels.
+Detailed setup and verification for every connection type is in
+[docs/TUNNEL_SETUP.md](docs/TUNNEL_SETUP.md).
+
 Install-once independent technical reasoning toolkit with MCP, an online pre-request planner, and **runtime-selectable browser tunnels** for ChatGPT Web/Plus without an OpenAI API key.
 
 ## Install once

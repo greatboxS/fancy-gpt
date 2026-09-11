@@ -133,7 +133,8 @@ exit 0
 
 
 @pytest.mark.parametrize("browser", ["chrome", "edge", "firefox"])
-def test_remote_extension_preset_creates_private_bundle_and_registers_codex(tmp_path: Path, browser: str) -> None:
+@pytest.mark.parametrize("deployment", ["remote", "local"])
+def test_extension_presets_create_bundle_and_register_codex(tmp_path: Path, browser: str, deployment: str) -> None:
     import os
     import subprocess
 
@@ -166,14 +167,18 @@ fi
     bundle = tmp_path / "bundle"
     env = os.environ | {
         "FANCY_GPT_UV_BIN": str(fake_uv), "FANCY_GPT_INSTALL_SOURCE": str(wheel),
-        "FANCY_GPT_EDGE_BUNDLE_DIR": str(bundle), "FAKE_BIN": str(fake_bin),
+        "FANCY_GPT_EXTENSION_BUNDLE_DIR": str(bundle), "FAKE_BIN": str(fake_bin),
         "FAKE_LOG": str(log), "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
-    result = subprocess.run(["bash", "install.sh", "--preset", "remote-extension", "--browser", browser, "--skip-verify"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
+    result = subprocess.run(["bash", "install.sh", "--preset", f"{deployment}-extension", "--browser", browser, "--skip-verify"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
     assert "preset-secret" not in result.stdout
-    assert "preset-secret" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
-    assert f"{browser}-extension-ws-remote" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
-    assert (bundle / "PAIRING.txt").stat().st_mode & 0o777 == 0o600
+    if deployment == "remote":
+        assert "preset-secret" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
+        assert f"{browser}-extension-ws-remote" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
+        assert (bundle / "PAIRING.txt").stat().st_mode & 0o777 == 0o600
+    else:
+        assert not (bundle / "PAIRING.txt").exists()
+        assert "native-manifest" in result.stdout
     assert (bundle / "extension" / "manifest.json").is_file()
     assert "mcp add fancy-gpt" in log.read_text(encoding="utf-8")
 

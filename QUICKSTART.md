@@ -1,5 +1,23 @@
 # fancy-gpt 0.7.0 Quick Start
 
+## Choose the connection first
+
+| Situation | Setup command | Tunnel |
+|---|---|---|
+| Chrome on another Windows/Linux machine | `./install.sh --preset remote-extension --browser chrome` | `chrome-extension-ws-remote` |
+| Edge on another Windows/Linux machine | `./install.sh --preset remote-extension --browser edge` | `edge-extension-ws-remote` |
+| Firefox on another Windows/Linux machine | `./install.sh --preset remote-extension --browser firefox` | `firefox-extension-ws-remote` |
+| Chrome on the same machine | `./install.sh --preset local-extension --browser chrome` | `chrome-extension-native-local` |
+| Edge on the same machine | `./install.sh --preset local-extension --browser edge` | `edge-extension-native-local` |
+| Firefox on the same machine | `./install.sh --preset local-extension --browser firefox` | `firefox-extension-native-local` |
+| Managed local Chromium | `./install.sh --with-playwright` | `playwright-chromium-local` |
+| Managed local Firefox | install Playwright extra and Firefox runtime | `playwright-firefox-local` |
+| Existing debug-enabled Chrome | configure loopback CDP | `chrome-cdp-local` |
+| Manual copy/paste fallback | no setup | `interactive-manual` |
+
+Remote extension means WebSocket over localhost/SSH. Local extension means
+Native Messaging on the same OS; its host still uses the loopback bridge.
+
 ## Fastest path: browser workstation + remote Ubuntu/Linux
 
 Run once on Ubuntu:
@@ -24,6 +42,17 @@ Copy only the generated `extension` directory to the browser workstation,
 establish SSH LocalForward port 8765, and use the browser's Load unpacked flow.
 Restart Codex after the first MCP registration. See
 [`docs/TUNNEL_SETUP.md`](docs/TUNNEL_SETUP.md) for every built-in tunnel.
+
+## Same-machine extension
+
+```bash
+./install.sh --preset local-extension --browser edge
+```
+
+Replace `edge` with `chrome` or `firefox`. Load the generated extension, copy
+the ID shown by the browser, and run the exact `extension native-manifest`
+command printed by the installer. Then start `fancy-gpt bridge serve`. No SSH is
+used.
 
 ## 1. Install once on the host that runs FancyGPT
 
