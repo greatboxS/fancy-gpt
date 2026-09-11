@@ -17,5 +17,5 @@ def test_mcp_tool_surface_can_be_registered_without_real_transport(monkeypatch):
       "prepare_request","run_request_automatic","submit_planner_result","submit_final_result","get_request_status",
       "inspect_routing","inspect_context","list_tunnel_sites","list_tunnel_runtimes","list_tunnel_transports","inspect_tunnel_layers",
       "list_tunnels","probe_tunnels","inspect_tunnel","select_tunnel",
-      "list_skills","list_workflows","list_domains"
+      "list_skills","list_workflows","list_domains","server_stats"
     }

@@ -27,11 +27,15 @@ class BrowserWorker:
     tunnel_ids: set[str]
     browser: str
     connected_at: float = field(default_factory=time.monotonic)
+    connected_at_wall: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.monotonic)
     send_lock: threading.Lock = field(default_factory=threading.Lock)
     request_lock: threading.Lock = field(default_factory=threading.Lock)
     pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
     alive: bool = True
+    jobs_started: int = 0
+    jobs_succeeded: int = 0
+    jobs_failed: int = 0
 
     def send(self, message: dict[str, Any]) -> None:
         with self.send_lock:
@@ -42,10 +46,17 @@ class BrowserWorker:
         response_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
         with self.request_lock:
             self.pending[job_id] = response_queue
+            self.jobs_started += 1
             try:
                 self.send(message)
-                return response_queue.get(timeout=timeout_s)
+                response = response_queue.get(timeout=timeout_s)
+                if response.get("type") == "job_error":
+                    self.jobs_failed += 1
+                else:
+                    self.jobs_succeeded += 1
+                return response
             except queue.Empty as exc:
+                self.jobs_failed += 1
                 raise TimeoutError(f"browser worker timed out for job {job_id}") from exc
             finally:
                 self.pending.pop(job_id, None)
@@ -66,12 +77,34 @@ class BridgeHub:
             raise ValueError("stale_after_s must be positive")
         self.token = token
         self.stale_after_s = stale_after_s
+        self.started_at = time.time()
         self._workers: list[BrowserWorker] = []
         self._lock = threading.RLock()
+        self._total_connections = 0
+        self._total_jobs_started = 0
+        self._total_jobs_succeeded = 0
+        self._total_jobs_failed = 0
+        self._total_probes = 0
 
     def register(self, worker: BrowserWorker) -> None:
         with self._lock:
             self._workers.append(worker)
+            self._total_connections += 1
+
+    def record_probe(self) -> None:
+        with self._lock:
+            self._total_probes += 1
+
+    def record_job_start(self) -> None:
+        with self._lock:
+            self._total_jobs_started += 1
+
+    def record_job_result(self, success: bool) -> None:
+        with self._lock:
+            if success:
+                self._total_jobs_succeeded += 1
+            else:
+                self._total_jobs_failed += 1
 
     def unregister(self, worker: BrowserWorker) -> None:
         worker.alive = False
@@ -101,9 +134,32 @@ class BridgeHub:
                     "tunnel_ids": sorted(worker.tunnel_ids),
                     "alive": worker.alive,
                     "state": "connected" if worker.alive else "stale",
+                    "connected_at": worker.connected_at_wall,
+                    "connected_seconds": round(now - worker.connected_at, 1),
+                    "last_seen_seconds_ago": round(now - worker.last_seen, 1),
+                    "jobs_started": worker.jobs_started,
+                    "jobs_succeeded": worker.jobs_succeeded,
+                    "jobs_failed": worker.jobs_failed,
                 }
                 for worker in self._workers
             ]
+
+    def stats(self) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            for worker in self._workers:
+                if worker.alive and now - worker.last_seen > self.stale_after_s:
+                    worker.alive = False
+            return {
+                "started_at": self.started_at,
+                "uptime_seconds": round(time.time() - self.started_at, 1),
+                "connected_workers": sum(1 for worker in self._workers if worker.alive),
+                "total_connections_seen": self._total_connections,
+                "total_probe_requests": self._total_probes,
+                "total_jobs_started": self._total_jobs_started,
+                "total_jobs_succeeded": self._total_jobs_succeeded,
+                "total_jobs_failed": self._total_jobs_failed,
+            }
 
 
 class BridgeServer:
@@ -169,6 +225,7 @@ class BridgeServer:
             message = loads(connection.recv())
             msg_type = message.get("type")
             if msg_type == "probe":
+                self.hub.record_probe()
                 tunnel_id = str(message.get("tunnel_id", ""))
                 worker = self.hub.worker_for(tunnel_id)
                 connection.send(dumps({
@@ -181,22 +238,28 @@ class BridgeServer:
                 tunnel_id = str(message.get("tunnel_id", ""))
                 worker = self.hub.worker_for(tunnel_id)
                 if worker is None:
+                    self.hub.record_job_result(False)
                     connection.send(dumps({
                         "type": "job_error",
                         "job_id": message.get("job_id"),
                         "error": f"no browser worker connected for tunnel {tunnel_id}",
                     }))
                     continue
+                self.hub.record_job_start()
                 try:
                     requested_timeout = float(message.get("timeout_s", self.job_timeout_s))
                     if requested_timeout <= 0:
                         raise ValueError("job timeout must be positive")
                     response = worker.request(message, timeout_s=min(requested_timeout, self.job_timeout_s))
+                    self.hub.record_job_result(response.get("type") != "job_error")
                 except Exception as exc:
                     response = {"type": "job_error", "job_id": message.get("job_id"), "error": str(exc)}
+                    self.hub.record_job_result(False)
                 connection.send(dumps(response))
             elif msg_type == "workers":
                 connection.send(dumps({"type": "workers_result", "workers": self.hub.snapshot()}))
+            elif msg_type == "stats":
+                connection.send(dumps({"type": "stats_result", "stats": self.hub.stats(), "workers": self.hub.snapshot()}))
             else:
                 connection.send(dumps({"type": "error", "error": f"unsupported controller message: {msg_type}"}))
 

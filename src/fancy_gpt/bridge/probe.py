@@ -25,6 +25,27 @@ def probe_bridge_workers(endpoint: str, token: str, *, open_timeout_s: float = 1
         connection.close()
 
 
+def probe_bridge_stats(endpoint: str, token: str, *, open_timeout_s: float = 1.0) -> dict:
+    """Return the bridge hub's aggregate stats plus current worker snapshot."""
+    connection = connect(endpoint, open_timeout=open_timeout_s, max_size=8 * 1024 * 1024)
+    try:
+        connection.send(dumps(hello(role="controller", token=token)))
+        ack = loads(connection.recv(timeout=open_timeout_s))
+        if ack.get("type") != "hello_ack":
+            raise RuntimeError(f"bridge refused probe controller: {ack}")
+        connection.send(dumps({"type": "stats"}))
+        result = loads(connection.recv(timeout=open_timeout_s))
+        if result.get("type") != "stats_result":
+            raise RuntimeError(f"unexpected bridge stats response: {result}")
+        stats = result.get("stats", {})
+        workers = result.get("workers", [])
+        if not isinstance(stats, dict) or not isinstance(workers, list):
+            raise RuntimeError("bridge stats response is malformed")
+        return {"stats": stats, "workers": [item for item in workers if isinstance(item, dict)]}
+    finally:
+        connection.close()
+
+
 def available_tunnels(workers: list[dict]) -> set[str]:
     result: set[str] = set()
     for worker in workers:

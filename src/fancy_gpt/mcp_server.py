@@ -17,6 +17,8 @@ from .models import (
     ResearchManifest,
     RoutingDecision,
 )
+from .server_stats import stats as _server_stats
+from .server_stats import tracked
 from .tunnels import TunnelHealth, TunnelManager, TunnelSelection, TunnelSpec, TunnelLayerInspector
 from .web.models import LayerHealth
 from .web.runtime import RuntimeContract, RuntimeRegistry
@@ -55,6 +57,7 @@ def _manager() -> TunnelManager:
 
 
 @mcp.tool()
+@tracked("prepare_request")
 def prepare_request(
     request: RawRequest,
     skill: str | None = None,
@@ -65,6 +68,7 @@ def prepare_request(
 
 
 @mcp.tool()
+@tracked("run_request_automatic")
 def run_request_automatic(
     request: RawRequest,
     skill: str | None = None,
@@ -89,21 +93,25 @@ def run_request_automatic(
 
 
 @mcp.tool()
+@tracked("submit_planner_result")
 def submit_planner_result(request_id: str, manifest: ResearchManifest) -> InteractionRequired:
     return _engine().submit_planner(request_id, manifest.model_dump(mode="json"), open_browser=False)
 
 
 @mcp.tool()
+@tracked("submit_final_result")
 def submit_final_result(request_id: str, result: FinalReport) -> FinalReport:
     return _engine().submit_final(request_id, result.model_dump(mode="json"))
 
 
 @mcp.tool()
+@tracked("get_request_status")
 def get_request_status(request_id: str) -> RequestStatus:
     return _engine().status(request_id)
 
 
 @mcp.tool()
+@tracked("inspect_routing")
 def inspect_routing(
     request: RawRequest,
     skill: str | None = None,
@@ -113,31 +121,33 @@ def inspect_routing(
 
 
 @mcp.tool()
+@tracked("inspect_context")
 def inspect_context(request_id: str) -> ContextPack:
     return _engine().inspect_context(request_id)
 
-
-
-
 @mcp.tool()
+@tracked("list_tunnel_sites")
 def list_tunnel_sites() -> list[SiteContract]:
     """List site-adapter contracts available for tunnel composition."""
     return SiteRegistry().all()
 
 
 @mcp.tool()
+@tracked("list_tunnel_runtimes")
 def list_tunnel_runtimes() -> list[RuntimeContract]:
     """List browser-runtime contracts available for tunnel composition."""
     return RuntimeRegistry().all()
 
 
 @mcp.tool()
+@tracked("list_tunnel_transports")
 def list_tunnel_transports() -> list[TransportContract]:
     """List transport contracts available for tunnel composition."""
     return TransportRegistry().all()
 
 
 @mcp.tool()
+@tracked("inspect_tunnel_layers")
 def inspect_tunnel_layers(tunnel_id: str) -> list[LayerHealth]:
     """Inspect static site/runtime/transport/composition health independently."""
     manager = _manager()
@@ -145,24 +155,28 @@ def inspect_tunnel_layers(tunnel_id: str) -> list[LayerHealth]:
 
 
 @mcp.tool()
+@tracked("list_tunnels")
 def list_tunnels() -> list[TunnelSpec]:
     """List every built-in tunnel composition and its static capabilities."""
     return _manager().registry.all()
 
 
 @mcp.tool()
+@tracked("probe_tunnels")
 def probe_tunnels() -> list[TunnelHealth]:
     """Probe runtime availability of all enabled tunnel compositions."""
     return _manager().health()
 
 
 @mcp.tool()
+@tracked("inspect_tunnel")
 def inspect_tunnel(tunnel_id: str) -> TunnelHealth:
     manager = _manager()
     return manager.probe(manager.registry.get(tunnel_id))
 
 
 @mcp.tool()
+@tracked("select_tunnel")
 def select_tunnel(
     tunnel_id: str | None = None,
     tunnel_policy: str = "auto",
@@ -172,18 +186,49 @@ def select_tunnel(
 
 
 @mcp.tool()
+@tracked("list_skills")
 def list_skills() -> list[dict[str, object]]:
     return [item.model_dump(mode="json") for item in load_skills().values()]
 
 
 @mcp.tool()
+@tracked("list_workflows")
 def list_workflows() -> list[dict[str, object]]:
     return [item.model_dump(mode="json") for item in load_workflows().values()]
 
 
 @mcp.tool()
+@tracked("list_domains")
 def list_domains() -> list[dict[str, object]]:
     return [item.model_dump(mode="json") for item in load_domains().values()]
+
+
+@mcp.tool()
+@tracked("server_stats")
+def server_stats() -> dict[str, object]:
+    """Live MCP-server process stats: uptime, per-tool call/error counts and
+    latency, plus the connected bridge's worker snapshot and job counters
+    when a bridge is configured and reachable. Use this instead of guessing
+    from probe_tunnels whether requests are actually flowing."""
+    snapshot = _server_stats.snapshot()
+    bridge: dict[str, object] = {"reachable": False}
+    try:
+        manager = _manager()
+        spec = next(
+            (item for item in manager.registry.effective() if item.runtime.value == "extension"),
+            None,
+        )
+        if spec is not None:
+            token_file = manager.driver_factory.token_file(spec)
+            endpoint = manager.driver_factory.endpoint(spec)
+            if endpoint is not None:
+                from .bridge import load_or_create_token, probe_bridge_stats
+
+                token = load_or_create_token(token_file)
+                bridge = {"reachable": True, "endpoint": endpoint, **probe_bridge_stats(endpoint, token, open_timeout_s=0.75)}
+    except Exception as exc:
+        bridge = {"reachable": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {"process": snapshot, "bridge": bridge}
 
 
 def main() -> None:

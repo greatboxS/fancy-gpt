@@ -7,8 +7,15 @@ import sys
 import time
 import urllib.request
 from pathlib import Path, PureWindowsPath
+from typing import Any
 
-from fancy_gpt.bridge import BridgeBrowserDriver, available_tunnels, load_or_create_token, probe_bridge_workers
+from fancy_gpt.bridge import (
+    BridgeBrowserDriver,
+    available_tunnels,
+    load_or_create_token,
+    probe_bridge_stats,
+    probe_bridge_workers,
+)
 from fancy_gpt.providers import ChatGPTWebAutomationProvider
 from fancy_gpt.runtime_paths import user_data_dir
 
@@ -37,7 +44,7 @@ class TunnelManager:
             bridge_token_file=self.bridge_token_file, headless=headless, timeout_s=timeout_s
         )
         self.layer_inspector = TunnelLayerInspector()
-        self._bridge_probe_cache: dict[tuple[str, str], tuple[float, set[str]]] = {}
+        self._bridge_probe_cache: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
         self._playwright_paths: list[Path] | None = None
         self.resolver = TunnelResolver(self.registry, self.probe)
 
@@ -84,11 +91,16 @@ class TunnelManager:
                 cached = self._bridge_probe_cache.get(cache_key)
                 now = time.monotonic()
                 if cached is None or now - cached[0] > 1.0:
-                    workers = probe_bridge_workers(endpoint, token, open_timeout_s=0.75)
-                    tunnel_ids = available_tunnels(workers)
-                    self._bridge_probe_cache[cache_key] = (now, tunnel_ids)
+                    try:
+                        bridge_info = probe_bridge_stats(endpoint, token, open_timeout_s=0.75)
+                    except Exception:
+                        workers = probe_bridge_workers(endpoint, token, open_timeout_s=0.75)
+                        bridge_info = {"stats": {}, "workers": workers}
+                    self._bridge_probe_cache[cache_key] = (now, bridge_info)
                 else:
-                    tunnel_ids = cached[1]
+                    bridge_info = cached[1]
+                tunnel_ids = available_tunnels(bridge_info.get("workers", []))
+                metadata: dict[str, Any] = {"bridge": bridge_info}
                 if spec.id not in tunnel_ids and "*" not in tunnel_ids:
                     return TunnelHealth(
                         tunnel_id=spec.id,
@@ -97,6 +109,7 @@ class TunnelManager:
                         latency_ms=(time.monotonic() - started) * 1000,
                         browser_connected=False,
                         layers=layers,
+                        metadata=metadata,
                     )
                 return TunnelHealth(
                     tunnel_id=spec.id,
@@ -105,6 +118,7 @@ class TunnelManager:
                     latency_ms=(time.monotonic() - started) * 1000,
                     browser_connected=True,
                     layers=layers,
+                    metadata=metadata,
                 )
 
             if spec.runtime.value == "playwright":
