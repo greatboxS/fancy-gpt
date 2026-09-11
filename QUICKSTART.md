@@ -1,135 +1,304 @@
 # fancy-gpt 0.7.0 Quick Start
 
-## Choose the connection first
+This guide takes you from a fresh installation to your first FancyGPT request.
+The recommended setup keeps ChatGPT in your local browser while FancyGPT runs
+on a remote Ubuntu/Linux development host.
 
-| Situation | Setup command | Tunnel |
-|---|---|---|
-| Chrome on another Windows/Linux machine | `./install.sh --preset remote-extension --browser chrome` | `chrome-extension-ws-remote` |
-| Edge on another Windows/Linux machine | `./install.sh --preset remote-extension --browser edge` | `edge-extension-ws-remote` |
-| Firefox on another Windows/Linux machine | `./install.sh --preset remote-extension --browser firefox` | `firefox-extension-ws-remote` |
-| Chrome on the same machine | `./install.sh --preset local-extension --browser chrome` | `chrome-extension-native-local` |
-| Edge on the same machine | `./install.sh --preset local-extension --browser edge` | `edge-extension-native-local` |
-| Firefox on the same machine | `./install.sh --preset local-extension --browser firefox` | `firefox-extension-native-local` |
-| Managed local Chromium | `./install.sh --with-playwright` | `playwright-chromium-local` |
-| Managed local Firefox | install Playwright extra and Firefox runtime | `playwright-firefox-local` |
-| Existing debug-enabled Chrome | configure loopback CDP | `chrome-cdp-local` |
-| Manual copy/paste fallback | no setup | `interactive-manual` |
+## Before you begin
 
-Remote extension means WebSocket over localhost/SSH. Local extension means
-Native Messaging on the same OS; its host still uses the loopback bridge.
+This guide uses two machines:
 
-## Fastest path: browser workstation + remote Ubuntu/Linux
+- **Development host**: the Ubuntu/Linux machine where you run FancyGPT and
+  Codex. It may be a remote server reached through SSH.
+- **Browser workstation**: the Windows or Linux machine where Chrome, Edge, or
+  Firefox is installed and where you are already signed in to ChatGPT.
 
-Run once on Ubuntu:
+Choose one browser name and use it consistently throughout the guide:
+`chrome`, `edge`, or `firefox`.
+
+The browser extension talks to the remote FancyGPT bridge through an SSH local
+port forward. The bridge remains bound to `127.0.0.1`; do not expose port 8765
+directly to a LAN or the internet.
+
+## 1. Install FancyGPT on the development host
+
+Clone or open the FancyGPT repository, then run the preset for your browser.
+This example uses Edge:
 
 ```bash
 ./install.sh --preset remote-extension --browser edge
 ```
 
-Replace `edge` with `chrome` or `firefox`. The browser workstation may run
-Windows or Linux. The preset installs the CLI and MCP server, registers
-`fancy-gpt` with Codex when available, and creates a private load-unpacked bundle
-under `~/.local/share/fancy-gpt/remote-<browser>`. Endpoint, exact tunnel ID, and pair
-token are kept in `PAIRING.txt` with mode `0600`; do not commit or publish it.
+For Chrome or Firefox, replace `edge` with `chrome` or `firefox`.
 
-Then start the loopback-only bridge:
+The installer:
 
-```bash
-fancy-gpt bridge serve
+1. installs the FancyGPT CLI and MCP server;
+2. registers the MCP server with Codex when Codex is available;
+3. creates a browser-specific extension bundle;
+4. creates or reuses a private bridge pair token; and
+5. writes the extension connection values to `PAIRING.txt`.
+
+The generated bundle is stored at:
+
+```text
+~/.local/share/fancy-gpt/remote-<browser>/
+├── extension/     # copy this directory to the browser workstation
+└── PAIRING.txt    # private connection values; do not copy this file
 ```
 
-Copy only the generated `extension` directory to the browser workstation,
-establish SSH LocalForward port 8765, and use the browser's Load unpacked flow.
-Restart Codex after the first MCP registration. See
-[`docs/TUNNEL_SETUP.md`](docs/TUNNEL_SETUP.md) for every built-in tunnel.
+For example, the Edge bundle is:
 
-## Same-machine extension
-
-```bash
-./install.sh --preset local-extension --browser edge
+```text
+~/.local/share/fancy-gpt/remote-edge/
 ```
 
-Replace `edge` with `chrome` or `firefox`. Load the generated extension, copy
-the ID shown by the browser, and run the exact `extension native-manifest`
-command printed by the installer. Then start `fancy-gpt bridge serve`. No SSH is
-used.
+If the installer registered FancyGPT with Codex for the first time, restart
+Codex before using the MCP tools.
 
-## 1. Install once on the host that runs FancyGPT
+## 2. Read and copy the connection values
 
-```bash
-./install.sh
-```
-
-No Playwright browser is downloaded by default. To also install the local Playwright fallback:
+On the development host, display `PAIRING.txt`. For Edge:
 
 ```bash
-./install.sh --with-playwright
+cat ~/.local/share/fancy-gpt/remote-edge/PAIRING.txt
 ```
 
-Verify:
+Use `remote-chrome` or `remote-firefox` for the other browsers. The output has
+this form:
 
-```bash
-fancy-gpt test
-fancy-gpt tunnels list
+```text
+Endpoint: ws://127.0.0.1:8765
+Tunnel ID: edge-extension-ws-remote
+Browser: edge
+Pair token: <secret-token>
 ```
 
-## 2. Recommended: local browser + remote development host
+Keep this terminal open or copy the four values to a secure temporary note.
+For the pair token, copy only the value after `Pair token:`—do not include the
+label or whitespace. Treat it as a password: do not commit, publish, or send
+`PAIRING.txt` to another person.
 
-On the remote host:
+If you installed without a preset, generate and display the same information
+with:
 
 ```bash
 fancy-gpt bridge init
+```
+
+That command prints JSON. Copy only the string inside `pair_token`, without the
+quotation marks:
+
+```json
+{
+  "endpoint": "ws://127.0.0.1:8765",
+  "token_file": "/home/<user>/.local/share/fancy-gpt/bridge-token",
+  "pair_token": "<copy-only-this-value>"
+}
+```
+
+## 3. Copy the extension to the browser workstation
+
+Copy only the generated `extension/` directory from the development host to a
+permanent directory on the browser workstation. Do not copy `PAIRING.txt`.
+
+For example, with `scp` from a Linux browser workstation:
+
+```bash
+scp -r <user>@<development-host>:~/.local/share/fancy-gpt/remote-edge/extension ./fancy-gpt-extension
+```
+
+On Windows, you may use the VS Code file explorer, WinSCP, or another SSH file
+transfer tool. Keep the copied directory after loading it: Chrome and Edge use
+its files directly.
+
+## 4. Load the extension in the browser
+
+### Chrome
+
+1. Open `chrome://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select the copied `extension/` directory.
+5. Pin **FancyGPT Tunnel** to the browser toolbar if desired.
+
+### Edge
+
+1. Open `edge://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked**.
+4. Select the copied `extension/` directory.
+5. Pin **FancyGPT Tunnel** to the browser toolbar if desired.
+
+### Firefox
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on**.
+3. Select `manifest.json` inside the copied `extension/` directory.
+
+Firefox removes a temporary add-on when the browser exits, so repeat these
+steps after restarting Firefox unless you install a signed package.
+
+## 5. Enter the endpoint and pair token
+
+Click the **FancyGPT Tunnel** icon in the browser toolbar. Fill in every field
+using the values from `PAIRING.txt`:
+
+| Field | Value for Edge | Chrome/Firefox |
+|---|---|---|
+| Transport | `WebSocket / SSH` | same |
+| Bridge endpoint | `ws://127.0.0.1:8765` | same |
+| Pair token | value after `Pair token:` | same |
+| Tunnel ID | `edge-extension-ws-remote` | replace `edge` with the browser name |
+| Browser name | `edge` | `chrome` or `firefox` |
+
+Click **Save & reconnect**. The extension stores these values in its local
+extension storage. You normally enter the token only once; enter it again if
+you remove the extension or clear its storage.
+
+At this point the connection may still show as disconnected. That is expected
+until both the SSH port forward and bridge are running.
+
+## 6. Start the SSH local port forward
+
+On the browser workstation, open a terminal and connect to the development
+host with local port 8765 forwarded:
+
+```bash
+ssh -o ExitOnForwardFailure=yes -N -L 8765:127.0.0.1:8765 <user>@<development-host>
+```
+
+Keep this terminal running while using FancyGPT. The command intentionally
+shows no prompt after connecting.
+
+If you use VS Code Remote-SSH, you can instead add the forward to the SSH host
+entry on the browser workstation:
+
+```sshconfig
+Host my-development-host
+    HostName <development-host>
+    User <user>
+    LocalForward 127.0.0.1:8765 127.0.0.1:8765
+```
+
+Reconnect the SSH or VS Code session after changing this file.
+
+## 7. Start the FancyGPT bridge
+
+On the development host, open a separate terminal and run:
+
+```bash
 fancy-gpt bridge serve
 ```
 
-Copy the printed pair token.
+Keep the bridge running while using FancyGPT. Return to the browser, open the
+**FancyGPT Tunnel** popup, and click **Save & reconnect** again if it does not
+reconnect automatically.
 
-On your local machine, forward the remote bridge through SSH:
+## 8. Verify the connection
 
-```bash
-ssh -L 8765:127.0.0.1:8765 <remote-host>
-```
-
-or put the equivalent `LocalForward` in the SSH host used by VS Code Remote-SSH.
-
-Export/load the extension for your browser (`chrome`, `edge`, `firefox`), then configure:
-
-```text
-Transport: WebSocket / SSH
-Endpoint: ws://127.0.0.1:8765
-Pair token: <token from remote bridge init>
-Tunnel ID: chrome-extension-ws-remote   # adapt browser name
-```
-
-Check from remote:
+On the development host, run:
 
 ```bash
 fancy-gpt tunnels health
+fancy-gpt tunnels explain edge-extension-ws-remote
+```
+
+Replace `edge` with your browser name. If the tunnel is healthy, select the
+remote-extension policy:
+
+```bash
 fancy-gpt tunnels select --policy prefer-remote
 ```
 
-## 3. Run from any project
+If verification fails, check these items in order:
+
+1. `fancy-gpt bridge serve` is still running on the development host;
+2. the SSH port-forward command is still running on the browser workstation;
+3. the extension's endpoint is exactly `ws://127.0.0.1:8765`;
+4. the pair token contains only the value, with no `Pair token:` label;
+5. the Tunnel ID and Browser name match the browser loaded with the extension.
+
+Useful diagnostics:
+
+```bash
+fancy-gpt tunnels components
+fancy-gpt tunnels list
+fancy-gpt tunnels health
+```
+
+## 9. Run the first request
+
+On the development host, change to the project you want to work on:
 
 ```bash
 cd my-project
 fancy-gpt init
-# edit fancy-gpt-request.yaml
-fancy-gpt run fancy-gpt-request.yaml --tunnel chrome-extension-ws-remote
 ```
 
-## 4. MCP
+Edit the generated `fancy-gpt-request.yaml`, then run it through the exact
+browser tunnel:
+
+```bash
+fancy-gpt run fancy-gpt-request.yaml --tunnel edge-extension-ws-remote
+```
+
+Replace `edge` with `chrome` or `firefox` when applicable. Keep the browser
+open and signed in to ChatGPT until the request completes.
+
+## 10. Use FancyGPT through MCP
+
+To start the MCP server directly:
 
 ```bash
 fancy-gpt mcp
 ```
 
-The MCP caller may pass `tunnel_id` or `tunnel_policy` on each automatic request.
+An MCP caller may pass `tunnel_id` for an exact tunnel or `tunnel_policy` to
+let FancyGPT choose a compatible tunnel. If the installer registered the MCP
+server automatically, restart Codex once and use the registered FancyGPT tools.
 
-## 5. Useful tunnel diagnostics
+## Same-machine browser alternative
+
+Use Native Messaging when FancyGPT and the browser run on the same operating
+system. SSH is not needed.
 
 ```bash
-fancy-gpt tunnels components
-fancy-gpt tunnels list
-fancy-gpt tunnels explain chrome-extension-ws-remote
-fancy-gpt tunnels health
+./install.sh --preset local-extension --browser edge
 ```
+
+The extension is created at:
+
+```text
+~/.local/share/fancy-gpt/local-edge/extension/
+```
+
+Replace `edge` with your browser name, then:
+
+1. load the extension using the browser steps above;
+2. copy the extension ID shown on the browser's extension page;
+3. run the exact command printed by the installer:
+
+   ```bash
+   fancy-gpt extension native-manifest --browser edge --extension-id <extension-id>
+   ```
+
+4. run `fancy-gpt bridge serve`;
+5. open **FancyGPT Tunnel**, select `Native Messaging`, confirm the browser
+   name and `<browser>-extension-native-local` tunnel ID, then click
+   **Save & reconnect**.
+
+Windows native-host registration is platform-specific and is not automated by
+the Linux installer.
+
+## Other connection options
+
+| Situation | Setup | Tunnel ID |
+|---|---|---|
+| Managed local Chromium | `./install.sh --with-playwright` | `playwright-chromium-local` |
+| Managed local Firefox | install the optional Playwright Firefox runtime | `playwright-firefox-local` |
+| Existing debug-enabled Chrome | configure loopback-only CDP | `chrome-cdp-local` |
+| Manual copy/paste fallback | no browser setup | `interactive-manual` |
+
+See [`docs/TUNNEL_SETUP.md`](docs/TUNNEL_SETUP.md) for full tunnel setup and
+security details.
