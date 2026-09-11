@@ -1,0 +1,341 @@
+domains:
+- name: architecture
+  description: Software/system architecture, boundaries, ownership, lifecycle, interfaces
+    and failure containment.
+  source_priority:
+  - project specifications
+  - upstream architecture docs
+  - official framework docs
+  - standards
+  - community
+  typical_artifacts:
+  - SAD
+  - SDD
+  - ADR
+  - interface specs
+  - diagrams
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - docs.official
+  functional_focus:
+  - boundaries and dependency direction
+  - ownership lifecycle and state
+  - interfaces and contracts
+  - failure containment and coupling
+- name: cpp
+  description: C/C++ implementation safety, API design, ownership, concurrency, determinism,
+    performance and undefined behavior.
+  source_priority:
+  - language standard
+  - C++ Core Guidelines
+  - library docs/source
+  - compiler docs
+  - project code
+  typical_artifacts:
+  - .cpp
+  - .hpp
+  - tests
+  - git diff
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - git.diff
+  - web.search
+  - source.upstream
+  functional_focus:
+  - lifetime and ownership
+  - undefined behavior and type safety
+  - concurrency and synchronization
+  - latency allocation copies and determinism
+  - API and error semantics
+- name: embedded-linux
+  description: Embedded Linux runtime, process/thread scheduling, memory, I/O, systemd,
+    drivers and hardware-software interfaces.
+  source_priority:
+  - Linux kernel docs/source
+  - subsystem docs
+  - systemd docs
+  - vendor BSP docs
+  - community
+  typical_artifacts:
+  - dmesg
+  - systemd units
+  - device tree
+  - kernel config
+  - runtime logs
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - source.upstream
+  functional_focus:
+  - process thread scheduling and signals
+  - memory file descriptors and I/O
+  - systemd lifecycle and recovery
+  - kernel userspace boundaries
+  - device tree driver and hardware interfaces
+- name: yocto
+  description: Yocto/OpenEmbedded recipes, layers, images, licenses, kernel/device-tree
+    integration and reproducibility.
+  source_priority:
+  - Yocto Project docs
+  - BitBake docs
+  - OE-Core
+  - meta-openembedded
+  - vendor layer
+  - community
+  typical_artifacts:
+  - .bb
+  - .bbappend
+  - layer.conf
+  - local.conf
+  - image recipes
+  - build logs
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - source.upstream
+  functional_focus:
+  - recipe and provider semantics
+  - layer compatibility and overrides
+  - image/package composition
+  - kernel/device-tree integration
+  - licenses reproducibility and upgrade impact
+- name: media
+  description: GStreamer/media pipelines, caps negotiation, buffering, queues, hardware
+    codecs, RTP/SRT and latency.
+  source_priority:
+  - GStreamer docs
+  - plugin docs
+  - GStreamer source
+  - vendor codec docs/source
+  - issues/community
+  typical_artifacts:
+  - pipeline code
+  - gst-launch commands
+  - caps
+  - logs
+  - traces
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - source.upstream
+  functional_focus:
+  - GStreamer topology pads and caps
+  - queueing backpressure and latency
+  - buffer/memory ownership and copies
+  - hardware codec integration
+  - RTP/SRT transport behavior
+- name: network
+  description: Linux networking, routing, sockets, QoS, tc/nftables, congestion, RF/LTE/SAT
+    and multi-link behavior.
+  source_priority:
+  - Linux networking docs/source
+  - iproute2
+  - nftables
+  - protocol RFCs
+  - vendor RF docs
+  - community
+  typical_artifacts:
+  - ip/nmcli/tc/nft output
+  - network config
+  - packet captures
+  - systemd units
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - source.upstream
+  - standards.search
+  functional_focus:
+  - routing and interface topology
+  - socket semantics and classification
+  - tc/nftables QoS and bottleneck placement
+  - congestion failover and multi-link behavior
+  - protocol/RFC conformance and runtime counters
+- name: security
+  description: Threat modeling, trust boundaries, TPM, secure boot, key lifecycle,
+    signed commands and update security.
+  source_priority:
+  - normative standards
+  - vendor security docs
+  - upstream implementation
+  - cryptographic library docs
+  - security advisories
+  typical_artifacts:
+  - boot chain
+  - key provisioning
+  - TPM config
+  - threat model
+  - protocol design
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - standards.search
+  - source.upstream
+  functional_focus:
+  - trust boundaries and threat model
+  - key lifecycle and provisioning
+  - TPM and secure boot
+  - signed commands and update trust
+  - cryptographic protocol correctness
+- name: documentation
+  description: Requirements, SAD/SDD/ADR, traceability, consistency, terminology and
+    technical writing quality.
+  source_priority:
+  - project document rules
+  - applicable standards
+  - source artifacts
+  - tests
+  typical_artifacts:
+  - REQ
+  - SAD
+  - SDD
+  - ADR
+  - TST
+  - REL
+  default_capabilities:
+  - repo.read
+  - repo.search
+  functional_focus:
+  - requirements quality and ambiguity
+  - SAD/SDD/ADR scope
+  - traceability and consistency
+  - terminology and reusable technical writing
+- name: testing
+  description: Verification strategy, negative tests, fault injection, performance
+    evidence, HIL/SIL and production acceptance.
+  source_priority:
+  - project requirements
+  - standards
+  - tool documentation
+  - runtime evidence
+  typical_artifacts:
+  - test plans
+  - test code
+  - measurements
+  - logs
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - docs.official
+  functional_focus:
+  - acceptance criteria and measurable evidence
+  - negative and fault-injection tests
+  - performance and impairment testing
+  - SIL/HIL/real-device validation
+  - regression and release verification
+- name: hardware
+  description: Board bring-up, schematics, power/reset sequencing, GPIO polarity,
+    ADC, PCIe, I2C/SPI/UART and component datasheets.
+  source_priority:
+  - component datasheet
+  - SoC TRM
+  - board schematic
+  - vendor BSP
+  - kernel driver source
+  typical_artifacts:
+  - schematic notes
+  - pin tables
+  - device tree
+  - datasheets
+  - dmesg
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - source.upstream
+  functional_focus:
+  - power reset and boot sequencing
+  - GPIO polarity and voltage domains
+  - PCIe I2C SPI UART ADC integration
+  - datasheet/TRM constraints
+  - board bring-up evidence
+- name: rf
+  description: RF topology, link configuration, pairing, transport assumptions, bandwidth/latency/loss
+    and modem integration.
+  source_priority:
+  - vendor RF manuals
+  - protocol specs
+  - RF theory references
+  - runtime measurements
+  typical_artifacts:
+  - RF profiles
+  - pairing design
+  - link stats
+  - network config
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  functional_focus:
+  - topology roles pairing and provisioning
+  - link budget bandwidth latency and loss
+  - transport assumptions over RF
+  - vendor module configuration
+  - runtime RF evidence
+- name: productization
+  description: Prototype-to-production architecture, maintainability, observability,
+    recovery, deployment and operational readiness.
+  source_priority:
+  - project requirements
+  - platform docs
+  - manufacturing/ops constraints
+  - standards
+  typical_artifacts:
+  - release docs
+  - system services
+  - update strategy
+  - logging
+  - watchdog
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - standards.search
+  functional_focus:
+  - operational lifecycle and watchdogs
+  - observability and diagnostics
+  - deployment update rollback and recovery
+  - manufacturing/field maintainability
+  - release readiness
+- name: ai-tooling
+  description: Agent/MCP/tooling architecture, prompt contracts, context management,
+    model-provider boundaries and evaluation.
+  source_priority:
+  - MCP official docs
+  - provider official docs
+  - upstream SDK/source
+  - security policies
+  typical_artifacts:
+  - tool schemas
+  - MCP server
+  - skills
+  - prompt profiles
+  - evaluation data
+  default_capabilities:
+  - repo.read
+  - repo.search
+  - web.search
+  - web.open
+  - source.upstream
+  functional_focus:
+  - MCP contracts and transport
+  - context selection and provenance
+  - prompt/provider boundaries
+  - agent skills and routing
+  - evaluation and browser automation safety

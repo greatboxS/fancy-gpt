@@ -1,0 +1,5 @@
+# Offline fixture for fancy-gpt simulation.
+# Real projects should point the request at their own QoS implementation.
+tc qdisc show dev datalink-eth0
+nft list ruleset
+cgroup: /system.slice/datalink-media-pipeline.service

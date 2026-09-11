@@ -1,0 +1,64 @@
+{
+  "version": "0.7.0",
+  "skills": 6,
+  "workflows": 4,
+  "domains": 13,
+  "tunnels": 10,
+  "tunnel_layer_errors": {},
+  "skill_bundle_errors": [],
+  "source_tests": {
+    "pass": true,
+    "command": [
+      "/tmp/fancy-gpt-audit-venv/bin/python",
+      "-m",
+      "pytest",
+      "-ra"
+    ],
+    "stdout": "........................................................................ [ 96%]\n...                                                                      [100%]\n75 passed in 6.73s",
+    "stderr": ""
+  },
+  "functional_review": {
+    "pass": true,
+    "command": [
+      "/tmp/fancy-gpt-audit-venv/bin/python",
+      "scripts/functional_review.py"
+    ],
+    "stdout": "FUNCTIONAL REVIEW: PASS\nskills=6 workflows=4 domains=13",
+    "stderr": ""
+  },
+  "tunnel_review": {
+    "pass": true,
+    "command": [
+      "/tmp/fancy-gpt-audit-venv/bin/python",
+      "scripts/tunnel_review.py"
+    ],
+    "stdout": "{\n  \"pass\": true,\n  \"tunnels\": 10,\n  \"sites\": 1,\n  \"runtimes\": 5,\n  \"transports\": 6,\n  \"extension_tunnels\": 6,\n  \"static_layer_failures\": {}\n}",
+    "stderr": ""
+  },
+  "extension_build": {
+    "pass": true,
+    "command": [
+      "/tmp/fancy-gpt-audit-venv/bin/python",
+      "scripts/build_extension.py",
+      "--check"
+    ],
+    "stdout": "{\n  \"ok\": true,\n  \"errors\": []\n}",
+    "stderr": ""
+  },
+  "wheel": "dist/fancy_gpt-0.7.0-py3-none-any.whl",
+  "wheel_errors": [],
+  "wheel_self_test": {
+    "pass": true,
+    "command": [
+      "/tmp/fancy-gpt-audit-venv/bin/python",
+      "-c",
+      "import json; from fancy_gpt.self_test import run_self_test; print(json.dumps(run_self_test()))"
+    ],
+    "stdout": "{\"ok\": true, \"version_contract\": \"0.7.0\", \"skills\": 6, \"workflows\": 4, \"domains\": 13, \"tunnels\": 10, \"tunnel_layers\": \"healthy\", \"offline_two_pass\": \"complete\", \"browser_required\": false, \"network_required\": false}",
+    "stderr": ""
+  },
+  "schemas_exist": true,
+  "example_files_exist": true,
+  "tunnel_architecture_doc": true,
+  "pass": true
+}

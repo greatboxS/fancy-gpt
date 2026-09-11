@@ -1,0 +1,62 @@
+workflows:
+  - name: deep-design-review
+    mode: review
+    description: Multi-perspective design review across architecture, failure modes, concurrency, testability, and evidence.
+    primary_skill: technical-review
+    component_skills: [technical-review, technical-consult, evidence-verification]
+    default_domains: [architecture, testing]
+    default_focus:
+      - boundaries and dependency direction
+      - ownership and lifecycle
+      - concurrency and resource behavior
+      - failure containment and degraded modes
+      - testability and verification evidence
+    required_sections: [executive-summary, findings, alternatives, recommendation, validation-plan]
+    quality_gates:
+      - Cover at least architecture, failure behavior, and verification perspective.
+
+  - name: change-impact-assessment
+    mode: verify
+    description: Trace the transitive impact of a change/diff across implementation, interfaces, tests, documentation, and runtime behavior.
+    primary_skill: evidence-verification
+    component_skills: [evidence-verification, technical-review]
+    default_domains: [architecture, testing, documentation]
+    default_focus:
+      - changed behavior and dependency surface
+      - interface/API/IPC compatibility
+      - regression risk
+      - required test and documentation updates
+    required_sections: [change-summary, impact-map, evidence-coverage, regression-risks, required-actions]
+    quality_gates:
+      - The assessment starts from concrete changed artifacts or a diff.
+
+  - name: production-readiness
+    mode: verify
+    description: Cross-domain readiness gate covering operational behavior, recovery, security, deployment, observability, and validation evidence.
+    primary_skill: evidence-verification
+    component_skills: [evidence-verification, technical-review, technical-consult]
+    default_domains: [architecture, embedded-linux, security, testing, productization]
+    default_focus:
+      - startup shutdown and recovery
+      - resource and failure containment
+      - security and credential posture
+      - deployment update rollback and observability
+      - real-device acceptance evidence
+    required_sections: [readiness-summary, blockers, evidence-coverage, operational-risks, release-actions]
+    quality_gates:
+      - A readiness claim cannot pass without runtime/acceptance evidence.
+
+  - name: conformance-audit
+    mode: verify
+    description: Audit traceability and consistency from requirements through design, implementation, tests, and release evidence.
+    primary_skill: evidence-verification
+    component_skills: [evidence-verification, technical-review]
+    default_domains: [documentation, architecture, testing]
+    default_focus:
+      - requirement to design traceability
+      - design to implementation conformance
+      - test coverage and acceptance evidence
+      - contradictions and orphan requirements
+    required_sections: [scope, traceability-map, conformance-gaps, evidence-coverage, corrective-actions]
+    quality_gates:
+      - Every audited claim maps to an artifact/evidence source or is marked missing.

@@ -1,0 +1,437 @@
+{
+  "$defs": {
+    "EvidenceRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "claim_area": {
+          "title": "Claim Area",
+          "type": "string"
+        },
+        "required_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Evidence",
+          "type": "array"
+        },
+        "acceptance_rule": {
+          "title": "Acceptance Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "claim_area",
+        "required_evidence",
+        "acceptance_rule"
+      ],
+      "title": "EvidenceRequirement",
+      "type": "object"
+    },
+    "Freshness": {
+      "enum": [
+        "static",
+        "version-specific",
+        "current"
+      ],
+      "title": "Freshness",
+      "type": "string"
+    },
+    "LocalContextRequirement": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        },
+        "exact_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exact Paths",
+          "type": "array"
+        },
+        "search_terms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Search Terms",
+          "type": "array"
+        },
+        "priority": {
+          "$ref": "#/$defs/Priority",
+          "default": "P1"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "description"
+      ],
+      "title": "LocalContextRequirement",
+      "type": "object"
+    },
+    "OnlineResearchTask": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "objective": {
+          "title": "Objective",
+          "type": "string"
+        },
+        "queries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Queries",
+          "type": "array"
+        },
+        "source_priority": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Priority",
+          "type": "array"
+        },
+        "freshness": {
+          "$ref": "#/$defs/Freshness",
+          "default": "version-specific"
+        },
+        "expected_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Expected Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "objective"
+      ],
+      "title": "OnlineResearchTask",
+      "type": "object"
+    },
+    "Priority": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "title": "Priority",
+      "type": "string"
+    },
+    "ReportContract": {
+      "additionalProperties": false,
+      "properties": {
+        "sections": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sections",
+          "type": "array"
+        },
+        "require_citations": {
+          "default": true,
+          "title": "Require Citations",
+          "type": "boolean"
+        },
+        "require_evidence_mapping": {
+          "default": true,
+          "title": "Require Evidence Mapping",
+          "type": "boolean"
+        },
+        "require_unknowns": {
+          "default": true,
+          "title": "Require Unknowns",
+          "type": "boolean"
+        },
+        "require_validation_plan": {
+          "default": true,
+          "title": "Require Validation Plan",
+          "type": "boolean"
+        },
+        "style": {
+          "default": "concise, technical, evidence-first",
+          "title": "Style",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sections"
+      ],
+      "title": "ReportContract",
+      "type": "object"
+    },
+    "RequestMode": {
+      "enum": [
+        "review",
+        "design",
+        "consult",
+        "investigate",
+        "verify",
+        "write"
+      ],
+      "title": "RequestMode",
+      "type": "string"
+    },
+    "ResearchBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "max_search_queries": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 0,
+          "title": "Max Search Queries",
+          "type": "integer"
+        },
+        "max_open_pages": {
+          "default": 10,
+          "maximum": 50,
+          "minimum": 0,
+          "title": "Max Open Pages",
+          "type": "integer"
+        },
+        "max_context_bytes": {
+          "default": 180000,
+          "maximum": 50000000,
+          "minimum": 4096,
+          "title": "Max Context Bytes",
+          "type": "integer"
+        }
+      },
+      "title": "ResearchBudget",
+      "type": "object"
+    },
+    "ResearchQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "priority": {
+          "$ref": "#/$defs/Priority",
+          "default": "P1"
+        }
+      },
+      "required": [
+        "id",
+        "question",
+        "rationale"
+      ],
+      "title": "ResearchQuestion",
+      "type": "object"
+    },
+    "SourceCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "authority": {
+          "enum": [
+            "primary",
+            "secondary",
+            "community"
+          ],
+          "title": "Authority",
+          "type": "string"
+        },
+        "relevance": {
+          "title": "Relevance",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "version_or_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version Or Date"
+        }
+      },
+      "required": [
+        "category",
+        "source",
+        "authority",
+        "relevance"
+      ],
+      "title": "SourceCandidate",
+      "type": "object"
+    },
+    "ToolUsage": {
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "title": "Capability",
+          "type": "string"
+        },
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "capability",
+        "purpose"
+      ],
+      "title": "ToolUsage",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "intent": {
+      "items": {
+        "$ref": "#/$defs/RequestMode"
+      },
+      "title": "Intent",
+      "type": "array"
+    },
+    "domains": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Domains",
+      "type": "array"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "research_goal": {
+      "title": "Research Goal",
+      "type": "string"
+    },
+    "research_questions": {
+      "items": {
+        "$ref": "#/$defs/ResearchQuestion"
+      },
+      "title": "Research Questions",
+      "type": "array"
+    },
+    "local_context_requirements": {
+      "items": {
+        "$ref": "#/$defs/LocalContextRequirement"
+      },
+      "title": "Local Context Requirements",
+      "type": "array"
+    },
+    "online_research": {
+      "items": {
+        "$ref": "#/$defs/OnlineResearchTask"
+      },
+      "title": "Online Research",
+      "type": "array"
+    },
+    "source_map": {
+      "items": {
+        "$ref": "#/$defs/SourceCandidate"
+      },
+      "title": "Source Map",
+      "type": "array"
+    },
+    "evidence_requirements": {
+      "items": {
+        "$ref": "#/$defs/EvidenceRequirement"
+      },
+      "title": "Evidence Requirements",
+      "type": "array"
+    },
+    "tool_plan": {
+      "items": {
+        "$ref": "#/$defs/ToolUsage"
+      },
+      "title": "Tool Plan",
+      "type": "array"
+    },
+    "freshness": {
+      "$ref": "#/$defs/Freshness"
+    },
+    "missing_evidence": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Missing Evidence",
+      "type": "array"
+    },
+    "report_contract": {
+      "$ref": "#/$defs/ReportContract"
+    },
+    "research_budget": {
+      "$ref": "#/$defs/ResearchBudget"
+    }
+  },
+  "required": [
+    "intent",
+    "domains",
+    "research_goal",
+    "research_questions",
+    "freshness",
+    "report_contract"
+  ],
+  "title": "ResearchManifest",
+  "type": "object"
+}

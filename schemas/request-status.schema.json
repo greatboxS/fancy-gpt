@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "RequestMode": {
+      "enum": [
+        "review",
+        "design",
+        "consult",
+        "investigate",
+        "verify",
+        "write"
+      ],
+      "title": "RequestMode",
+      "type": "string"
+    },
+    "RequestState": {
+      "enum": [
+        "new",
+        "running-planner",
+        "waiting-planner",
+        "running-final",
+        "waiting-final",
+        "complete",
+        "failed"
+      ],
+      "title": "RequestState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/RequestState"
+    },
+    "route_kind": {
+      "enum": [
+        "skill",
+        "workflow"
+      ],
+      "title": "Route Kind",
+      "type": "string"
+    },
+    "route_name": {
+      "title": "Route Name",
+      "type": "string"
+    },
+    "skill": {
+      "title": "Skill",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/RequestMode"
+    },
+    "objective": {
+      "title": "Objective",
+      "type": "string"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "title": "Updated At",
+      "type": "string"
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Provider"
+    },
+    "tunnel_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tunnel Id"
+    },
+    "planner_prompt_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Planner Prompt File"
+    },
+    "planner_response_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Planner Response File"
+    },
+    "final_prompt_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Final Prompt File"
+    },
+    "final_response_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Final Response File"
+    },
+    "result_file": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Result File"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    }
+  },
+  "required": [
+    "request_id",
+    "state",
+    "route_kind",
+    "route_name",
+    "skill",
+    "mode",
+    "objective",
+    "created_at",
+    "updated_at"
+  ],
+  "title": "RequestStatus",
+  "type": "object"
+}

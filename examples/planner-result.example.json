@@ -1,0 +1,34 @@
+{
+  "intent": ["review"],
+  "domains": ["network", "embedded-linux", "yocto"],
+  "tags": ["qos", "cgroup-v2", "tc", "nftables", "bandwidth-saturation"],
+  "research_goal": "Determine what evidence is needed to assess whether the QoS design preserves mission traffic under the actual bottleneck.",
+  "research_questions": [
+    {"id": "RQ1", "question": "How is traffic classified and at which hook?", "rationale": "Priority is impossible if classification does not cover the real packets.", "priority": "P0"}
+  ],
+  "local_context_requirements": [
+    {"id": "LC1", "description": "QoS implementation or captured policy evidence", "patterns": ["examples/context/qos-policy.txt"], "exact_paths": [], "search_terms": ["tc ", "nft ", "cgroup"], "priority": "P0", "required": true}
+  ],
+  "online_research": [
+    {"id": "WEB1", "objective": "Verify current Linux cgroup/socket classification semantics.", "queries": ["Linux kernel cgroup v2 network classification nftables socket cgroup"], "source_priority": ["Linux kernel documentation", "nftables documentation", "upstream source"], "freshness": "version-specific", "expected_evidence": ["documented matching semantics", "implementation details when docs are ambiguous"]}
+  ],
+  "source_map": [],
+  "evidence_requirements": [
+    {"id": "EV1", "claim_area": "QoS enforcement", "required_evidence": ["classification counters", "qdisc counters", "impairment measurements"], "acceptance_rule": "Configuration alone is insufficient; runtime traffic must exercise the intended class under saturation."}
+  ],
+  "tool_plan": [
+    {"capability": "repo.read", "purpose": "Read QoS config and service definitions", "required": true},
+    {"capability": "web.search", "purpose": "Verify current kernel/tool behavior", "required": true}
+  ],
+  "freshness": "version-specific",
+  "missing_evidence": ["exact target kernel and nftables/iproute2 versions"],
+  "report_contract": {
+    "sections": ["executive-summary", "findings", "recommendation", "unknowns", "validation-plan"],
+    "require_citations": true,
+    "require_evidence_mapping": true,
+    "require_unknowns": true,
+    "require_validation_plan": true,
+    "style": "concise, technical, evidence-first"
+  },
+  "research_budget": {"max_search_queries": 8, "max_open_pages": 10, "max_context_bytes": 200000}
+}
