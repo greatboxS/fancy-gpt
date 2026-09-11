@@ -6,6 +6,7 @@ WITH_PLAYWRIGHT=0
 WITH_BROWSER_DEPS=0
 SKIP_VERIFY=0
 PRESET=""
+PRESET_BROWSER="edge"
 
 usage() {
   cat <<'EOF'
@@ -18,7 +19,10 @@ Options:
   --with-playwright     Also install Playwright Chromium as a local fallback tunnel.
   --with-browser-deps   Install Playwright Linux system dependencies too (implies --with-playwright).
   --skip-verify         Skip post-install offline self-test.
-  --preset remote-edge Install the Edge/SSH deployment bundle and register Codex MCP.
+  --preset remote-extension
+                        Install a portable browser/SSH bundle and register Codex MCP.
+  --preset remote-edge Backward-compatible alias for --preset remote-extension --browser edge.
+  --browser NAME        Browser for remote-extension: chrome, edge, or firefox (default: edge).
   -h, --help            Show this help.
 EOF
 }
@@ -30,8 +34,16 @@ while (($#)); do
     --skip-verify) SKIP_VERIFY=1 ;;
     --preset)
       shift
-      [[ "${1:-}" == "remote-edge" ]] || { echo "Supported preset: remote-edge" >&2; exit 2; }
-      PRESET="$1"
+      case "${1:-}" in
+        remote-extension) PRESET="remote-extension" ;;
+        remote-edge) PRESET="remote-extension"; PRESET_BROWSER="edge" ;;
+        *) echo "Supported presets: remote-extension, remote-edge" >&2; exit 2 ;;
+      esac
+      ;;
+    --browser)
+      shift
+      PRESET_BROWSER="${1:-}"
+      [[ "$PRESET_BROWSER" =~ ^(chrome|edge|firefox)$ ]] || { echo "--browser must be chrome, edge, or firefox" >&2; exit 2; }
       ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -84,18 +96,19 @@ fi
 
 TOKEN_INFO="$($FG bridge init)"
 
-if [[ "$PRESET" == "remote-edge" ]]; then
-  BUNDLE_DIR="${FANCY_GPT_EDGE_BUNDLE_DIR:-${HOME}/.local/share/fancy-gpt/remote-edge}"
-  "$FG" extension export edge "$BUNDLE_DIR/extension" >/dev/null
-  python3 - "$TOKEN_INFO" "$BUNDLE_DIR/PAIRING.txt" <<'PY'
+if [[ "$PRESET" == "remote-extension" ]]; then
+  BUNDLE_DIR="${FANCY_GPT_EXTENSION_BUNDLE_DIR:-${FANCY_GPT_EDGE_BUNDLE_DIR:-${HOME}/.local/share/fancy-gpt/remote-${PRESET_BROWSER}}}"
+  "$FG" extension export "$PRESET_BROWSER" "$BUNDLE_DIR/extension" >/dev/null
+  python3 - "$TOKEN_INFO" "$BUNDLE_DIR/PAIRING.txt" "$PRESET_BROWSER" <<'PY'
 import json, os, pathlib, sys
 info = json.loads(sys.argv[1])
 target = pathlib.Path(sys.argv[2])
+browser = sys.argv[3]
 target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text(
     "Endpoint: ws://127.0.0.1:8765\n"
-    "Tunnel ID: edge-extension-ws-remote\n"
-    "Browser: edge\n"
+    f"Tunnel ID: {browser}-extension-ws-remote\n"
+    f"Browser: {browser}\n"
     f"Pair token: {info['pair_token']}\n",
     encoding="utf-8",
 )
@@ -126,9 +139,9 @@ echo "Next: $FG extension export chrome ~/.local/share/fancy-gpt/extension-chrom
 echo "      $FG bridge serve"
 echo "For remote VS Code/SSH development, forward remote port 8765 to local 127.0.0.1:8765."
 echo "Run '$FG tunnels list' to inspect all runtime-selectable tunnel compositions."
-if [[ "$PRESET" == "remote-edge" ]]; then
+if [[ "$PRESET" == "remote-extension" ]]; then
   echo
-  echo "Remote Edge preset ready."
+  echo "Remote $PRESET_BROWSER extension preset ready (Windows/Linux browser workstation)."
   echo "Private bundle: $BUNDLE_DIR"
   echo "Pairing details: $BUNDLE_DIR/PAIRING.txt (mode 0600; do not commit/share)"
   echo "Codex MCP: $MCP_STATUS"

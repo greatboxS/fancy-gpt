@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from fancy_gpt.cli import app
@@ -131,7 +132,8 @@ exit 0
     assert "--with playwright>=1.55,<2" in log.read_text(encoding="utf-8")
 
 
-def test_remote_edge_preset_creates_private_bundle_and_registers_codex(tmp_path: Path) -> None:
+@pytest.mark.parametrize("browser", ["chrome", "edge", "firefox"])
+def test_remote_extension_preset_creates_private_bundle_and_registers_codex(tmp_path: Path, browser: str) -> None:
     import os
     import subprocess
 
@@ -167,9 +169,10 @@ fi
         "FANCY_GPT_EDGE_BUNDLE_DIR": str(bundle), "FAKE_BIN": str(fake_bin),
         "FAKE_LOG": str(log), "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
-    result = subprocess.run(["bash", "install.sh", "--preset", "remote-edge", "--skip-verify"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
+    result = subprocess.run(["bash", "install.sh", "--preset", "remote-extension", "--browser", browser, "--skip-verify"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
     assert "preset-secret" not in result.stdout
     assert "preset-secret" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
+    assert f"{browser}-extension-ws-remote" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
     assert (bundle / "PAIRING.txt").stat().st_mode & 0o777 == 0o600
     assert (bundle / "extension" / "manifest.json").is_file()
     assert "mcp add fancy-gpt" in log.read_text(encoding="utf-8")

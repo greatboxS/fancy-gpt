@@ -1,16 +1,17 @@
 # fancy-gpt 0.7.0 Quick Start
 
-## Fastest path: Windows Edge + remote Ubuntu
+## Fastest path: browser workstation + remote Ubuntu/Linux
 
 Run once on Ubuntu:
 
 ```bash
-./install.sh --preset remote-edge
+./install.sh --preset remote-extension --browser edge
 ```
 
-The preset installs the CLI and MCP server, registers `fancy-gpt` with Codex
-when the Codex CLI is available, and creates a private load-unpacked Edge bundle
-under `~/.local/share/fancy-gpt/remote-edge`. Endpoint, exact tunnel ID, and pair
+Replace `edge` with `chrome` or `firefox`. The browser workstation may run
+Windows or Linux. The preset installs the CLI and MCP server, registers
+`fancy-gpt` with Codex when available, and creates a private load-unpacked bundle
+under `~/.local/share/fancy-gpt/remote-<browser>`. Endpoint, exact tunnel ID, and pair
 token are kept in `PAIRING.txt` with mode `0600`; do not commit or publish it.
 
 Then start the loopback-only bridge:
@@ -19,9 +20,10 @@ Then start the loopback-only bridge:
 fancy-gpt bridge serve
 ```
 
-Copy only the generated `extension` directory to Windows, establish SSH
-LocalForward port 8765, and load it from `edge://extensions`. Restart Codex after
-the first MCP registration.
+Copy only the generated `extension` directory to the browser workstation,
+establish SSH LocalForward port 8765, and use the browser's Load unpacked flow.
+Restart Codex after the first MCP registration. See
+[`docs/TUNNEL_SETUP.md`](docs/TUNNEL_SETUP.md) for every built-in tunnel.
 
 ## 1. Install once on the host that runs FancyGPT
 
