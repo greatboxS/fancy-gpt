@@ -26,17 +26,31 @@ from .self_test import run_self_test
 from . import __version__
 
 
-def _table(headers: list[str], rows: list[list[str]]) -> str:
+def _truncate(text: str, width: int) -> str:
+    return text if len(text) <= width else text[: max(0, width - 1)] + "…"
+
+
+def _yn(value: bool | None) -> str:
+    return "-" if value is None else ("yes" if value else "no")
+
+
+def _table(headers: list[str], rows: list[list[str]], max_widths: list[int | None] | None = None) -> str:
     if not rows:
         return "(none)"
+    caps = max_widths or [None] * len(headers)
+    capped = [
+        [cell if caps[i] is None else _truncate(cell, caps[i]) for i, cell in enumerate(row)]
+        for row in rows
+    ]
     widths = [len(h) for h in headers]
-    for row in rows:
+    for row in capped:
         for i, cell in enumerate(row):
             widths[i] = max(widths[i], len(cell))
+    last = len(headers) - 1
     def fmt(row: list[str]) -> str:
-        return "  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row))
+        return "  ".join(cell if i == last else cell.ljust(widths[i]) for i, cell in enumerate(row))
     lines = [fmt(headers), "  ".join("-" * w for w in widths)]
-    lines.extend(fmt(row) for row in rows)
+    lines.extend(fmt(row) for row in capped)
     return "\n".join(lines)
 
 
@@ -418,12 +432,12 @@ def tunnels_components(json_output: Annotated[bool, typer.Option("--json")] = Fa
     typer.echo("SITES")
     typer.echo(_table(["ID", "HOSTS"], [[s["id"], ", ".join(s.get("hosts", []))] for s in payload["sites"]]))
     typer.echo("\nRUNTIMES")
-    typer.echo(_table(["ID", "AUTOMATIC", "REQUIRES_EXTENSION"], [
-        [r["id"], str(r.get("automatic", "")), str(r.get("requires_extension", ""))] for r in payload["runtimes"]
+    typer.echo(_table(["ID", "AUTO", "EXT"], [
+        [r["id"], _yn(r.get("automatic")), _yn(r.get("requires_extension"))] for r in payload["runtimes"]
     ]))
     typer.echo("\nTRANSPORTS")
-    typer.echo(_table(["ID", "REMOTE_CAPABLE", "REQUIRES_BRIDGE"], [
-        [t["id"], str(t.get("remote_capable", "")), str(t.get("requires_bridge", ""))] for t in payload["transports"]
+    typer.echo(_table(["ID", "REMOTE", "BRIDGE"], [
+        [t["id"], _yn(t.get("remote_capable")), _yn(t.get("requires_bridge"))] for t in payload["transports"]
     ]))
 
 
@@ -447,9 +461,11 @@ def tunnels_explain(
     typer.echo(f"{spec.id}  ({spec.runtime.value}/{spec.transport.value}, browser={spec.browser})")
     typer.echo(spec.description)
     typer.echo("")
-    typer.echo(_table(["LAYER", "COMPONENT", "STATE", "DETAIL"], [
-        [item.layer.value, item.component, item.state, item.detail] for item in layers
-    ]))
+    typer.echo(_table(
+        ["LAYER", "COMPONENT", "STATE", "DETAIL"],
+        [[item.layer.value, item.component, item.state, item.detail] for item in layers],
+        max_widths=[None, None, None, 50],
+    ))
     typer.echo("")
     typer.echo(f"health: {health.state.value} — {health.detail}")
     if health.latency_ms is not None:
@@ -465,9 +481,10 @@ def tunnels_list(json_output: Annotated[bool, typer.Option("--json")] = False) -
     if json_output:
         typer.echo(json.dumps([item.model_dump(mode="json") for item in specs], indent=2))
         return
-    typer.echo(_table(["ID", "RUNTIME", "TRANSPORT", "BROWSER", "AUTOMATIC", "ENABLED"], [
-        [s.id, s.runtime.value, s.transport.value, s.browser, str(s.capabilities.automatic), str(s.enabled)]
+    typer.echo(_table(["ID", "RUNTIME", "TRANSPORT", "BROWSER", "AUTO"], [
+        [s.id, s.runtime.value, s.transport.value, s.browser, _yn(s.capabilities.automatic)]
         for s in specs
+        if s.enabled
     ]))
 
 
@@ -478,17 +495,21 @@ def tunnels_health(json_output: Annotated[bool, typer.Option("--json")] = False)
     if json_output:
         typer.echo(json.dumps([item.model_dump(mode="json") for item in healths], indent=2))
         return
-    typer.echo(_table(["ID", "STATE", "BROWSER_CONNECTED", "LATENCY_MS", "BRIDGE", "DETAIL"], [
+    typer.echo(_table(
+        ["ID", "STATE", "CONN", "MS", "DETAIL"],
         [
-            h.tunnel_id,
-            h.state.value,
-            "-" if h.browser_connected is None else str(h.browser_connected),
-            "-" if h.latency_ms is None else f"{h.latency_ms:.1f}",
-            _bridge_summary(h.metadata),
-            h.detail,
-        ]
-        for h in healths
-    ]))
+            [
+                h.tunnel_id,
+                h.state.value,
+                _yn(h.browser_connected),
+                "-" if h.latency_ms is None else f"{h.latency_ms:.0f}",
+                h.detail,
+            ]
+            for h in healths
+        ],
+        max_widths=[None, None, None, None, 40],
+    ))
+    typer.echo("\n(run 'tunnels explain <id>' for layer/bridge detail)")
 
 
 @tunnels_app.command("select")
