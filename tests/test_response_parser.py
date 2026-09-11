@@ -30,3 +30,13 @@ def test_rejects_non_object_json():
 def test_rejects_prose_wrapped_json():
     with pytest.raises(ValueError, match="valid JSON value"):
         parse_json_object('Sure, here is the result:\n{"a": 1}')
+
+
+def test_tolerates_literal_newline_inside_string_value():
+    # Reproduces a real fancy-gpt failure: ChatGPT's DOM line-wraps a long
+    # URL, and innerText captures that as a literal newline inside the JSON
+    # string value instead of an escaped \n, which strict json.loads rejects
+    # as an invalid control character even though the document is otherwise
+    # well-formed and complete.
+    raw = '{"url": "https://example.com/very/long/path/that/wrapped\n"}'
+    assert parse_json_object(raw) == {"url": "https://example.com/very/long/path/that/wrapped\n"}
