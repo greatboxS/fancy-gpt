@@ -8,9 +8,9 @@
     assistant: ['[data-message-author-role="assistant"]', '[data-testid="conversation-turn-assistant"]']
   };
 
-  function firstVisible(selectors) {
+  function firstVisible(selectors, root = document) {
     for (const selector of selectors) {
-      const values = [...document.querySelectorAll(selector)].filter(el => {
+      const values = [...root.querySelectorAll(selector)].filter(el => {
         const rect = el.getBoundingClientRect();
         const style = getComputedStyle(el);
         return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
@@ -18,6 +18,32 @@
       if (values.length === 1) return values[0];
     }
     return null;
+  }
+
+  // The send control must be the composer's own. Searching the whole document
+  // also finds unrelated buttons whose label merely contains "Send", and the
+  // uniqueness rule then rejects every candidate -- reporting "not found" for
+  // what is really "found too many".
+  function composerRoot(composer) {
+    return composer?.closest("form") ?? composer?.parentElement ?? document;
+  }
+
+  function sendControl(composer) {
+    return firstVisible(SELECTORS.send, composerRoot(composer)) ?? firstVisible(SELECTORS.send);
+  }
+
+  function describeControls(composer) {
+    const counts = {};
+    for (const selector of [...SELECTORS.send, ...SELECTORS.composer]) {
+      counts[selector] = document.querySelectorAll(selector).length;
+    }
+    const text = composer ? (composer.value ?? composer.textContent ?? "") : "";
+    return JSON.stringify({
+      url: location.pathname,
+      composerFound: Boolean(composer),
+      composerChars: text.length,
+      matches: counts,
+    });
   }
 
   async function waitFor(getter, timeoutMs, message) {
@@ -124,15 +150,19 @@
     // a single write is silently dropped and the send button never appears. Keep
     // re-writing until the app acknowledges by revealing the send control.
     let send = null;
+    let target = composer;
     for (let attempt = 0; attempt < 6 && !send; ++attempt) {
-      setComposer(firstVisible(SELECTORS.composer) || composer, prompt);
+      target = firstVisible(SELECTORS.composer) || composer;
+      setComposer(target, prompt);
       try {
-        send = await waitFor(() => firstVisible(SELECTORS.send), 2500, "send control not ready yet");
+        send = await waitFor(() => sendControl(target), 2500, "send control not ready yet");
       } catch (_) {
         await new Promise(resolve => setTimeout(resolve, 600));
       }
     }
-    if (!send) throw new Error("unique ChatGPT send button not found");
+    if (!send) {
+      throw new Error("ChatGPT send control unavailable: " + describeControls(target));
+    }
     send.click();
 
     const deadline = Date.now() + timeoutMs;
