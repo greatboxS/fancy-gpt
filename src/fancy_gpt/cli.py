@@ -17,6 +17,7 @@ from .models import ChatPolicy, FinalReport, InspectedChat, LocalContextRequirem
 from .focused import FocusedAnswerEngine, FocusedQuestion
 from .orchestrator import TeamOrchestrator
 from .project_models import AcceptanceCriterion, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus, WorkExecutionMode
+from .conversation_index import ConversationIndex
 from .project_service import ProjectService
 from .project_store import load_verification_checks, save_verification_checks
 from .project_runner import ProjectRunner
@@ -138,6 +139,7 @@ skills_app = typer.Typer(help="Validate/export Agent Skill bundles")
 tunnels_app = typer.Typer(help="Inspect, probe, and select browser tunnels")
 bridge_app = typer.Typer(help="Run/pair the browser bridge used by extension tunnels")
 extension_app = typer.Typer(help="Export/configure Chrome, Edge, and Firefox tunnel extensions")
+conversations_app = typer.Typer(help="Inspect the ChatGPT threads this runtime opened")
 sessions_app = typer.Typer(help="Manage persistent FancyGPT work sessions")
 chats_app = typer.Typer(help="Manage chats inside a FancyGPT session")
 project_app = typer.Typer(help="Persistent engineering projects, sessions, work items, and evidence")
@@ -150,6 +152,7 @@ app.add_typer(skills_app, name="skills")
 app.add_typer(tunnels_app, name="tunnels")
 app.add_typer(bridge_app, name="bridge")
 app.add_typer(extension_app, name="extension")
+app.add_typer(conversations_app, name="conversations")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(chats_app, name="chats")
 app.add_typer(project_app, name="project")
@@ -996,6 +999,38 @@ def project_context_requirements(
         project_id, work_item_id, _context_requirement(pattern, path, search, required_context)
     )
     typer.echo(item.model_dump_json(indent=2))
+
+
+@conversations_app.command("list")
+def conversations_list(
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    """List every ChatGPT thread this runtime opened, with a link to each.
+
+    This is built from local records only. FancyGPT holds no ChatGPT account
+    credentials and calls no private endpoint, so it can account for the threads
+    it opened itself but cannot enumerate -- or delete -- everything in your
+    ChatGPT history. Use the links to open one and manage it there.
+    """
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    items = ConversationIndex(root).all()
+    if json_output:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in items], indent=2))
+        return
+    if not items:
+        typer.echo("No ChatGPT thread has been opened from this workdir yet.")
+        typer.echo("Threads appear here once a turn runs with a persistent conversation;")
+        typer.echo("a temporary chat is never saved and so is never listed.")
+        return
+    typer.echo(_table(
+        ["ORIGIN", "OWNER", "LABEL", "THREAD", "TURNS", "URL"],
+        [
+            [item.origin, item.owner, item.label, item.thread_key or "-", str(item.turns), item.url]
+            for item in items
+        ],
+        max_widths=[None, None, 14, 10, None, None],
+    ))
 
 
 @project_app.command("checks")

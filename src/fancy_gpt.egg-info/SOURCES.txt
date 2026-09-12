@@ -6,6 +6,7 @@ src/fancy_gpt/capabilities.py
 src/fancy_gpt/catalog.py
 src/fancy_gpt/cli.py
 src/fancy_gpt/context_builder.py
+src/fancy_gpt/conversation_index.py
 src/fancy_gpt/conversations.py
 src/fancy_gpt/engine.py
 src/fancy_gpt/errors.py
