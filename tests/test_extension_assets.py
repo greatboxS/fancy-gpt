@@ -165,3 +165,9 @@ def test_composer_writes_through_the_editor_input_path(tmp_path: Path) -> None:
     fallback = kit.index("composer.textContent = prompt")
     assert insert < fallback, "the direct write must only be a fallback"
     assert "selectAll(composer)" in kit, "a retry must replace the text, not append to it"
+
+
+def test_automation_uses_a_separate_minimized_window_by_default(tmp_path: Path) -> None:
+    background = (export_extension("edge", tmp_path / "edge-background") / "background.js").read_text(encoding="utf-8")
+    assert "separateTaskWindow: true" in background
+    assert 'ext.windows.create({url, focused: false, state: "minimized"})' in background

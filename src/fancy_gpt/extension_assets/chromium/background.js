@@ -14,7 +14,7 @@ const DEFAULTS = {
   reconnectIntervalMs: 2000,
   // Run task tabs in their own minimized window instead of the window you are
   // working in, so automation never appears in your tab strip.
-  separateTaskWindow: false
+  separateTaskWindow: true
 };
 
 let taskWindowId = null;
