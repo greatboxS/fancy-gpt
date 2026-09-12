@@ -78,7 +78,8 @@ def test_sessions_inspect_cli_human_output_is_not_raw_json(tmp_path: Path) -> No
     assert result.exit_code == 0, result.stdout
     assert "Session " in result.stdout
     assert "ContextTooLargeError" in result.stdout
-    assert "reduce required P0 context" in result.stdout
+    # The failure is shown with the action that resolves it, not just the error.
+    assert "Hint: Reduce required P0 context" in result.stdout
     with pytest.raises(json.JSONDecodeError):
         json.loads(result.stdout)
 
