@@ -9,6 +9,15 @@ from websockets.sync.client import ClientConnection, connect
 from fancy_gpt.browser.base import BrowserResponse, BrowserTurn
 
 from .probe import fetch_job_progress
+
+
+class SiteHealthUnsupported(RuntimeError):
+    """The connected browser worker predates the site-health probe.
+
+    Raised instead of a plain error so callers can tell "this worker cannot be
+    asked" apart from "this worker says the site is not ready".
+    """
+
 from .protocol import PROTOCOL_VERSION, dumps, hello, loads
 
 
@@ -86,7 +95,13 @@ class BridgeBrowserDriver:
         if result.get("job_id") != job_id:
             raise RuntimeError("bridge site-health response identity mismatch")
         if result.get("type") == "job_error":
-            raise RuntimeError(str(result.get("error", "site health failed")))
+            error = str(result.get("error", "site health failed"))
+            if "unsupported operation" in error:
+                raise SiteHealthUnsupported(
+                    "the connected browser extension is older than this FancyGPT build; "
+                    "re-export it with 'fancy-gpt extension export' and reload it in the browser"
+                )
+            raise RuntimeError(error)
         if result.get("type") != "job_result":
             raise RuntimeError(f"unexpected site-health response: {result.get('type')}")
         import json

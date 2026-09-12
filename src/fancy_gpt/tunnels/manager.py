@@ -16,6 +16,7 @@ from fancy_gpt.bridge import (
     probe_bridge_stats,
     probe_bridge_workers,
 )
+from fancy_gpt.bridge.client import SiteHealthUnsupported
 from fancy_gpt.providers import ChatGPTWebAutomationProvider
 from fancy_gpt.runtime_paths import user_data_dir
 
@@ -200,6 +201,13 @@ class TunnelManager:
             health.metadata["site_health"] = payload
             health.detail = "browser worker connected and ChatGPT site adapter is ready"
             health.state = TunnelHealthState.HEALTHY
+            return health
+        except SiteHealthUnsupported as exc:
+            # The worker is connected and usable; it is simply too old to be
+            # asked. Report that plainly instead of calling the tunnel broken.
+            health.metadata["site_ready"] = None
+            health.metadata["site_health_error"] = str(exc)
+            health.detail = f"browser worker connected but site readiness is unverifiable: {exc}"
             return health
         except Exception as exc:
             health.state = TunnelHealthState.UNAVAILABLE

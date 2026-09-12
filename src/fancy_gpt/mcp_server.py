@@ -11,7 +11,7 @@ from .engine import ReviewEngine
 from .execution import ExecutionCoordinator, ExecutionStatus, ExecutionStore
 from .focused import FocusedAnswer, FocusedAnswerEngine, FocusedQuestion
 from .orchestrator import TeamOrchestrator
-from .project_models import AcceptanceCriterion, AgentAssignment, AgentOutcome, ConversationStrategy, CriterionStatus, ProjectArtifactRecord, FindingRecord, ProjectEvent, ProjectRecord, ProjectSnapshot, RelevantProjectContext, SessionRecord, TeamCyclePlan, TeamStepResult
+from .project_models import AcceptanceCriterion, AgentAssignment, AgentOutcome, ConversationStrategy, CriterionStatus, ProjectArtifactRecord, FindingRecord, ProjectEvent, ProjectRecord, ProjectSnapshot, RelevantProjectContext, SessionRecord, TeamCyclePlan, TeamStepResult, WorkItem
 from .project_service import ProjectService
 from .project_runner import ProjectRunner
 from .relevance import ResponseIntent
@@ -316,6 +316,12 @@ def bootstrap_project_cycle(project_id: str) -> list[str]:
 @mcp.tool()
 def get_project_status(project_id: str) -> ProjectSnapshot:
     return _project_service().snapshot(project_id)
+
+
+@mcp.tool()
+def retry_project_work_item(project_id: str, work_item_id: str) -> WorkItem:
+    """Return a failed work item to the ready pool after fixing its cause."""
+    return _project_service().retry_work_item(project_id, work_item_id)
 
 
 @mcp.tool()

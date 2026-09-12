@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from typing import Callable
 
+from fancy_gpt.bridge.client import SiteHealthUnsupported
 from fancy_gpt.browser import BrowserDriver, BrowserPromptTooLargeError
 from fancy_gpt.models import AutomatedModelResponse, ModelRequest
 
@@ -34,6 +35,7 @@ class ChatGPTWebAutomationProvider:
         if tunnel_id:
             self.name = f"chatgpt-web-automation:{tunnel_id}"
         self._started = False
+        self.site_health_checked: bool | None = None
 
     def start(self) -> None:
         if not self._started:
@@ -42,7 +44,16 @@ class ChatGPTWebAutomationProvider:
                 self.driver.health_check()
                 site_health = getattr(self.driver, "site_health", None)
                 if callable(site_health):
-                    site_health(timeout_s=min(20.0, self.timeout_s))
+                    try:
+                        site_health(timeout_s=min(20.0, self.timeout_s))
+                    except SiteHealthUnsupported:
+                        # An older extension cannot answer the readiness probe.
+                        # That is exactly the pre-probe behaviour, so continue
+                        # rather than making the whole runtime unusable until
+                        # the browser-side bundle is reloaded.
+                        self.site_health_checked = False
+                    else:
+                        self.site_health_checked = True
             except Exception:
                 self.driver.stop()
                 raise

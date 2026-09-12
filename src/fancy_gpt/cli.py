@@ -912,6 +912,17 @@ def project_status(
     typer.echo(_project_service(workdir).snapshot(project_id).model_dump_json(indent=2))
 
 
+@project_app.command("retry")
+def project_retry(
+    project_id: Annotated[str, typer.Argument()],
+    work_item_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    """Return a failed work item to the ready pool after fixing its cause."""
+    item = _project_service(workdir).retry_work_item(project_id, work_item_id)
+    typer.echo(item.model_dump_json(indent=2))
+
+
 @project_app.command("continue")
 def project_continue(
     project_id: Annotated[str, typer.Argument()],

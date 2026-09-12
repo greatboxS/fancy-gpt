@@ -118,6 +118,29 @@ class ProjectService:
         self.store.append(project_id, ProjectEventType.WORK_ITEM_STATE_CHANGED, updated.model_dump(mode="json"))
         return updated
 
+    def retry_work_item(self, project_id: str, work_item_id: str) -> WorkItem:
+        """Return one failed work item to the ready pool.
+
+        A failed model turn is durable on purpose: nothing is retried silently.
+        But an infrastructure failure (tunnel down, browser not ready) would
+        otherwise strand the whole project, since a FAILED item never becomes
+        ready again and blocks every dependant. Retrying is therefore an
+        explicit operator action, and the journal keeps the failed attempt.
+        """
+        snapshot = self.snapshot(project_id)
+        item = snapshot.work_item(work_item_id)
+        if item.state != WorkItemState.FAILED:
+            raise ValueError(f"work item {work_item_id} is not failed (state {item.state.value})")
+        completed = {
+            entry.work_item_id
+            for entry in snapshot.work_items
+            if entry.state in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED}
+        }
+        state = WorkItemState.READY if set(item.dependencies).issubset(completed) else WorkItemState.BLOCKED
+        return self.set_work_item_state(
+            project_id, work_item_id, state, result_summary=f"retry requested after: {item.result_summary or 'failure'}"
+        )
+
     def start_session(
         self,
         project_id: str,
