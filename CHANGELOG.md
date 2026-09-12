@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0
+
+- Reframed FancyGPT as a persistent engineering-team runtime; independent review remains a capability rather than the product boundary.
+- Added durable Project/Target/AcceptanceCriterion/WorkItem/Session/Decision/Evidence/Finding/Artifact models backed by an append-only event journal.
+- Added semantic Relevance/Sufficiency and Scope contracts across planner, final, focused-answer, and teammate execution; scope expansion requires material justification instead of fixed word limits.
+- Added one-pass `ask` path for narrow technical questions.
+- Added TeamOrchestrator, ProjectRunner, structured external-agent assignments/outcomes, and evidence-gated project completion.
+- Added ChatGPT conversation `fresh` / `resume` / `fork` strategies with persistent conversation URL bindings.
+- Added ExecutionCoordinator and structured execution phase/error records before tunnel selection.
+- Added deep tunnel `inspect` site-readiness diagnostics and hardened bridge worker heartbeat, exact tunnel registration, timeout bounds, reconnect generation, and Native Messaging Windows framing.
+- Added outbound secret/DLP filtering and bounded context acquisition/git execution.
+- Added CLI/MCP project/team/session/evidence/finding/artifact/focused-answer surfaces.
+- Added Codex + Claude Code MCP client adapters and installer auto-registration.
+- Moved Playwright to optional `automation` dependencies.
+
 ## 0.7.0
 
 - Introduced runtime-selectable **Tunnel** abstraction: Site + Runtime + Transport + Browser + Scope + Endpoint + Policy.

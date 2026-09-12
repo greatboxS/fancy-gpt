@@ -1,6 +1,8 @@
-# fancy-gpt 0.7.0
+# fancy-gpt 0.8.0
 
-Install-once independent technical reasoning toolkit with MCP, an online pre-request planner, and **runtime-selectable browser tunnels** for ChatGPT Web/Plus without an OpenAI API key.
+FancyGPT is a **persistent engineering-team runtime** that coordinates focused technical reasoning, independent review, long-lived project state, AI teammates, MCP clients, and runtime-selectable ChatGPT Web tunnels without requiring an OpenAI API key.
+
+Independent review remains a core capability; it is no longer the identity of the whole product.
 
 ## Install once
 
@@ -8,40 +10,104 @@ Install-once independent technical reasoning toolkit with MCP, an online pre-req
 ./install.sh
 ```
 
-The default install is lightweight: it installs the CLI/MCP/bridge and extension assets, but does **not** download a private Chromium runtime. Playwright remains an optional fallback:
+The default install is lightweight and does **not** download a private Chromium runtime. Playwright remains an explicit fallback:
 
 ```bash
 ./install.sh --with-playwright
 ```
 
-After installation:
+The installer detects Codex and Claude Code and attempts idempotent user-level MCP registration. Disable this with:
 
 ```bash
+./install.sh --no-mcp-register
+```
+
+Verify:
+
+```bash
+fancy-gpt version
 fancy-gpt test
 fancy-gpt doctor
 fancy-gpt tunnels list
-fancy-gpt tunnels components
+fancy-gpt clients list
 ```
 
-## Core reasoning model
+## Product model
 
-FancyGPT deliberately keeps reasoning and browser connectivity orthogonal:
+```text
+Project / Mission
+      ↓
+Target + Acceptance Criteria
+      ↓
+Team Orchestrator
+      ↓
+Work Items + Agent Roles
+      ↓
+Persistent Sessions
+      ↓
+Reduced Project Context
+      ↓
+Reasoning / Focused / Team Engines
+      ↓
+ExecutionCoordinator
+      ↓
+Model Provider
+      ↓
+Runtime-selected Tunnel
+      ↓
+ChatGPT Web / browser runtime
+```
 
-- **6 Skills** = reasoning primitives.
-- **4 Workflows** = orchestration profiles composed from skills.
-- **13 Domains** = technical source/evidence policy.
-- **Focus** = request-specific technical lens.
-- **Tunnel** = runtime-selected online connection composition.
+The current team roles are `planner`, `researcher`, `designer`, `implementer`, `reviewer`, and `verifier`. Roles are independent from model/tunnel choice.
 
-Skills:
+## Semantic relevance instead of hard verbosity limits
 
-`technical-review`, `independent-design`, `technical-consult`, `root-cause-investigation`, `evidence-verification`, `technical-writing`.
+FancyGPT carries a semantic `RelevanceSufficiencyPolicy` across sessions:
 
-Workflows:
+> Expand only when expansion changes correctness, decision quality, material risk, confidence, a blocking unknown, or the next required action. Otherwise preserve the caller's scope.
 
-`deep-design-review`, `change-impact-assessment`, `production-readiness`, `conformance-audit`.
+Completeness means **sufficient for the current intent**, not exhaustive coverage of the surrounding topic. This policy is compiled into planner, final, focused-answer, and engineering-teammate requests and validated through structured relevance assessments.
 
-## Two-pass online reasoning
+For a narrow question use the focused one-pass path:
+
+```bash
+fancy-gpt ask "Does this pin need software control?" --intent focused
+```
+
+## Persistent engineering projects
+
+```bash
+fancy-gpt project init datalink-qos \
+  --target "Deliver production-ready QoS for C2, telemetry, and media" \
+  --acceptance "C2 remains responsive under media saturation" \
+  --acceptance "Runtime evidence is recorded"
+
+fancy-gpt project bootstrap datalink-qos
+fancy-gpt project status datalink-qos
+fancy-gpt project continue datalink-qos
+fancy-gpt project run-next datalink-qos --tunnel edge-extension-ws-remote
+```
+
+Project state is append-only and persists targets, work items, sessions, decisions, evidence, findings, artifacts, and next actions. Model prompts receive a reduced relevant projection instead of raw historical chats.
+
+Local mutation is not simulated: implementer work can be handed to Codex/Claude as an `external-agent` assignment and returned through a structured outcome contract.
+
+See `docs/TEAM_RUNTIME.md`.
+
+## Core reasoning capabilities
+
+FancyGPT still exposes the existing two-pass reasoning stack:
+
+- **6 Skills** — reasoning primitives.
+- **4 Workflows** — orchestration profiles.
+- **13 Domains** — technical source/evidence policy.
+- **Focus** — request-specific technical lens.
+
+Skills: `technical-review`, `independent-design`, `technical-consult`, `root-cause-investigation`, `evidence-verification`, `technical-writing`.
+
+Workflows: `deep-design-review`, `change-impact-assessment`, `production-readiness`, `conformance-audit`.
+
+## Two-pass independent reasoning
 
 ```text
 Request
@@ -49,140 +115,72 @@ Request
 Online Pre-Request Planner
   ↓ ResearchManifest
 Local ContextBuilder
+  ↓ Secret/DLP filter + bounded acquisition
   ↓ ContextPack
 Final online model
   ↓ structured FinalReport
-Evidence/research validation
+Semantic relevance + evidence validation
 ```
 
-The planner researches **what must be investigated, which online/local tools are needed, which sources should be preferred, and what evidence the final answer must contain**. It is explicitly forbidden from deciding the final technical answer.
+Independent-design candidate metadata/content is removed before online planning/final prompts. Outbound context rejects intrinsically secret-bearing files and redacts high-confidence credential patterns.
 
 ## Tunnel architecture
 
-A tunnel is a validated composition:
+A tunnel remains a runtime-selected composition:
 
 ```text
 Tunnel = Site + Runtime + Transport + Browser + Scope + Endpoint + Policy
 ```
 
-Layers are independent and contract-tested:
+Built-in families include Chrome/Edge/Firefox extension tunnels (Native Messaging local or WebSocket/SSH remote), Chrome CDP, Playwright Chromium/Firefox fallback, and interactive mode.
 
-```text
-Reasoning Core
-    ↓
-Web Model Provider
-    ↓
-Site Adapter        (ChatGPT semantics only)
-    ↓
-Browser Runtime     (extension / Playwright / CDP / interactive)
-    ↓
-Transport           (Native Messaging / WebSocket+SSH / local process / CDP / human)
-    ↓
-Tunnel Composition  (runtime-selectable tuple + health + priority)
-    ↓
-CLI / MCP
-```
-
-Built-in tunnel families:
-
-- Chrome / Edge / Firefox extension + Native Messaging (local).
-- Chrome / Edge / Firefox extension + WebSocket, normally carried through SSH (remote).
-- Chrome CDP (advanced local attach).
-- Playwright Chromium / Firefox (fallback local runtime).
-- Interactive/manual fallback.
-
-Inspect them:
+Useful diagnostics:
 
 ```bash
 fancy-gpt tunnels list
 fancy-gpt tunnels components
-fancy-gpt tunnels explain chrome-extension-ws-remote
+fancy-gpt tunnels inspect edge-extension-ws-remote
 fancy-gpt tunnels health
 fancy-gpt tunnels select --policy prefer-remote
 ```
 
-Choose one at runtime:
+`inspect` performs deeper site readiness diagnostics for extension tunnels. Transport connectivity and ChatGPT site readiness are intentionally distinct states.
 
-```bash
-fancy-gpt run request.yaml --tunnel firefox-extension-ws-remote
-```
-
-or encode it in the request:
-
-```yaml
-tunnel: chrome-extension-ws-remote
-```
-
-Policy selection is also available:
-
-```yaml
-tunnel_policy: prefer-extension
-```
-
-Custom tunnel catalogs can be added explicitly with `FANCY_GPT_TUNNELS_FILE`.
-
-## Recommended remote development topology
-
-For a local Windows/macOS/Linux workstation running Chrome/Edge/Firefox and a remote VS Code/SSH host containing the code/repo:
+## Recommended Windows Edge + Ubuntu VM/remote topology
 
 ```text
-LOCAL WORKSTATION                         REMOTE HOST
-Browser + FancyGPT extension              FancyGPT bridge + MCP + repo
-       │ ws://127.0.0.1:8765                  ▲
-       └──────── SSH LocalForward ────────────┘
+WINDOWS HOST                                UBUNTU VM / REMOTE HOST
+Edge + FancyGPT extension                   FancyGPT bridge + MCP + repo
+       │ ws://127.0.0.1:8765                       ▲
+       └──────────── SSH LocalForward ─────────────┘
 ```
 
-On the remote host:
+Remote host:
 
 ```bash
 fancy-gpt bridge init
 fancy-gpt bridge serve
 ```
 
-On the local workstation, forward local port 8765 to remote 127.0.0.1:8765. Example SSH config:
+Windows/local workstation:
 
-```sshconfig
-Host datalink-build
-    HostName <remote-host>
-    User <user>
-    LocalForward 127.0.0.1:8765 127.0.0.1:8765
+```text
+ssh -L 8765:127.0.0.1:8765 <remote-host>
 ```
 
-Export the extension on a machine with FancyGPT installed, or copy the exported directory to the workstation:
+Export/load the Edge extension, configure `ws://127.0.0.1:8765`, the pair token, and tunnel `edge-extension-ws-remote`.
 
-```bash
-fancy-gpt extension export chrome ./fancy-gpt-extension
-# edge / firefox are also supported
-```
+The bridge binds loopback by default; use SSH forwarding instead of exposing it on LAN/WAN.
 
-Load the unpacked extension, configure the pair token printed by `fancy-gpt bridge init`, keep endpoint `ws://127.0.0.1:8765`, and select the browser-specific `*-extension-ws-remote` tunnel.
+## ChatGPT Web conversation policy
 
-The remote bridge binds loopback by default. This is intentional: use SSH forwarding rather than exposing the bridge on LAN/WAN.
+Persistent project sessions can choose:
 
-## Local Native Messaging mode
+- `fresh` — independent work in a temporary ChatGPT thread;
+- `resume` — resume a saved ChatGPT conversation URL;
+- `fork` — start a new persistent thread with only reduced relevant project state.
 
-For browser and FancyGPT on the same machine:
-
-```bash
-fancy-gpt bridge init
-fancy-gpt bridge serve
-fancy-gpt extension export chrome ./fancy-gpt-extension
-fancy-gpt extension native-config --browser chrome --tunnel chrome-extension-native-local
-fancy-gpt extension native-manifest --browser chrome --extension-id <extension-id>
-```
-
-Chrome/Edge use `allowed_origins`; Firefox uses `allowed_extensions`. Linux/macOS manifest locations and Windows per-user registry registration are implemented by the native-manifest layer.
-
-## Playwright fallback
-
-Optional only:
-
-```bash
-./install.sh --with-playwright
-fancy-gpt run request.yaml --tunnel playwright-chromium-local
-```
-
-This path uses a FancyGPT-owned persistent browser profile. It is not the preferred mode for the local-browser/remote-repo workflow.
+Conversation URLs are session bindings, not project truth. Durable project state remains local in FancyGPT.
 
 ## MCP
 
@@ -190,35 +188,38 @@ This path uses a FancyGPT-owned persistent browser profile. It is not the prefer
 fancy-gpt mcp
 ```
 
-MCP exposes reasoning tools plus tunnel inspection/selection, including:
+FancyGPT can be registered explicitly:
 
-- `run_request_automatic(..., tunnel_id=..., tunnel_policy=...)`
-- `list_tunnels`
-- `probe_tunnels`
-- `inspect_tunnel`
-- `select_tunnel`
-- `list_tunnel_sites`
-- `list_tunnel_runtimes`
-- `list_tunnel_transports`
-- `inspect_tunnel_layers`
+```bash
+fancy-gpt clients register codex
+fancy-gpt clients register claude-code
+```
 
-Thus the caller can select the online tunnel **per request at runtime** without changing ReviewEngine.
+MCP exposes review/tunnel tools plus project/team operations such as project creation/status/context/history, session assignments/outcomes, evidence/findings/artifacts, focused questions, project stepping, and execution diagnostics.
+
+## Execution diagnostics
+
+Automatic review requests create an execution record **before** tunnel selection, so failures can be localized to tunnel/provider/planner/context/validation phases.
+
+```bash
+fancy-gpt execution recent
+fancy-gpt execution status <execution-id>
+```
 
 ## Security boundaries
 
-- Core/MCP never reads browser cookies, local storage, OAuth/access/session tokens, or private ChatGPT endpoints.
-- Extension transport and ChatGPT DOM logic are separate layers.
-- Bridge binds loopback by default; remote use is intended through SSH forwarding.
-- Pair tokens are stored in a user-private file where supported.
-- Filesystem context is constrained by allowed roots before online planning.
-- Independent-design candidates are removed from planner metadata, ContextPack and final prompt.
-- Local/web evidence is treated as untrusted input, not instructions.
+- Core/MCP never imports browser cookies, OAuth/access tokens, or private ChatGPT endpoints.
+- Bridge binds loopback by default.
+- Browser worker registration uses exact tunnel IDs; stale workers are excluded.
+- Native Messaging enforces browser framing/size constraints and binary stdio on Windows.
+- Filesystem context is confined to allowed roots.
+- Outbound context has an independent secret/DLP policy.
+- Repository scanning and git subprocesses are bounded.
+- Local/web/project content is untrusted evidence, not instructions.
 
-See `SECURITY.md` and `docs/TUNNEL_ARCHITECTURE.md`.
+See `SECURITY.md`, `docs/ARCHITECTURE.md`, `docs/TEAM_RUNTIME.md`, and `docs/TUNNEL_ARCHITECTURE.md`.
 
 ## Offline verification
-
-No browser/account/network required:
 
 ```bash
 fancy-gpt test
@@ -229,10 +230,10 @@ From source:
 ```bash
 python scripts/build_extension.py --check
 python -m compileall -q src tests scripts
-PYTHONPATH=src pytest -ra
+pytest -q
 PYTHONPATH=src python scripts/functional_review.py
 PYTHONPATH=src python scripts/tunnel_review.py
 PYTHONPATH=src python scripts/release_gate.py
 ```
 
-Live ChatGPT Web UI compatibility remains a local smoke-test item because the site UI can change independently from FancyGPT.
+Live ChatGPT Web UI/account compatibility remains a user-controlled smoke test because the external site can change independently from FancyGPT.

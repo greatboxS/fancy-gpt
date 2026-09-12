@@ -1,81 +1,111 @@
-# fancy-gpt 0.7.0 Quick Start
+# fancy-gpt 0.8.0 Quick Start
 
-## 1. Install once on the host that runs FancyGPT
+## 1. Install
 
 ```bash
 ./install.sh
 ```
 
-No Playwright browser is downloaded by default. To also install the local Playwright fallback:
-
-```bash
-./install.sh --with-playwright
-```
-
-Verify:
+The installer keeps Playwright optional and attempts to register detected Codex/Claude Code MCP clients.
 
 ```bash
 fancy-gpt test
+fancy-gpt clients list
 fancy-gpt tunnels list
 ```
 
-## 2. Recommended: local browser + remote development host
+## 2. Bring up Edge on Windows → FancyGPT in Ubuntu/VM
 
-On the remote host:
+Ubuntu/remote host:
 
 ```bash
 fancy-gpt bridge init
 fancy-gpt bridge serve
 ```
 
-Copy the printed pair token.
+Windows/local host:
 
-On your local machine, forward the remote bridge through SSH:
-
-```bash
+```text
 ssh -L 8765:127.0.0.1:8765 <remote-host>
 ```
 
-or put the equivalent `LocalForward` in the SSH host used by VS Code Remote-SSH.
-
-Export/load the extension for your browser (`chrome`, `edge`, `firefox`), then configure:
+Load the exported Edge extension and configure:
 
 ```text
-Transport: WebSocket / SSH
 Endpoint: ws://127.0.0.1:8765
-Pair token: <token from remote bridge init>
-Tunnel ID: chrome-extension-ws-remote   # adapt browser name
+Pair token: <token from bridge init>
+Tunnel: edge-extension-ws-remote
 ```
 
-Check from remote:
+Verify from Ubuntu:
 
 ```bash
 fancy-gpt tunnels health
-fancy-gpt tunnels select --policy prefer-remote
+fancy-gpt tunnels inspect edge-extension-ws-remote
 ```
 
-## 3. Run from any project
+## 3. Ask a narrow technical question
 
 ```bash
-cd my-project
-fancy-gpt init
-# edit fancy-gpt-request.yaml
-fancy-gpt run fancy-gpt-request.yaml --tunnel chrome-extension-ws-remote
+fancy-gpt ask "Does this ADC input require software control?" --intent focused
 ```
 
-## 4. MCP
+FancyGPT preserves the semantic scope and expands only for material correctness/risk/decision reasons.
+
+## 4. Run the classic independent review path
+
+```bash
+fancy-gpt init
+# edit fancy-gpt-request.yaml
+fancy-gpt run fancy-gpt-request.yaml --tunnel edge-extension-ws-remote
+```
+
+If a run fails:
+
+```bash
+fancy-gpt execution recent
+fancy-gpt execution status <execution-id>
+```
+
+## 5. Create a persistent engineering project
+
+```bash
+fancy-gpt project init demo \
+  --target "Ship a verified feature" \
+  --acceptance "Runtime tests pass"
+
+fancy-gpt project bootstrap demo
+fancy-gpt project status demo
+fancy-gpt project continue demo
+```
+
+Execute the next model-backed step:
+
+```bash
+fancy-gpt project run-next demo --tunnel edge-extension-ws-remote
+```
+
+When an implementer step requires local repository mutation, FancyGPT returns an external-agent assignment instead of pretending the browser model edited files. Codex/Claude can execute that assignment through MCP and return a structured outcome.
+
+## 6. Inspect persistent state
+
+```bash
+fancy-gpt project sessions demo
+fancy-gpt project history demo
+fancy-gpt project context demo
+```
+
+The context command shows reduced relevant state, not raw conversation history.
+
+## 7. MCP
 
 ```bash
 fancy-gpt mcp
 ```
 
-The MCP caller may pass `tunnel_id` or `tunnel_policy` on each automatic request.
-
-## 5. Useful tunnel diagnostics
+Manual registration if needed:
 
 ```bash
-fancy-gpt tunnels components
-fancy-gpt tunnels list
-fancy-gpt tunnels explain chrome-extension-ws-remote
-fancy-gpt tunnels health
+fancy-gpt clients register codex
+fancy-gpt clients register claude-code
 ```
