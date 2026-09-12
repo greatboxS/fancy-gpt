@@ -46,6 +46,40 @@ def probe_bridge_stats(endpoint: str, token: str, *, open_timeout_s: float = 1.0
         connection.close()
 
 
+def send_job_cancel(
+    endpoint: str,
+    token: str,
+    tunnel_id: str,
+    job_id: str,
+    *,
+    generation_epoch: int = 0,
+    reason: str = "cancelled",
+    open_timeout_s: float = 2.0,
+) -> bool:
+    """Ask the browser to stop generating `job_id`.
+
+    Uses its own short-lived connection so it can be sent while the controller
+    that owns the turn is still blocked waiting for that turn's reply.
+    Returns True when the bridge accepted and forwarded it to a worker.
+    """
+    with connect(endpoint, open_timeout=open_timeout_s, max_size=1 << 20) as connection:
+        connection.send(dumps(hello(role="controller", token=token)))
+        ack = loads(connection.recv(timeout=open_timeout_s))
+        if ack.get("type") != "hello_ack":
+            raise RuntimeError(f"bridge refused cancel controller: {ack}")
+        connection.send(dumps({
+            "type": "cancel",
+            "tunnel_id": tunnel_id,
+            "job_id": job_id,
+            "generation_epoch": generation_epoch,
+            "reason": reason,
+        }))
+        result = loads(connection.recv(timeout=open_timeout_s))
+        if result.get("type") != "cancel_result":
+            raise RuntimeError(f"unexpected bridge cancel response: {result}")
+        return bool(result.get("accepted"))
+
+
 def fetch_job_progress(endpoint: str, token: str, job_id: str, *, open_timeout_s: float = 1.0) -> dict | None:
     """Return the latest in-flight text for `job_id`, or None if no progress recorded yet.
 

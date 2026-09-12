@@ -109,6 +109,25 @@ function taskUrlFor(site, conversation) {
   return mode === "persistent" ? policy.persistent : policy.fresh;
 }
 
+/* Which tab is serving which job, so a cancel can find it.
+ * The generation epoch lets a cancel for a previous occupant of a recycled tab
+ * be discarded instead of stopping the turn currently using it. */
+const activeJobs = new Map();
+
+async function cancelJob(message) {
+  const jobId = String(message.job_id ?? "");
+  const entry = activeJobs.get(jobId);
+  if (!entry) return;
+  const epoch = Number(message.generation_epoch ?? 0);
+  if (Number(entry.epoch ?? 0) !== epoch) return;  // stale: a recycled tab
+  entry.cancelled = true;
+  try {
+    await ext.tabs.sendMessage(entry.tabId, {type: "fancy_cancel_turn", jobId});
+  } catch (_) {
+    // The tab may already be gone; the turn unwinds on its own.
+  }
+}
+
 async function executeJob(job) {
   let tab = null;
   try {
@@ -132,6 +151,7 @@ async function executeJob(job) {
       });
       return;
     }
+    activeJobs.set(job.job_id, {tabId: tab.id, epoch: Number(job.generation_epoch ?? 0), cancelled: false});
     const result = await sendToContentOrTabClose(tab.id, {
       type: "fancy_execute_turn",
       site,
@@ -141,6 +161,19 @@ async function executeJob(job) {
       timeoutMs: Math.max(1000, Math.floor((job.timeout_s ?? 300) * 1000))
     });
     if (!result || !result.ok) throw new Error(result?.error ?? "site content adapter failed");
+    if (result.cancelled) {
+      // Report cancellation distinctly. The controller must be able to tell a
+      // stopped turn from one that answered, and keep whatever partial text
+      // existed rather than treating it as a complete reply.
+      globalThis.FancyGPTTransport.send({
+        type: "job_cancelled",
+        job_id: job.job_id,
+        text: result.text ?? "",
+        stopped_generation: Boolean(result.stoppedGeneration),
+        conversation_id: result.conversationId ?? null
+      });
+      return;
+    }
     globalThis.FancyGPTTransport.send({
       type: "job_result",
       job_id: job.job_id,
@@ -152,12 +185,14 @@ async function executeJob(job) {
   } catch (error) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});
   } finally {
+    activeJobs.delete(job.job_id);
     if (tab?.id != null) try { await ext.tabs.remove(tab.id); } catch (_) {}
   }
 }
 
 globalThis.FancyGPTTransport.setHandler(async message => {
   if (message.type === "job") await executeJob(message);
+  else if (message.type === "cancel") await cancelJob(message);
 });
 
 async function connectBridge() {

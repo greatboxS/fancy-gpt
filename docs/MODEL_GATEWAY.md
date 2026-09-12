@@ -282,15 +282,34 @@ A caller that disconnects cancels its turn *while the browser call is still in
 flight*, via a task that polls `request.is_disconnected()` and trips the
 `CancelToken`. The turn releases its conversation lock at its next checkpoint.
 
-Because the browser call blocks in an uninterruptible read, a cancelled turn is
-**abandoned rather than killed** (`abandon_on_cancel=True`): the gateway stops
-waiting and frees the caller, while the turn itself is recorded as
-`uncertain-submit` rather than pretending the browser work stopped.
+Cancellation reaches the browser. Because the provider call blocks, a watcher
+carries the cancellation out of band: it names the in-flight bridge turn on its
+own short-lived connection, the extension routes it to the tab serving that job,
+and the site adapter clicks the site's **own stop control**. Generation ends, the
+content script finishes, and the blocked call unwinds normally. The controller
+then sees `job_cancelled` with whatever partial text existed - distinct from a
+turn that actually answered.
+
+A cancel carries `(job_id, generation_epoch)`, so a cancel aimed at a previous
+occupant of a recycled tab is discarded rather than stopping the turn currently
+using it. If the driver has no cancel path at all, `provider.cancel()` reports
+`False` rather than pretending it worked.
 
 SSE events are emitted one at a time with a disconnect checkpoint between them.
 Note what this does and does not mean: the browser backend returns a whole
 answer, so these events are protocol *framing*, not token-by-token generation.
 What is genuinely incremental is the transport.
+
+### Concurrency through the bridge
+
+One browser worker serves many turns at once. The worker's lock is held only to
+register a job's reply queue and touch counters, never across the wait. Holding
+it for the whole job made a single worker strictly one-job-at-a-time, and worse:
+a second caller could not even register its queue, so its reply arrived, found no
+destination, and was dropped - after which that caller waited out its full
+timeout for a response that had already come and gone.
+
+Measured on four jobs of 0.3s each: ~1.2s serialized before, ~0.3s after.
 
 ### Backpressure and limits
 

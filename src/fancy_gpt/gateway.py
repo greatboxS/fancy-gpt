@@ -832,7 +832,12 @@ class GatewayService:
                 provider.start()
                 try:
                     self.state.transition(record, TurnState.SUBMITTED, "prompt handed to provider")
-                    raw = provider.execute(request)
+                    # execute() blocks, so cancellation is carried into the
+                    # browser by a watcher that names the in-flight bridge turn
+                    # on its own connection. Stopping generation makes the
+                    # content script finish, which unblocks execute() normally.
+                    with self._cancel_watcher(provider, token):
+                        raw = provider.execute(request)
                     self.state.transition(record, TurnState.OBSERVING, "awaiting provider completion")
                     # Bind the provider conversation while the lock is still
                     # held. If this waited until after release, a queued turn on
@@ -932,6 +937,39 @@ class GatewayService:
             self.state.update_idempotency(key, TurnState.COMPLETED)
         self.metrics.record("completed")
         return result
+
+    @contextmanager
+    def _cancel_watcher(self, provider: Any, token: CancelToken) -> Any:
+        """Forward a cancellation to the browser while the provider call blocks.
+
+        The provider call cannot be interrupted from here, so the browser is
+        told to stop instead. That makes the turn end on its own rather than
+        being abandoned while the tab keeps generating.
+        """
+        cancel = getattr(provider, "cancel", None)
+        if not callable(cancel):
+            yield
+            return
+        done = threading.Event()
+
+        def watch() -> None:
+            while not done.wait(0.25):
+                if not token.cancelled:
+                    continue
+                turn_id = getattr(provider, "active_turn_id", None)
+                if turn_id:
+                    try:
+                        cancel(turn_id, reason=token.reason)
+                    except Exception:
+                        pass
+                return
+
+        thread = threading.Thread(target=watch, name="gateway-cancel-watcher", daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            done.set()
 
     def _compact(self, turn: NormalizedTurn) -> tuple[NormalizedTurn, CompactionRecord]:
         """Fit the transcript into the context budget without breaking it.

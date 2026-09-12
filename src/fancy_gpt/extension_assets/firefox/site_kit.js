@@ -126,6 +126,18 @@
     };
   }
 
+  /* Click a site's own stop control to end generation.
+   *
+   * Returns false when no stop control is visible, which means generation had
+   * already finished. The caller must treat that as "already terminal" rather
+   * than as a failed cancel.
+   */
+  function stopGeneration(stopSelectors) {
+    const control = firstVisible(stopSelectors);
+    if (!control) return false;
+    try { control.click(); return true; } catch (_) { return false; }
+  }
+
   // Stamped at export time; every adapter reports this one value.
   const BUILD = "__FANCYGPT_ADAPTER_BUILD__";
 
@@ -140,5 +152,6 @@
     jsonSegment,
     looksLikeCompleteJson,
     createSettleTracker,
+    stopGeneration,
   };
 })();

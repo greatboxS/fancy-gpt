@@ -8,7 +8,7 @@ from websockets.sync.client import ClientConnection, connect
 
 from fancy_gpt.browser.base import BrowserResponse, BrowserTurn
 
-from .probe import fetch_job_progress
+from .probe import fetch_job_progress, send_job_cancel
 
 
 class SiteHealthUnsupported(RuntimeError):
@@ -191,6 +191,22 @@ class BridgeBrowserDriver:
 
     def close_turn(self, turn: BrowserTurn) -> None:
         self._turns.pop(turn.turn_id, None)
+
+    def cancel_turn(self, turn_id: str, *, generation_epoch: int = 0, reason: str = "cancelled") -> bool:
+        """Ask the browser to stop generating this turn.
+
+        Sent on its own short-lived connection, because the primary controller
+        connection is blocked in wait_for_response() for this very turn. The
+        turn's reply still arrives there: stopping generation makes the content
+        script finish, which produces the normal job_result or job_error.
+        """
+        try:
+            return send_job_cancel(
+                self.endpoint, self.token, self.tunnel_id, turn_id,
+                generation_epoch=generation_epoch, reason=reason,
+            )
+        except Exception:
+            return False
 
     def poll_progress(self, turn_id: str) -> str | None:
         """Best-effort snapshot of the in-flight response text for `turn_id`.

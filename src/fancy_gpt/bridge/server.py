@@ -44,28 +44,57 @@ class BrowserWorker:
             self.connection.send(dumps(message))
 
     def request(self, message: dict[str, Any], timeout_s: float) -> dict[str, Any]:
+        """Send a job and wait for its reply.
+
+        The lock is held only to register the pending queue and touch counters,
+        never across the wait. Holding it for the whole job would make one
+        worker strictly single-job: a second caller could not even register its
+        queue, so a reply arriving for it would find no destination and be
+        dropped, and it would then wait out its full timeout for a response that
+        had already come and gone.
+        """
         job_id = str(message["job_id"])
         response_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
         with self.request_lock:
+            if job_id in self.pending:
+                raise ValueError(f"job {job_id} is already in flight")
             self.pending[job_id] = response_queue
             self.jobs_started += 1
-            try:
-                self.send(message)
-                response = response_queue.get(timeout=timeout_s)
+        try:
+            self.send(message)
+            response = response_queue.get(timeout=timeout_s)
+        except queue.Empty as exc:
+            with self.request_lock:
+                self.jobs_failed += 1
+            raise TimeoutError(f"browser worker timed out for job {job_id}") from exc
+        except Exception:
+            with self.request_lock:
+                self.jobs_failed += 1
+            raise
+        else:
+            with self.request_lock:
                 if response.get("type") == "job_error":
                     self.jobs_failed += 1
                 else:
                     self.jobs_succeeded += 1
-                return response
-            except queue.Empty as exc:
-                self.jobs_failed += 1
-                raise TimeoutError(f"browser worker timed out for job {job_id}") from exc
-            finally:
+            return response
+        finally:
+            with self.request_lock:
                 self.pending.pop(job_id, None)
+
+    def send_control(self, message: dict[str, Any]) -> None:
+        """Fire-and-forget message to the worker, outside any job's reply path.
+
+        Cancellation uses this: the turn's own reply still returns on the
+        request that is waiting for it, so the control message must not consume
+        or register a pending slot.
+        """
+        self.send(message)
 
     def dispatch(self, message: dict[str, Any]) -> None:
         job_id = str(message.get("job_id", ""))
-        target = self.pending.get(job_id)
+        with self.request_lock:
+            target = self.pending.get(job_id)
         if target is not None:
             try:
                 target.put_nowait(message)
@@ -305,6 +334,26 @@ class BridgeServer:
                 connection.send(dumps({"type": "workers_result", "workers": self.hub.snapshot()}))
             elif msg_type == "stats":
                 connection.send(dumps({"type": "stats_result", "stats": self.hub.stats(), "workers": self.hub.snapshot()}))
+            elif msg_type == "cancel":
+                # Cancellation is out of band on purpose: the turn's own reply
+                # still returns on whichever request is waiting for it, so this
+                # must not consume that pending slot.
+                tunnel_id = str(message.get("tunnel_id", ""))
+                job_id = str(message.get("job_id", ""))
+                worker = self.hub.worker_for(tunnel_id)
+                if worker is None or not job_id:
+                    connection.send(dumps({
+                        "type": "cancel_result", "job_id": job_id, "accepted": False,
+                        "reason": "no browser worker connected" if worker is None else "job_id is required",
+                    }))
+                    continue
+                worker.send_control({
+                    "type": "cancel",
+                    "job_id": job_id,
+                    "generation_epoch": message.get("generation_epoch", 0),
+                    "reason": str(message.get("reason", "cancelled")),
+                })
+                connection.send(dumps({"type": "cancel_result", "job_id": job_id, "accepted": True}))
             elif msg_type == "progress":
                 job_id = str(message.get("job_id", ""))
                 progress = self.hub.get_progress(job_id)

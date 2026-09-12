@@ -39,6 +39,9 @@ class ChatGPTWebAutomationProvider:
             self.name = f"chatgpt-web-automation:{tunnel_id}"
         self._started = False
         self.site_health_checked: set[str] = set()
+        #: Bridge turn id of the turn currently in flight, so an out-of-band
+        #: cancel can name it while execute() is still blocked.
+        self.active_turn_id: str | None = None
 
     def start(self) -> None:
         if not self._started:
@@ -106,6 +109,7 @@ class ChatGPTWebAutomationProvider:
             conversation_mode=request.metadata.get("conversation_mode", "temporary"),
             site=site,
         )
+        self.active_turn_id = turn.turn_id
         poller = self._start_progress_poller(turn.turn_id, on_progress)
         try:
             self.driver.submit(turn, request.prompt)
@@ -121,9 +125,24 @@ class ChatGPTWebAutomationProvider:
                 conversation_id=response.conversation_id,
             )
         finally:
+            self.active_turn_id = None
             if poller is not None:
                 poller.stop()
             self.driver.close_turn(turn)
+
+    def cancel(self, turn_id: str, *, generation_epoch: int = 0, reason: str = "cancelled") -> bool:
+        """Stop generation for an in-flight turn, if the driver supports it.
+
+        Returns False when the driver has no cancel path, so callers can tell
+        "refused" apart from "not supported" instead of assuming success.
+        """
+        cancel = getattr(self.driver, "cancel_turn", None)
+        if not callable(cancel):
+            return False
+        try:
+            return bool(cancel(turn_id, generation_epoch=generation_epoch, reason=reason))
+        except Exception:
+            return False
 
     def _start_progress_poller(
         self, turn_id: str, on_progress: Callable[[str], None] | None

@@ -123,7 +123,7 @@ def test_gemini_waits_for_existing_history_before_continuing(tmp_path: Path) -> 
     gemini = (exported / "site_gemini.js").read_text(encoding="utf-8")
 
     assert 'continuing: job.conversation?.mode === "continue"' in background
-    assert "{continuing: Boolean(message.continuing)}" in content
+    assert "continuing: Boolean(message.continuing)," in content
     assert "await settledResponseCount(Boolean(options.continuing))" in gemini
     assert '"Gemini conversation history did not load"' in gemini
 
@@ -173,3 +173,34 @@ def test_review_chat_cannot_reuse_a_conversation_on_another_site(tmp_path: Path)
 
     with pytest.raises(ValueError, match="use a new chat for gemini"):
         manager.resolve(RawRequest(mode="review", objective="second", repo_root=str(tmp_path), site="gemini"))
+
+
+def test_cancellation_is_wired_through_the_exported_extension(tmp_path: Path) -> None:
+    """Stopping a turn must reach the page, not just the background script."""
+    exported = export_extension("edge", tmp_path / "edge-cancel")
+    background = (exported / "background.js").read_text(encoding="utf-8")
+    content = (exported / "content.js").read_text(encoding="utf-8")
+    kit = (exported / "site_kit.js").read_text(encoding="utf-8")
+
+    # The controller's cancel is dispatched, not silently ignored.
+    assert 'message.type === "cancel"' in background
+    assert "async function cancelJob(" in background
+    # A cancel for a previous occupant of a recycled tab is discarded.
+    assert "stale: a recycled tab" in background
+    # Cancellation is reported distinctly from a normal answer.
+    assert '"job_cancelled"' in background
+
+    assert '"fancy_cancel_turn"' in content
+    assert "isCancelled:" in content
+
+    # The stop control is the site's own, exposed once for every adapter.
+    assert "function stopGeneration(" in kit
+
+
+@pytest.mark.parametrize("adapter", ["site_chatgpt.js", "site_gemini.js"])
+def test_each_adapter_honours_cancellation_in_its_poll_loop(tmp_path: Path, adapter: str) -> None:
+    exported = export_extension("edge", tmp_path / f"edge-{adapter}")
+    source = (exported / adapter).read_text(encoding="utf-8")
+    assert "stopGeneration(SELECTORS.stop)" in source
+    assert "cancelled: true" in source
+    assert "isCancelled" in source

@@ -18,6 +18,7 @@ src/fancy_gpt/gateway.py
 src/fancy_gpt/gateway_app.py
 src/fancy_gpt/gateway_capabilities.py
 src/fancy_gpt/gateway_compaction.py
+src/fancy_gpt/gateway_execution.py
 src/fancy_gpt/gateway_state.py
 src/fancy_gpt/inspection.py
 src/fancy_gpt/io.py
@@ -119,6 +120,7 @@ src/fancy_gpt/web/sites/chatgpt_browser.py
 src/fancy_gpt/web/sites/gemini.py
 src/fancy_gpt/web/transport/__init__.py
 src/fancy_gpt/web/transport/contracts.py
+tests/test_bridge_concurrency.py
 tests/test_bridge_stats.py
 tests/test_browser.py
 tests/test_catalog_routing.py
@@ -130,6 +132,8 @@ tests/test_engine.py
 tests/test_execution.py
 tests/test_extension_assets.py
 tests/test_gateway.py
+tests/test_gateway_cancel_path.py
+tests/test_gateway_execution.py
 tests/test_gateway_hardening.py
 tests/test_gateway_transport.py
 tests/test_install_once.py

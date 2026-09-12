@@ -7,7 +7,7 @@
  */
 (() => {
   const kit = globalThis.FancyGPTSiteKit;
-  const {firstVisible, waitFor, setComposer, createSettleTracker} = kit;
+  const {firstVisible, waitFor, setComposer, createSettleTracker, stopGeneration} = kit;
 
   const SELECTORS = {
     composer: [
@@ -142,6 +142,16 @@
     const deadline = Date.now() + timeoutMs;
     let lastReported = null;
     while (Date.now() < deadline) {
+      if (options?.isCancelled?.()) {
+        const stopped = stopGeneration(SELECTORS.stop);
+        return {
+          text: latestResponseText(baselineCount) ?? "",
+          responseIdentity: `gemini-response-${baselineCount + 1}`,
+          conversationId: currentConversationId(),
+          cancelled: true,
+          stoppedGeneration: stopped,
+        };
+      }
       const text = latestResponseText(baselineCount);
       if (text && text !== lastReported) {
         lastReported = text;

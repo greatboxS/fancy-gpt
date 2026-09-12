@@ -3,7 +3,7 @@
   // Everything that is not a ChatGPT DOM assumption comes from the shared kit,
   // so a second adapter starts from what already works rather than repeating it.
   const kit = globalThis.FancyGPTSiteKit;
-  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson} = kit;
+  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson, stopGeneration} = kit;
 
   const SELECTORS = {
     composer: ["#prompt-textarea", "textarea", '[contenteditable="true"]'],
@@ -70,7 +70,7 @@
     };
   }
 
-  async function executeTurn(prompt, timeoutMs, onProgress) {
+  async function executeTurn(prompt, timeoutMs, onProgress, options = {}) {
     if (location.hostname !== "chatgpt.com") throw new Error("FancyGPT ChatGPT adapter loaded on unexpected host");
     const composer = await waitFor(() => firstVisible(SELECTORS.composer), 20000, "ChatGPT composer unavailable; sign in first");
     const baseline = new Set(turnIds());
@@ -96,10 +96,25 @@
 
     const deadline = Date.now() + timeoutMs;
     let boundId = null;
+    // Cancellation is checked inside the poll loop: clicking stop ends
+    // generation in the page, and whatever text exists is returned as partial.
+    const checkCancelled = () => {
+      if (!options?.isCancelled?.()) return null;
+      const stopped = stopGeneration(SELECTORS.stop);
+      return {
+        text: boundId != null ? (assistantText(boundId) ?? "") : "",
+        responseIdentity: boundId ?? "chatgpt-cancelled",
+        conversationId: currentConversationId?.() ?? null,
+        cancelled: true,
+        stoppedGeneration: stopped,
+      };
+    };
     let stableText = null;
     let stableCount = 0;
     let lastReported = null;
     while (Date.now() < deadline) {
+      const cancelled = checkCancelled();
+      if (cancelled) return cancelled;
       const candidates = [];
       for (const id of turnIds()) {
         if (baseline.has(id)) continue;
