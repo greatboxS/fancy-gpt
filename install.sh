@@ -69,11 +69,18 @@ else
   [[ -n "$UV" && -x "$UV" ]] || { echo "uv installation did not produce an executable" >&2; exit 1; }
 fi
 
+# The installer installs whatever wheel the build produced; it deliberately
+# knows no version of its own, so a bump needs no change here.
 WHEEL="${FANCY_GPT_INSTALL_SOURCE:-}"
 if [[ -z "$WHEEL" ]]; then
-  WHEEL="$(find "$ROOT/dist" -maxdepth 1 -type f -name 'fancy_gpt-0.8.0-*.whl' | sort | tail -n 1 || true)"
+  WHEEL="$(find "$ROOT/dist" -maxdepth 1 -type f -name 'fancy_gpt-*.whl' -printf '%T@ %p\n' \
+    | sort -n | tail -n 1 | cut -d' ' -f2- || true)"
 fi
-[[ -n "$WHEEL" && -f "$WHEEL" ]] || { echo "Bundled fancy-gpt 0.8.0 wheel not found under $ROOT/dist" >&2; exit 1; }
+if [[ -z "$WHEEL" || ! -f "$WHEEL" ]]; then
+  echo "No fancy-gpt wheel found under $ROOT/dist" >&2
+  echo "Build it first:  uv build --wheel" >&2
+  exit 1
+fi
 
 echo "[fancy-gpt] Installing isolated user CLI from: $WHEEL"
 if (( WITH_PLAYWRIGHT )); then
@@ -159,7 +166,7 @@ else
   echo "Bridge pairing token stored in the private native-host configuration."
 fi
 echo
-echo "FancyGPT 0.8.0 installed successfully."
+echo "FancyGPT $("$FG" version) installed successfully."
 echo "Command: $FG"
 echo "Default architecture: browser extension tunnel; Playwright is only a fallback."
 echo "Next: $FG extension export chrome ~/.local/share/fancy-gpt/extension-chrome"

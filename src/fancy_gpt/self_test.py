@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import __version__
+
 import json
 import tempfile
 from pathlib import Path
@@ -148,7 +150,7 @@ def run_self_test() -> dict:
             raise RuntimeError("persistent team self-test did not complete")
         return {
             "ok": True,
-            "version_contract": "0.8.0",
+            "version_contract": __version__,
             "skills": len(skills),
             "workflows": len(workflows),
             "domains": len(domains),

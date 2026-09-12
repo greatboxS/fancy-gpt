@@ -1,0 +1,4 @@
+[console_scripts]
+fancy-gpt = fancy_gpt.cli:app
+fancy-gpt-mcp = fancy_gpt.mcp_server:main
+fancy-gpt-native-host = fancy_gpt.bridge.native_host:main

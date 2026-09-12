@@ -1,0 +1,12 @@
+pydantic<3,>=2.12
+typer<1,>=0.26
+PyYAML<7,>=6
+mcp<3,>=2
+websockets<17,>=15
+
+[automation]
+playwright<2,>=1.55
+
+[dev]
+pytest<10,>=9
+pytest-cov<8,>=7
