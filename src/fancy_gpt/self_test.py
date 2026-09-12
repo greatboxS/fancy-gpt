@@ -9,6 +9,9 @@ from .catalog import load_domains, load_skills, load_workflows
 from .engine import ReviewEngine
 from .models import RawRequest
 from .providers import ChatGPTWebAutomationProvider
+from .orchestrator import TeamOrchestrator
+from .project_models import AcceptanceCriterion, AgentRole, CriterionStatus
+from .project_service import ProjectService
 from .skills import packaged_skills_root, validate_skill_bundle
 from .tunnels import TunnelLayerInspector, TunnelRegistry
 
@@ -119,15 +122,41 @@ def run_self_test() -> dict:
         )
         if report.status != "complete" or report.verdict != "pass":
             raise RuntimeError("offline automatic self-test did not complete")
+
+        # v0.8 persistent-team vertical slice: create a target, execute one
+        # required assignment, persist evidence, and prove that completion
+        # requires BOTH work completion and evidence-backed acceptance.
+        project_service = ProjectService(workdir)
+        project = project_service.create_project(
+            project_id="selftest-project",
+            name="Self Test",
+            target="Prove persistent team state",
+            acceptance=[AcceptanceCriterion(id="ac-1", statement="Evidence persists", evidence_required=["recorded evidence"])],
+        )
+        work = project_service.add_work_item(
+            project.project_id,
+            title="Verify persistence",
+            objective="Persist one durable engineering-team session",
+            role=AgentRole.VERIFIER,
+        )
+        assignment = project_service.start_assignment(project.project_id, work.work_item_id)
+        project_service.finish_session(project.project_id, assignment.session.session_id, summary="verification session persisted")
+        evidence = project_service.record_evidence(project.project_id, claim="state reloaded", source="offline self-test")
+        project_service.update_criterion(project.project_id, "ac-1", status=CriterionStatus.SATISFIED, evidence_ids=[evidence.evidence_id])
+        reloaded = ProjectService(workdir).snapshot(project.project_id)
+        if reloaded.project.status.value != "complete" or not reloaded.sessions:
+            raise RuntimeError("persistent team self-test did not complete")
         return {
             "ok": True,
-            "version_contract": "0.7.0",
+            "version_contract": "0.8.0",
             "skills": len(skills),
             "workflows": len(workflows),
             "domains": len(domains),
             "tunnels": len(registry.all()),
             "tunnel_layers": "healthy",
             "offline_two_pass": "complete",
+            "persistent_team_state": "complete",
+            "semantic_relevance_policy": "enabled",
             "browser_required": False,
             "network_required": False,
         }

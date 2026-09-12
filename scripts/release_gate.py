@@ -45,7 +45,7 @@ checks = {
     "tunnel_architecture_doc": (root / "docs/TUNNEL_ARCHITECTURE.md").is_file(),
 }
 checks["pass"] = (
-    checks["version"] == "0.7.0"
+    checks["version"] == "0.8.0"
     and checks["skills"] == 6
     and checks["workflows"] == 4
     and checks["domains"] == 13

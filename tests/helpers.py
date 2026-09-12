@@ -53,6 +53,7 @@ def final_payload(request_id: str, mode: str = "review", sections: list[str] | N
         payload["options"]=[{"name":"A","description":"Option A","advantages":["simple"],"disadvantages":["risk"],"risks":[],"when_to_choose":"when simple"}]
     if mode == "design":
         payload["deliverables"]=[{"name":"design.md","kind":"design","content":"# Complete Design\n"}]
+        payload["options"]=[{"name":"A","description":"Primary design","advantages":["fits requirements"],"disadvantages":["tradeoff"],"risks":[],"when_to_choose":"default"}]
     if mode == "investigate":
         payload["hypotheses"]=[{"id":"H1","hypothesis":"Race condition","mechanism":"unsynchronized ownership","evidence_for":[],"evidence_against":[],"confidence":0.5,"next_discriminating_test":"instrument ownership"}]
     if mode == "write":
