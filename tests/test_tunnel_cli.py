@@ -24,3 +24,10 @@ def test_tunnel_explain_reports_layered_health() -> None:
     payload = json.loads(result.stdout)
     assert payload["spec"]["runtime"] == "playwright"
     assert {item["layer"] for item in payload["layers"]} == {"site", "runtime", "transport", "composition"}
+
+
+def test_tunnel_inspect_alias_exists() -> None:
+    result = runner.invoke(app, ["tunnels", "inspect", "interactive-manual"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["spec"]["id"] == "interactive-manual"
