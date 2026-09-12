@@ -8,6 +8,7 @@ from pathlib import Path
 from .context_builder import ContextBuilder
 from .conversations import ConversationManager
 from .errors import InvalidStateError
+from .inspection import SessionInspectionService
 from .models import (
     ContextPack,
     ChatRecord,
@@ -21,6 +22,7 @@ from .models import (
     ResearchManifest,
     RoutingDecision,
     SessionRecord,
+    SessionInspection,
 )
 from .planner import PreRequestPlanner
 from .providers import ChatGPTWebInteractiveProvider
@@ -357,6 +359,9 @@ class ReviewEngine:
         ]
         # Preserve requests even if future chat metadata contains a duplicate.
         return self.store.list_statuses(list(dict.fromkeys(request_ids)))
+
+    def inspect_session(self, session_id: str) -> SessionInspection:
+        return SessionInspectionService(self.session_store, self.store).inspect_session(session_id)
 
     def inspect_context(self, request_id: str) -> ContextPack:
         return self.store.read_model(request_id, "context-pack.json", ContextPack)

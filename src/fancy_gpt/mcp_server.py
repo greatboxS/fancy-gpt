@@ -13,6 +13,7 @@ from .models import (
     ContextPack,
     FinalReport,
     InteractionRequired,
+    SessionInspection,
     RawRequest,
     RequestStatus,
     ResearchManifest,
@@ -174,6 +175,13 @@ def archive_chat(session_id: str, chat_id: str) -> ChatRecord:
 @tracked("list_session_requests")
 def list_session_requests(session_id: str) -> list[RequestStatus]:
     return _engine().list_session_requests(session_id)
+
+
+@mcp.tool()
+@tracked("inspect_session")
+def inspect_session(session_id: str) -> SessionInspection:
+    """Read-only dashboard snapshot for a FancyGPT session, chats, latest requests, and recovery hints."""
+    return _engine().inspect_session(session_id)
 
 
 @mcp.tool()

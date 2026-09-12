@@ -11,7 +11,7 @@ from .browser import FakeBrowserDriver, PlaywrightChatGPTDriver
 from .catalog import load_domains, load_skills, load_workflows
 from .engine import ReviewEngine
 from .io import load_mapping
-from .models import ChatPolicy, FinalReport, RawRequest, ResearchManifest
+from .models import ChatPolicy, FinalReport, InspectedChat, RawRequest, ResearchManifest, SessionInspection
 from .providers import ChatGPTWebAutomationProvider
 from .skills import export_packaged_skills, packaged_skills_root, validate_skill_bundle
 from .runtime_paths import default_browser_profile, user_data_dir, default_bridge_token_file, default_bridge_native_config
@@ -64,6 +64,62 @@ def _bridge_summary(metadata: dict) -> str:
     jobs_ok = stats.get("total_jobs_succeeded", "-")
     jobs_failed = stats.get("total_jobs_failed", "-")
     return f"workers={connected} jobs_ok={jobs_ok} jobs_failed={jobs_failed}"
+
+
+def _request_summary(chat: InspectedChat) -> list[str]:
+    latest = chat.latest_request
+    if latest is None:
+        return ["  Latest request: none"]
+    route = latest.route_name or latest.skill
+    lines = [
+        f"  Latest request: {latest.request_id}  {latest.state.value}  {latest.mode.value}  {route}",
+    ]
+    if latest.has_partial_text:
+        lines.append(f"  Progress: partial text updated {latest.partial_text_updated_at or '-'}")
+    if latest.error:
+        lines.append(f"  Error: {_truncate(latest.error, 100)}")
+    if latest.recovery_hint:
+        lines.append(f"  Hint: {latest.recovery_hint.message}")
+    return lines
+
+
+def _session_inspection_text(inspection: SessionInspection) -> str:
+    lines = [
+        f"Session {inspection.session_id}  {inspection.title}",
+        f"Repo: {inspection.repo_root}",
+        f"State: {inspection.state}",
+        f"Active chat: {inspection.active_chat_id or '-'}",
+        f"Chats: {inspection.chat_count}  Requests: {inspection.request_count}",
+        "",
+        "Chats",
+    ]
+    if not inspection.chats:
+        lines.append("(none)")
+    for index, chat in enumerate(inspection.chats):
+        branch = "└─" if index == len(inspection.chats) - 1 else "├─"
+        flags = []
+        if chat.is_active:
+            flags.append("active")
+        if chat.kind.value == "independent":
+            flags.append("independent")
+        if chat.is_archived:
+            flags.append("archived")
+        flag_text = f"  {', '.join(flags)}" if flags else ""
+        conversation = chat.conversation_id or chat.conversation_binding_state
+        lines.append(f"{branch} {chat.chat_id}  {chat.title}  {chat.kind.value}{flag_text}")
+        lines.append(f"  Conversation: {conversation}")
+        if chat.tunnel_id:
+            lines.append(f"  Tunnel: {chat.tunnel_id}")
+        lines.extend(_request_summary(chat))
+    lines.extend(["", "Tunnels"])
+    if not inspection.tunnels:
+        lines.append("(none)")
+    for tunnel in inspection.tunnels:
+        browser = _yn(tunnel.browser_connected)
+        bridge = _yn(tunnel.bridge_reachable)
+        detail = f"  {tunnel.detail}" if tunnel.detail else ""
+        lines.append(f"└─ {tunnel.tunnel_id or '-'}  {tunnel.state}  browser={browser}  bridge={bridge}{detail}")
+    return "\n".join(lines)
 
 app = typer.Typer(help="fancy-gpt independent technical reasoning toolkit")
 catalogs_app = typer.Typer(help="Inspect skills, workflows, domains, and routing")
@@ -344,6 +400,19 @@ def sessions_show(
     workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
 ) -> None:
     typer.echo(_engine(workdir).get_session(session_id).model_dump_json(indent=2))
+
+
+@sessions_app.command("inspect")
+def sessions_inspect(
+    session_id: str,
+    json_output: Annotated[bool, typer.Option("--json", help="Emit stable machine-readable JSON.")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    inspection = _engine(workdir).inspect_session(session_id)
+    if json_output:
+        typer.echo(inspection.model_dump_json(indent=2))
+    else:
+        typer.echo(_session_inspection_text(inspection))
 
 
 @sessions_app.command("close")

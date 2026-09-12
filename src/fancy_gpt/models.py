@@ -530,3 +530,65 @@ class RequestStatus(StrictModel):
     session_id: str | None = None
     chat_id: str | None = None
     chat_policy: ChatPolicy | None = None
+
+
+class RecoveryHint(StrictModel):
+    code: str
+    message: str
+
+
+class InspectedRequest(StrictModel):
+    request_id: str
+    mode: RequestMode
+    route_kind: Literal["skill", "workflow"]
+    route_name: str
+    skill: str
+    chat_policy: ChatPolicy | None = None
+    state: RequestState
+    created_at: str
+    updated_at: str
+    provider: str | None = None
+    tunnel_id: str | None = None
+    conversation_id: str | None = None
+    has_partial_text: bool = False
+    partial_text: str | None = None
+    partial_text_updated_at: str | None = None
+    error: str | None = None
+    recovery_hint: RecoveryHint | None = None
+
+
+class InspectedChat(StrictModel):
+    chat_id: str
+    title: str
+    kind: ChatKind
+    is_active: bool
+    is_archived: bool
+    conversation_id: str | None = None
+    conversation_binding_state: Literal["unbound", "bound", "pending", "unavailable"]
+    tunnel_id: str | None = None
+    request_count: int
+    latest_request: InspectedRequest | None = None
+
+
+class InspectedTunnel(StrictModel):
+    tunnel_id: str | None = None
+    state: Literal["healthy", "unavailable", "unknown"] = "unknown"
+    browser_connected: bool | None = None
+    bridge_reachable: bool | None = None
+    detail: str | None = None
+
+
+class SessionInspection(StrictModel):
+    schema_version: str = "1.0"
+    session_id: str
+    title: str
+    repo_root: str
+    active_chat_id: str | None = None
+    created_at: str
+    updated_at: str
+    closed_at: str | None = None
+    state: Literal["open", "closed"]
+    chat_count: int
+    request_count: int
+    chats: list[InspectedChat]
+    tunnels: list[InspectedTunnel] = Field(default_factory=list)
