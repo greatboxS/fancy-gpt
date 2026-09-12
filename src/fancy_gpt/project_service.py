@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from .context_builder import ContextBuilder
+from .patcher import CommandRunner, PatchRejected, RepositoryPatcher
 from .models import (
     ContextArtifact,
     Freshness,
@@ -31,6 +32,7 @@ from .project_models import (
     FindingRecord,
     FindingStatus,
     ProjectArtifactRecord,
+    ExecutionReceipt,
     ProjectEvent,
     ProjectEventType,
     ProjectRecord,
@@ -59,11 +61,15 @@ class ProjectService:
         context_builder: ContextBuilder | None = None,
         allowed_roots: list[Path | str] | None = None,
         max_context_bytes: int = 180_000,
+        verification_checks: dict[str, list[str]] | None = None,
     ) -> None:
         self.store = ProjectStore(root)
         self.context_builder = context_builder or ContextBuilder()
         self.allowed_roots = self._resolve_allowed_roots(allowed_roots)
         self.max_context_bytes = max_context_bytes
+        # Named checks an operator allows a teammate to request. A teammate can
+        # pick a name; it can never supply a command line.
+        self.verification_checks = dict(verification_checks or {})
 
     @staticmethod
     def _resolve_allowed_roots(values: list[Path | str] | None) -> list[Path]:
@@ -166,6 +172,8 @@ class ProjectService:
         required_for_completion: bool = True,
         activation_condition: WorkActivationCondition = WorkActivationCondition.ALWAYS,
         context_requirements: list[LocalContextRequirement] | None = None,
+        conversation_key: str | None = None,
+        conversation_strategy: ConversationStrategy | None = None,
         work_item_id: str | None = None,
     ) -> WorkItem:
         snapshot = self.snapshot(project_id)
@@ -189,6 +197,8 @@ class ProjectService:
             required_for_completion=required_for_completion,
             activation_condition=activation_condition,
             context_requirements=context_requirements or [],
+            conversation_key=conversation_key,
+            conversation_strategy=conversation_strategy,
         )
         self.store.append(project_id, ProjectEventType.WORK_ITEM_CREATED, item.model_dump(mode="json"))
         return item
@@ -245,21 +255,34 @@ class ProjectService:
     ) -> SessionRecord:
         snapshot = self.snapshot(project_id)
         item = snapshot.work_item(work_item_id)
-        strategy = conversation_strategy or self.default_conversation_strategy(item.role)
+        strategy = (
+            conversation_strategy
+            or item.conversation_strategy
+            or self.default_conversation_strategy(item.role)
+        )
+        key = item.conversation_key
         if conversation_binding is None and strategy == ConversationStrategy.RESUME:
             # Resume the newest persisted ChatGPT thread for the same role when one exists.
             # If this is the first role session, use a logical binding; the browser runtime
             # will create a normal persistent thread and return its real ChatGPT URL.
-            candidates = [
-                session for session in snapshot.sessions
-                if session.role == item.role and session.conversation_binding
-            ]
+            # A declared key groups work items into one thread regardless of role;
+            # without one, resume falls back to rejoining this role's own thread.
+            if key:
+                candidates = [
+                    session for session in snapshot.sessions
+                    if session.conversation_key == key and session.conversation_binding
+                ]
+            else:
+                candidates = [
+                    session for session in snapshot.sessions
+                    if session.role == item.role and session.conversation_binding
+                ]
             real = [session for session in candidates if is_chatgpt_conversation(str(session.conversation_binding))]
             if real:
                 real.sort(key=lambda session: session.started_at, reverse=True)
                 conversation_binding = real[0].conversation_binding
             else:
-                conversation_binding = f"project:{project_id}:role:{item.role.value}"
+                conversation_binding = f"project:{project_id}:thread:{key or item.role.value}"
         elif conversation_binding is None and strategy == ConversationStrategy.FORK:
             conversation_binding = f"project:{project_id}:work:{work_item_id}"
         session = SessionRecord(
@@ -270,6 +293,7 @@ class ProjectService:
             state=SessionState.OPEN,
             conversation_strategy=strategy,
             conversation_binding=conversation_binding,
+            conversation_key=key,
             started_at=utc_now(),
         )
         self.store.append(project_id, ProjectEventType.SESSION_STARTED, session.model_dump(mode="json"))
@@ -417,6 +441,61 @@ class ProjectService:
     def add_next_action(self, project_id: str, action: str) -> None:
         self.store.append(project_id, ProjectEventType.NEXT_ACTION_RECORDED, {"action": action})
 
+    def record_receipt(self, project_id: str, *, check: str, receipt, source_session_id: str | None = None) -> ExecutionReceipt:
+        """Persist proof that the runtime ran a command."""
+        record = ExecutionReceipt(
+            receipt_id=self._id("receipt"),
+            check=check,
+            argv=list(receipt.argv),
+            exit_code=receipt.exit_code,
+            duration_seconds=receipt.duration_seconds,
+            output_sha256=receipt.output_sha256,
+            output_tail=receipt.output_tail,
+            timed_out=receipt.timed_out,
+            source_session_id=source_session_id,
+            recorded_at=utc_now(),
+        )
+        self.store.append(project_id, ProjectEventType.EXECUTION_RECEIPT_RECORDED, record.model_dump(mode="json"))
+        return record
+
+    def apply_code_change(self, project_id: str, change, *, source_session_id: str | None = None) -> dict:
+        """Apply a teammate's proposed patch, then run the checks it named.
+
+        The patch is validated in full before anything is written, so a refusal
+        leaves the working tree untouched. Checks run afterwards and their
+        receipts are what a verifier is later allowed to cite.
+        """
+        project = self.store.load_project(project_id)
+        root = self.context_builder.validate_allowed_root(project.repo_root, self.allowed_roots)
+        patcher = RepositoryPatcher(root, secret_policy=self.context_builder.secret_policy)
+        applied = patcher.apply(change.edits)
+
+        for item in applied.applied:
+            self.record_artifact(
+                project_id,
+                path=item.path,
+                kind="source",
+                sha256=item.after_sha256,
+                description=("created" if item.created else "modified") + " by applied code change",
+                source_session_id=source_session_id,
+            )
+        self.store.append(project_id, ProjectEventType.CODE_CHANGE_APPLIED, {
+            "summary": change.summary,
+            "session_id": source_session_id,
+            "files": [
+                {"path": f.path, "created": f.created, "after_sha256": f.after_sha256, "bytes": f.bytes_written}
+                for f in applied.applied
+            ],
+        })
+
+        runner = CommandRunner(root, allowed=self.verification_checks)
+        receipts: list[ExecutionReceipt] = []
+        for check in change.verification_checks:
+            receipts.append(self.record_receipt(
+                project_id, check=check, receipt=runner.run(check), source_session_id=source_session_id
+            ))
+        return {"applied": applied.applied, "receipts": receipts}
+
     def snapshot(self, project_id: str) -> ProjectSnapshot:
         project = self.store.load_project(project_id)
         work: dict[str, WorkItem] = {}
@@ -425,6 +504,7 @@ class ProjectService:
         evidence: list[EvidenceRecord] = []
         findings: dict[str, FindingRecord] = {}
         artifacts: list[ProjectArtifactRecord] = []
+        receipts: list[ExecutionReceipt] = []
         criteria = {item.id: item for item in project.target.acceptance_criteria}
         next_actions: list[str] = []
         events = self.store.events(project_id)
@@ -452,6 +532,8 @@ class ProjectService:
             elif event.event_type in {ProjectEventType.FINDING_RECORDED, ProjectEventType.FINDING_RESOLVED}:
                 item = FindingRecord.model_validate(payload)
                 findings[item.finding_id] = item
+            elif event.event_type == ProjectEventType.EXECUTION_RECEIPT_RECORDED:
+                receipts.append(ExecutionReceipt.model_validate(payload))
             elif event.event_type == ProjectEventType.ARTIFACT_RECORDED:
                 artifacts.append(ProjectArtifactRecord.model_validate(payload))
             elif event.event_type == ProjectEventType.CRITERION_UPDATED:
@@ -496,6 +578,7 @@ class ProjectService:
             evidence=evidence,
             findings=list(findings.values()),
             artifacts=artifacts,
+            receipts=receipts,
             next_actions=relevant_subset(next_actions),
             event_count=len(events),
         )
@@ -550,6 +633,8 @@ class ProjectService:
             open_work_items=open_items,
             next_actions=snapshot.next_actions,
             principles=snapshot.project.principles,
+            recent_receipts=snapshot.receipts[-5:],
+            available_checks=sorted(self.verification_checks),
             repository_source=repo_artifacts,
             repository_omitted=repo_omitted,
             repository_revision=repo_revision,
@@ -662,6 +747,23 @@ class ProjectService:
                 )
         for action in outcome.next_actions:
             self.add_next_action(project_id, action)
+
+        if outcome.code_change is not None:
+            try:
+                self.apply_code_change(
+                    project_id, outcome.code_change, source_session_id=session.session_id
+                )
+            except PatchRejected as exc:
+                # A refused patch is a failed assignment, not a quiet no-op: the
+                # teammate believes it changed the repository and every later
+                # role would reason from that belief.
+                self.finish_session(
+                    project_id,
+                    session.session_id,
+                    summary=f"code change refused: {exc}",
+                    failed=True,
+                )
+                raise
 
         if outcome.status == AgentOutcomeStatus.BLOCKED:
             work_state = WorkItemState.BLOCKED

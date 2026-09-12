@@ -19,6 +19,7 @@ src/fancy_gpt/mcp_clients.py
 src/fancy_gpt/mcp_server.py
 src/fancy_gpt/models.py
 src/fancy_gpt/orchestrator.py
+src/fancy_gpt/patcher.py
 src/fancy_gpt/planner.py
 src/fancy_gpt/project_models.py
 src/fancy_gpt/project_runner.py
@@ -110,6 +111,7 @@ src/fancy_gpt/web/transport/contracts.py
 tests/test_bridge_stats.py
 tests/test_browser.py
 tests/test_catalog_routing.py
+tests/test_code_change.py
 tests/test_context.py
 tests/test_conversation_continuity.py
 tests/test_engine.py
@@ -123,6 +125,7 @@ tests/test_models_contracts.py
 tests/test_planner.py
 tests/test_progress_poller.py
 tests/test_project_cli.py
+tests/test_project_repository_context.py
 tests/test_projects.py
 tests/test_relevance_policy.py
 tests/test_response_parser.py

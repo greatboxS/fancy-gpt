@@ -11,6 +11,35 @@ from .file_lock import exclusive_file_lock
 from .project_models import ProjectEvent, ProjectEventType, ProjectRecord
 
 
+def load_verification_checks(root: Path) -> dict[str, list[str]]:
+    """Read the operator's allowlist of named verification commands.
+
+    Teammates may ask for a check by name; only the operator decides what that
+    name runs, so the mapping lives in a file they own rather than anywhere a
+    model can reach.
+    """
+    path = root.expanduser().resolve() / "checks.json"
+    if not path.is_file():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("checks.json must be an object mapping check name to argv list")
+    checks: dict[str, list[str]] = {}
+    for name, argv in payload.items():
+        if not isinstance(argv, list) or not argv or not all(isinstance(x, str) for x in argv):
+            raise ValueError(f"check {name!r} must be a non-empty list of strings")
+        checks[str(name)] = [str(x) for x in argv]
+    return checks
+
+
+def save_verification_checks(root: Path, checks: dict[str, list[str]]) -> Path:
+    path = root.expanduser().resolve()
+    path.mkdir(parents=True, exist_ok=True)
+    target = path / "checks.json"
+    target.write_text(json.dumps(checks, indent=2, sort_keys=True), encoding="utf-8")
+    return target
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 

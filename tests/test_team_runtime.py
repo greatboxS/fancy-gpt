@@ -330,6 +330,15 @@ def test_implementer_outcome_can_resolve_review_finding(tmp_path: Path) -> None:
     assert snapshot.work_item(work.work_item_id).state == WorkItemState.DONE
 
 
+def _outcome_for(assignment, summary: str):
+    from fancy_gpt.project_models import AgentOutcome, AgentOutcomeStatus
+    return AgentOutcome(
+        request_id="r", session_id=assignment.session.session_id,
+        work_item_id=assignment.work_item_id, role=assignment.role,
+        status=AgentOutcomeStatus.COMPLETE, summary=summary, confidence=0.9,
+    )
+
+
 def test_agent_prompt_states_every_identity_field_it_later_enforces(tmp_path: Path) -> None:
     # The runtime rejects an outcome whose request_id/session_id/work_item_id/role
     # differ from the assignment. A real model can only satisfy that if the prompt
@@ -347,3 +356,48 @@ def test_agent_prompt_states_every_identity_field_it_later_enforces(tmp_path: Pa
     assert assignment.session.session_id in request.prompt
     assert assignment.work_item_id in request.prompt
     assert assignment.role.value in request.prompt
+
+
+def test_work_items_sharing_a_thread_continue_one_conversation(tmp_path: Path) -> None:
+    from fancy_gpt.project_models import ConversationStrategy
+
+    service = ProjectService(tmp_path)
+    project = service.create_project(name="p", target="ship it")
+    first = service.add_work_item(
+        project.project_id, title="Research", objective="look", role=AgentRole.RESEARCHER,
+        conversation_key="main", conversation_strategy=ConversationStrategy.RESUME,
+    )
+    a = service.start_assignment(project.project_id, first.work_item_id)
+    # The first session has no thread yet, so it opens one and reports its id back.
+    service.apply_agent_outcome(project.project_id, _outcome_for(a, "looked"))
+    service.bind_session_conversation(project.project_id, a.session.session_id, "abcd1234-efgh-5678")
+
+    # A different role in the same thread rejoins the same conversation.
+    second = service.add_work_item(
+        project.project_id, title="Design", objective="design", role=AgentRole.DESIGNER,
+        dependencies=[first.work_item_id],
+        conversation_key="main", conversation_strategy=ConversationStrategy.RESUME,
+    )
+    b = service.start_assignment(project.project_id, second.work_item_id)
+    assert b.session.conversation_binding == "abcd1234-efgh-5678"
+    assert b.session.role != a.session.role
+
+
+def test_without_a_thread_key_resume_stays_per_role(tmp_path: Path) -> None:
+    from fancy_gpt.project_models import ConversationStrategy
+
+    service = ProjectService(tmp_path)
+    project = service.create_project(name="p", target="ship it")
+    first = service.add_work_item(
+        project.project_id, title="Research", objective="look", role=AgentRole.RESEARCHER
+    )
+    a = service.start_assignment(project.project_id, first.work_item_id)
+    service.apply_agent_outcome(project.project_id, _outcome_for(a, "looked"))
+    service.bind_session_conversation(project.project_id, a.session.session_id, "abcd1234-efgh-5678")
+
+    other = service.add_work_item(
+        project.project_id, title="Design", objective="design", role=AgentRole.DESIGNER,
+        dependencies=[first.work_item_id], conversation_strategy=ConversationStrategy.RESUME,
+    )
+    b = service.start_assignment(project.project_id, other.work_item_id)
+    assert b.session.conversation_binding != "abcd1234-efgh-5678"

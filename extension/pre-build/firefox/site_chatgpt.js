@@ -78,14 +78,35 @@
     return match ? match[1] : null;
   }
 
+  const BLOCK_LABEL = /^[ \t]*fancygpt[:\s]+([A-Za-z0-9._-]+)[ \t]*$/i;
+
+  // The JSON document ends where the first verbatim code block begins. Braces
+  // inside those blocks belong to source code and must not be counted.
+  function jsonSegment(text) {
+    const lines = text.split("\n");
+    let stop = lines.length;
+    for (let i = 0; i < lines.length; ++i) {
+      if (BLOCK_LABEL.test(lines[i])) { stop = i; break; }
+    }
+    const head = lines.slice(0, stop).join("\n");
+    const start = head.search(/[{[]/);
+    return start === -1 ? null : head.slice(start);
+  }
+
   function looksLikeCompleteJson(text) {
-    const trimmed = text.trim();
-    if (!trimmed) return false;
-    const first = trimmed[0];
-    if (first !== "{" && first !== "[") return true;
-    const opens = (trimmed.match(/[{[]/g) || []).length;
-    const closes = (trimmed.match(/[}\]]/g) || []).length;
-    return opens === closes;
+    const segment = jsonSegment(text);
+    // Every stage answers with JSON, so text without any is a partial capture,
+    // not a finished non-JSON reply.
+    if (segment == null) return false;
+    const opens = (segment.match(/[{[]/g) || []).length;
+    const closes = (segment.match(/[}\]]/g) || []).length;
+    if (opens !== closes) return false;
+    // A reply that names verbatim blocks is only complete once they have arrived.
+    const refs = segment.match(/"(?:old_ref|new_ref|content_ref)"\s*:\s*"([^"]+)"/g) || [];
+    return refs.every(ref => {
+      const id = ref.match(/:\s*"([^"]+)"/)[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp("^[ \\t]*fancygpt[:\\s]+" + id + "[ \\t]*$", "im").test(text);
+    });
   }
 
   async function healthCheck() {

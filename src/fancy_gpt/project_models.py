@@ -74,6 +74,8 @@ class ProjectEventType(str, Enum):
     SESSION_CONVERSATION_BOUND = "session-conversation-bound"
     DECISION_RECORDED = "decision-recorded"
     EVIDENCE_RECORDED = "evidence-recorded"
+    EXECUTION_RECEIPT_RECORDED = "execution-receipt-recorded"
+    CODE_CHANGE_APPLIED = "code-change-applied"
     CRITERION_UPDATED = "criterion-updated"
     NEXT_ACTION_RECORDED = "next-action-recorded"
     FINDING_RECORDED = "finding-recorded"
@@ -130,6 +132,10 @@ class WorkItem(StrictModel):
     # assignment carries no source at all and performs no repository read;
     # the whole tree is never sent implicitly.
     context_requirements: list[LocalContextRequirement] = Field(default_factory=list)
+    # Work items sharing a conversation_key share one ChatGPT thread, whatever
+    # their role. Without it, resume only ever rejoins a thread of the same role.
+    conversation_key: str | None = None
+    conversation_strategy: ConversationStrategy | None = None
 
 
 class SessionRecord(StrictModel):
@@ -140,6 +146,7 @@ class SessionRecord(StrictModel):
     state: SessionState = SessionState.OPEN
     conversation_strategy: ConversationStrategy = ConversationStrategy.FRESH
     conversation_binding: str | None = None
+    conversation_key: str | None = None
     summary: str | None = None
     started_at: str
     ended_at: str | None = None
@@ -218,6 +225,80 @@ class FindingDraft(StrictModel):
 
 
 
+class FileEditDraft(StrictModel):
+    """One proposed change to one repository file.
+
+    `content` replaces the whole file; `old`/`new` replace one unique passage.
+    `base_sha256` is the hash of the file as it was supplied in
+    `repository_source`, and is what lets the runtime refuse an edit aimed at a
+    file that has since changed.
+    """
+
+    path: str = Field(min_length=1)
+    base_sha256: str | None = None
+    # Source code travels beside the JSON as verbatim blocks; these name them.
+    content_ref: str | None = None
+    old_ref: str | None = None
+    new_ref: str | None = None
+    rationale: str = Field(min_length=3)
+    # Resolved from the verbatim blocks before validation; never sent by the model.
+    content: str | None = None
+    old: str | None = None
+    new: str | None = None
+
+    @model_validator(mode="after")
+    def one_edit_shape(self) -> "FileEditDraft":
+        whole = self.content is not None or self.content_ref is not None
+        replace = any(x is not None for x in (self.old, self.new, self.old_ref, self.new_ref))
+        if whole and replace:
+            raise ValueError("an edit is either a whole-file content or an old/new replacement, not both")
+        if not whole and not replace:
+            raise ValueError("an edit must reference either content or old text")
+        return self
+
+    def resolved(self, blocks: dict[str, str]) -> "FileEditDraft":
+        """Bind this edit to the verbatim blocks that carry its source text."""
+
+        def take(ref: str | None, inline: str | None, what: str) -> str | None:
+            if ref is None:
+                return inline
+            if ref not in blocks:
+                raise ValueError(f"edit for {self.path} references missing {what} block: {ref}")
+            return blocks[ref]
+
+        return self.model_copy(update={
+            "content": take(self.content_ref, self.content, "content"),
+            "old": take(self.old_ref, self.old, "old"),
+            "new": take(self.new_ref, self.new, "new"),
+        })
+
+
+class CodeChangeDraft(StrictModel):
+    """A patch a teammate proposes; only the runtime applies it."""
+
+    summary: str = Field(min_length=3)
+    edits: list[FileEditDraft] = Field(min_length=1)
+    verification_checks: list[str] = Field(default_factory=list)
+
+    def resolved(self, blocks: dict[str, str]) -> "CodeChangeDraft":
+        return self.model_copy(update={"edits": [item.resolved(blocks) for item in self.edits]})
+
+
+class ExecutionReceipt(StrictModel):
+    """Durable proof that the runtime ran a command. Teammates cannot mint these."""
+
+    receipt_id: str
+    check: str
+    argv: list[str]
+    exit_code: int
+    duration_seconds: float
+    output_sha256: str
+    output_tail: str
+    timed_out: bool = False
+    source_session_id: str | None = None
+    recorded_at: str
+
+
 class FindingResolutionDraft(StrictModel):
     finding_id: str
     resolution: str
@@ -258,6 +339,7 @@ class AgentOutcome(StrictModel):
     artifacts: list[ArtifactDraft] = Field(default_factory=list)
     criterion_assessments: list[CriterionAssessmentDraft] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
+    code_change: CodeChangeDraft | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     relevance_assessment: RelevanceAssessment = Field(default_factory=RelevanceAssessment)
     conversation_binding: str | None = None
@@ -273,6 +355,8 @@ class RelevantProjectContext(StrictModel):
     relevant_evidence: list[EvidenceRecord] = Field(default_factory=list)
     open_findings: list[FindingRecord] = Field(default_factory=list)
     relevant_artifacts: list[ProjectArtifactRecord] = Field(default_factory=list)
+    recent_receipts: list[ExecutionReceipt] = Field(default_factory=list)
+    available_checks: list[str] = Field(default_factory=list)
     open_work_items: list[WorkItem] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
     principles: RelevanceSufficiencyPolicy = Field(default_factory=RelevanceSufficiencyPolicy)
@@ -291,6 +375,7 @@ class ProjectSnapshot(StrictModel):
     evidence: list[EvidenceRecord] = Field(default_factory=list)
     findings: list[FindingRecord] = Field(default_factory=list)
     artifacts: list[ProjectArtifactRecord] = Field(default_factory=list)
+    receipts: list[ExecutionReceipt] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
     event_count: int = 0
 

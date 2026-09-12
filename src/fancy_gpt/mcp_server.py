@@ -13,6 +13,7 @@ from .focused import FocusedAnswer, FocusedAnswerEngine, FocusedQuestion
 from .orchestrator import TeamOrchestrator
 from .project_models import AcceptanceCriterion, AgentAssignment, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus, ProjectArtifactRecord, FindingRecord, ProjectEvent, ProjectRecord, ProjectSnapshot, RelevantProjectContext, SessionRecord, TeamCyclePlan, TeamStepResult, WorkExecutionMode, WorkItem
 from .project_service import ProjectService
+from .project_store import load_verification_checks
 from .project_runner import ProjectRunner
 from .relevance import ResponseIntent
 from .models import (
@@ -64,7 +65,8 @@ def _engine() -> ReviewEngine:
 
 
 def _project_service() -> ProjectService:
-    return ProjectService(Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt")))
+    root = Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    return ProjectService(root, verification_checks=load_verification_checks(root))
 
 
 def _manager() -> TunnelManager:

@@ -18,6 +18,7 @@ from .focused import FocusedAnswerEngine, FocusedQuestion
 from .orchestrator import TeamOrchestrator
 from .project_models import AcceptanceCriterion, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus, WorkExecutionMode
 from .project_service import ProjectService
+from .project_store import load_verification_checks, save_verification_checks
 from .project_runner import ProjectRunner
 from .relevance import ResponseIntent
 from .providers import ChatGPTWebAutomationProvider
@@ -164,7 +165,7 @@ def _engine(workdir: Path | None, allowed_root: list[Path] | None = None) -> Rev
 
 def _project_service(workdir: Path | None) -> ProjectService:
     root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
-    return ProjectService(root)
+    return ProjectService(root, verification_checks=load_verification_checks(root))
 
 
 def _route_args(skill: str | None, workflow: str | None) -> tuple[str | None, str | None]:
@@ -934,9 +935,15 @@ def project_work_item(
     path: Annotated[list[str] | None, typer.Option("--path")] = None,
     search: Annotated[list[str] | None, typer.Option("--search")] = None,
     required_context: Annotated[bool, typer.Option("--required-context")] = False,
+    thread: Annotated[str | None, typer.Option("--thread")] = None,
+    strategy: Annotated[ConversationStrategy | None, typer.Option("--strategy")] = None,
     workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
 ) -> None:
-    """Add one work item, optionally declaring the repository source it needs."""
+    """Add one work item, optionally declaring the repository source it needs.
+
+    Work items given the same --thread share one ChatGPT conversation, so several
+    requests continue in the same chat instead of each opening a new one.
+    """
     item = _project_service(workdir).add_work_item(
         project_id,
         title=title,
@@ -945,6 +952,8 @@ def project_work_item(
         execution_mode=WorkExecutionMode.EXTERNAL_AGENT if external else WorkExecutionMode.MODEL,
         dependencies=list(depends_on or []),
         context_requirements=_context_requirement(pattern, path, search, required_context),
+        conversation_key=thread,
+        conversation_strategy=ConversationStrategy.RESUME if thread and strategy is None else strategy,
     )
     typer.echo(item.model_dump_json(indent=2))
 
@@ -967,6 +976,27 @@ def project_context_requirements(
         project_id, work_item_id, _context_requirement(pattern, path, search, required_context)
     )
     typer.echo(item.model_dump_json(indent=2))
+
+
+@project_app.command("checks")
+def project_checks(
+    name: Annotated[str | None, typer.Argument()] = None,
+    argv: Annotated[list[str] | None, typer.Option("--argv")] = None,
+    remove: Annotated[bool, typer.Option("--remove")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    """List, add or remove the verification commands teammates may request by name."""
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    checks = load_verification_checks(root)
+    if name and remove:
+        checks.pop(name, None)
+        save_verification_checks(root, checks)
+    elif name and argv:
+        checks[name] = list(argv)
+        save_verification_checks(root, checks)
+    elif name:
+        raise typer.BadParameter("pass --argv to define the check, or --remove to delete it")
+    typer.echo(json.dumps(checks, indent=2, sort_keys=True))
 
 
 @project_app.command("status")
