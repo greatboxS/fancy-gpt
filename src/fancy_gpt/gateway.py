@@ -10,8 +10,6 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -1251,202 +1249,27 @@ def classify_error(exc: Exception, protocol: str) -> tuple[int, dict[str, Any], 
     return 502, _protocol_error(protocol, 502, str(exc), "api_error"), None
 
 
-@dataclass
-class GatewayApplication:
-    service: GatewayService
-    token: str | None = None
+def serve_gateway(
+    host: str,
+    port: int,
+    root: Path | str,
+    token: str | None = None,
+    *,
+    browser_slots: int | None = None,
+) -> None:
+    """Serve the gateway over ASGI.
 
-    def _authorized(self, headers: Any) -> bool:
-        """Constant-time bearer/api-key check.
+    ``browser_slots`` bounds how many automation tabs may be open at once; it is
+    the real resource, so it is deliberately separate from HTTP concurrency.
+    """
+    import uvicorn
 
-        Comparison uses ``secrets.compare_digest`` so a caller cannot probe
-        the token a character at a time by timing the response.
-        """
-        if not self.token:
-            return True
-        authorization = headers.get("Authorization") or ""
-        api_key = headers.get("x-api-key") or ""
-        expected_bearer = f"Bearer {self.token}"
-        return secrets.compare_digest(authorization, expected_bearer) or secrets.compare_digest(api_key, self.token)
+    from .gateway_app import create_app
 
-    def handler(self) -> type[BaseHTTPRequestHandler]:
-        app = self
-
-        class Handler(BaseHTTPRequestHandler):
-            server_version = "FancyGPTGateway/0.8"
-
-            def _send(
-                self,
-                status: int,
-                body: dict[str, Any],
-                content_type: str = "application/json",
-                extra_headers: dict[str, str] | None = None,
-            ) -> None:
-                raw = json.dumps(body, ensure_ascii=False).encode("utf-8")
-                self.send_response(status)
-                self.send_header("Content-Type", content_type)
-                for name, value in (extra_headers or {}).items():
-                    self.send_header(name, value)
-                self.send_header("Content-Length", str(len(raw)))
-                self.end_headers()
-                self.wfile.write(raw)
-
-            def _sse(self, events: list[tuple[str | None, dict[str, Any]]]) -> None:
-                chunks = []
-                for event, data in events:
-                    prefix = f"event: {event}\n" if event else ""
-                    chunks.append(f"{prefix}data: {json.dumps(data, ensure_ascii=False)}\n\n")
-                raw = "".join(chunks).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Content-Length", str(len(raw)))
-                self.end_headers()
-                self.wfile.write(raw)
-
-            def do_GET(self) -> None:
-                path = urlparse(self.path).path
-                if path == "/health":
-                    self._send(200, {
-                        "ok": True,
-                        "service": "fancy-gpt-gateway",
-                        "metrics": app.service.metrics.snapshot(),
-                        "active_conversations": len(app.service.locks.active_keys()),
-                        "capabilities": capability_report(GATEWAY_MODELS, GatewayService.resolve_site),
-                        "limits": app.service.limits.__dict__,
-                    })
-                elif path == "/metrics":
-                    self._send(200, {
-                        "metrics": app.service.metrics.snapshot(),
-                        "active_conversations": app.service.locks.active_keys(),
-                    })
-                elif path == "/v1/capabilities":
-                    self._send(200, {"capabilities": capability_report(GATEWAY_MODELS, GatewayService.resolve_site)})
-                elif path == "/v1/models":
-                    self._send(200, codex_models())
-                else:
-                    self._send(404, {"error": {"message": "not found", "type": "invalid_request_error"}})
-
-            def do_HEAD(self) -> None:
-                path = urlparse(self.path).path
-                self.send_response(200 if path in {"/health", "/api/hello"} else 404)
-                self.end_headers()
-
-            @staticmethod
-            def _protocol_for(path: str) -> str | None:
-                if path == "/v1/responses":
-                    return "openai"
-                if path == "/v1/messages":
-                    return "anthropic"
-                if ":generateContent" in path or ":streamGenerateContent" in path:
-                    return "gemini"
-                return None
-
-            def _idempotency_key(self) -> str | None:
-                for name in IDEMPOTENCY_HEADERS:
-                    value = self.headers.get(name)
-                    if value:
-                        candidate = value.strip()
-                        if len(candidate) > 255:
-                            raise ValueError("idempotency key must be 1-255 characters")
-                        return candidate
-                return None
-
-            def _client_key(self) -> str:
-                """Identify the caller for per-client concurrency accounting."""
-                declared = self.headers.get("x-fancy-client-id")
-                if declared:
-                    return _scrub(declared.strip())[:64]
-                return self.client_address[0] if self.client_address else "unknown"
-
-            def do_POST(self) -> None:
-                path = urlparse(self.path).path
-                protocol = self._protocol_for(path)
-                if protocol is None:
-                    self._send(404, {"error": {"message": "not found", "type": "invalid_request_error"}})
-                    return
-                token = CancelToken()
-                try:
-                    if not app._authorized(self.headers):
-                        self._send(401, _protocol_error(protocol, 401, "invalid API key", "authentication_error"))
-                        return
-                    # Size is checked from the header before any body is read or
-                    # parsed, so an oversized payload costs nothing.
-                    limit = app.service.limits.max_body_bytes
-                    try:
-                        size = int(self.headers.get("Content-Length", "0"))
-                    except ValueError:
-                        raise ValueError("Content-Length header is not an integer")
-                    if size <= 0:
-                        raise ValueError("request body is required")
-                    if size > limit:
-                        self._send(413, _protocol_error(protocol, 413, f"request body exceeds {limit} bytes", "invalid_request_error"))
-                        return
-                    payload = json.loads(self.rfile.read(size))
-                    if not isinstance(payload, dict):
-                        raise ValueError("request body must be a JSON object")
-                    session = _validate_header(self.headers.get("x-fancy-session-id"), "x-fancy-session-id")
-                    tunnel = _validate_header(self.headers.get("x-fancy-tunnel-id"), "x-fancy-tunnel-id")
-                    idempotency_key = self._idempotency_key()
-                    client_key = self._client_key()
-
-                    if protocol == "openai":
-                        turn = normalize_openai(payload, session)
-                    elif protocol == "anthropic":
-                        turn = normalize_anthropic(payload, session)
-                    else:
-                        model = path.split("/models/", 1)[1].split(":", 1)[0]
-                        turn = normalize_gemini(payload, model, session)
-
-                    result = app.service.execute(
-                        turn,
-                        tunnel_id=tunnel,
-                        idempotency_key=idempotency_key,
-                        cancel_token=token,
-                        client_key=client_key,
-                    )
-
-                    if protocol == "openai":
-                        body = openai_response(result)
-                        if turn.stream:
-                            self._sse(openai_stream_events(body, result))
-                        else:
-                            self._send(200, body)
-                    elif protocol == "anthropic":
-                        body = anthropic_response(result)
-                        if turn.stream:
-                            self._sse(anthropic_stream_events(body, result))
-                        else:
-                            self._send(200, body)
-                    else:
-                        body = gemini_response(result)
-                        if ":streamGenerateContent" in path:
-                            self._sse(gemini_stream_events(body))
-                        else:
-                            self._send(200, body)
-                except BrokenPipeError:
-                    # The client hung up. Cancel so the turn stops holding the
-                    # conversation lock instead of running on unobserved.
-                    token.cancel("client disconnected")
-                    return
-                except Exception as exc:  # noqa: BLE001 - mapped to a protocol envelope
-                    status, body, retry_after = classify_error(exc, protocol)
-                    headers = {"Retry-After": str(retry_after)} if retry_after else None
-                    try:
-                        self._send(status, body, extra_headers=headers)
-                    except BrokenPipeError:
-                        return
-
-            def log_message(self, fmt: str, *args: Any) -> None:
-                print(f"gateway: {fmt % args}")
-
-        return Handler
-
-
-def serve_gateway(host: str, port: int, root: Path | str, token: str | None = None) -> None:
     if host not in {"127.0.0.1", "localhost", "::1"} and not token:
         raise ValueError("a gateway token is required when binding outside loopback")
-    app = GatewayApplication(GatewayService(root), token=token)
-    server = ThreadingHTTPServer((host, port), app.handler())
-    print(f"FancyGPT model gateway listening on http://{host}:{port}")
-    server.serve_forever()
+    service = GatewayService(root)
+    slots = browser_slots or int(os.getenv("FANCY_GPT_GATEWAY_BROWSER_SLOTS", "4"))
+    app = create_app(service, token=token, browser_slots=slots)
+    print(f"FancyGPT model gateway listening on http://{host}:{port} ({slots} browser slots)")
+    uvicorn.run(app, host=host, port=port, log_level="warning", timeout_graceful_shutdown=30)

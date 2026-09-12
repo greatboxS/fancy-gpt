@@ -12,9 +12,14 @@ Requires-Dist: typer<1,>=0.26
 Requires-Dist: PyYAML<7,>=6
 Requires-Dist: mcp<3,>=2
 Requires-Dist: websockets<17,>=15
+Requires-Dist: starlette<2,>=0.40
+Requires-Dist: uvicorn<1,>=0.30
+Requires-Dist: sse-starlette<4,>=2
+Requires-Dist: anyio<5,>=4
 Provides-Extra: dev
 Requires-Dist: pytest<10,>=9; extra == "dev"
 Requires-Dist: pytest-cov<8,>=7; extra == "dev"
+Requires-Dist: httpx<1,>=0.27; extra == "dev"
 Provides-Extra: automation
 Requires-Dist: playwright<2,>=1.55; extra == "automation"
 Dynamic: license-file

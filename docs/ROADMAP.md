@@ -129,11 +129,17 @@ Delivered:
 - Bounded backpressure with protocol-native 429/529/RESOURCE_EXHAUSTED errors,
   credential scrubbing, constant-time token comparison, and `/health` + `/metrics`.
 - Compatibility matrix published in `docs/MODEL_GATEWAY.md`.
+- ASGI transport on Starlette/uvicorn with an `anyio.CapacityLimiter` bounding
+  browser tabs, client-disconnect cancellation while a turn is in flight, and
+  incremental SSE that stops when the caller goes away.
 
 Remaining:
 
-- Incremental SSE streaming with per-event cancellation checkpoints (mid-stream
-  disconnect is currently unproven).
+- True token-by-token generation streaming. The transport is now incremental
+  and cancellable, but the browser backend still returns a whole answer, so
+  SSE events are protocol framing rather than generation progress. The
+  provider's `on_progress` callback is the route to real deltas.
+
 - Enforce or remove `max_tool_loop_iterations`, which is declared but not enforced.
 - Real retry lineage (`attempt`, `retry_of`) populated and surfaced in inspection.
 - Legal turn-state transitions enforced as a compare-and-set.

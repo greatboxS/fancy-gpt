@@ -3,6 +3,10 @@ typer<1,>=0.26
 PyYAML<7,>=6
 mcp<3,>=2
 websockets<17,>=15
+starlette<2,>=0.40
+uvicorn<1,>=0.30
+sse-starlette<4,>=2
+anyio<5,>=4
 
 [automation]
 playwright<2,>=1.55
@@ -10,3 +14,4 @@ playwright<2,>=1.55
 [dev]
 pytest<10,>=9
 pytest-cov<8,>=7
+httpx<1,>=0.27

@@ -259,6 +259,39 @@ before submit**, never dropped and never turned into a text placeholder reported
 as success. `/v1/models`, `/health` and `/v1/capabilities` report the resolved
 intersection, so the Gemini protocol's video support is not advertised.
 
+### Transport and resource management
+
+The gateway runs as an ASGI app on **Starlette + uvicorn**, with SSE through
+**sse-starlette**. These arrive with the `mcp` dependency already, so they are
+declared directly rather than relied on transitively.
+
+The scarce resource is **browser tabs**, not CPU or threads: one turn occupies
+one automation tab for as long as the model takes to answer. So an
+`anyio.CapacityLimiter` bounds how many turns may hold a tab at once, and every
+turn runs on the worker thread pool through that limiter:
+
+```
+FANCY_GPT_GATEWAY_BROWSER_SLOTS   # default 4
+```
+
+`GatewayService` stays synchronous. The browser driver blocks in a socket read,
+so running the turn in a worker thread is what it actually is, and keeping the
+core sync leaves the state, compaction and capability layers untouched.
+
+A caller that disconnects cancels its turn *while the browser call is still in
+flight*, via a task that polls `request.is_disconnected()` and trips the
+`CancelToken`. The turn releases its conversation lock at its next checkpoint.
+
+Because the browser call blocks in an uninterruptible read, a cancelled turn is
+**abandoned rather than killed** (`abandon_on_cancel=True`): the gateway stops
+waiting and frees the caller, while the turn itself is recorded as
+`uncertain-submit` rather than pretending the browser work stopped.
+
+SSE events are emitted one at a time with a disconnect checkpoint between them.
+Note what this does and does not mean: the browser backend returns a whole
+answer, so these events are protocol *framing*, not token-by-token generation.
+What is genuinely incremental is the transport.
+
 ### Backpressure and limits
 
 | Limit | Default | Env override |

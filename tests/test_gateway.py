@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 import json
-import threading
-from http.server import ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 
 import pytest
 
 from fancy_gpt.gateway import (
-    GatewayApplication,
     GatewayService,
     anthropic_response,
     gemini_response,
@@ -20,7 +15,9 @@ from fancy_gpt.gateway import (
     openai_response,
     codex_models,
 )
+from fancy_gpt.gateway_app import create_app
 from fancy_gpt.models import AutomatedModelResponse, RequestState
+from .asgi_harness import request
 from fancy_gpt.tunnels.models import TunnelHealth, TunnelHealthState, TunnelSelection
 
 
@@ -143,41 +140,28 @@ def test_gateway_rejects_oversized_input_and_audits_failure(tmp_path: Path) -> N
 
 
 def test_gateway_http_three_protocols_streaming_and_auth(tmp_path: Path) -> None:
-    app = GatewayApplication(GatewayService(tmp_path, manager=Manager()), token="secret")
-    server = ThreadingHTTPServer(("127.0.0.1", 0), app.handler())
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{server.server_port}"
+    app = create_app(GatewayService(tmp_path, manager=Manager()), token="secret")
 
-    def post(path: str, payload: dict, *, auth: bool = True) -> tuple[str, str]:
+    def post(path: str, payload: dict, *, auth: bool = True):
         headers = {"Content-Type": "application/json"}
         if auth:
             headers["Authorization"] = "Bearer secret"
-        response = urlopen(Request(base + path, data=json.dumps(payload).encode(), headers=headers), timeout=5)
-        return response.headers.get_content_type(), response.read().decode()
+        return request(app, "POST", path, body=payload, headers=headers)
 
-    try:
-        with HTTPErrorContext(401):
-            post("/v1/responses", {"model": "gemini-web", "input": "hello"}, auth=False)
-        content_type, body = post("/v1/responses", {"model": "gemini-web", "input": "hello", "stream": True})
-        assert content_type == "text/event-stream"
-        assert "response.completed" in body
-        assert body.index("response.output_item.added") < body.index("response.output_text.delta")
-        _, body = post("/v1/messages", {"model": "chatgpt-web", "messages": [{"role": "user", "content": "hello"}]})
-        assert json.loads(body)["content"][0]["text"] == "gateway-ok"
-        _, body = post("/v1beta/models/gemini-web:generateContent", {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]})
-        assert json.loads(body)["candidates"][0]["content"]["parts"][0]["text"] == "gateway-ok"
-    finally:
-        server.shutdown()
-        server.server_close()
+    assert post("/v1/responses", {"model": "gemini-web", "input": "hello"}, auth=False).status == 401
 
+    streamed = post("/v1/responses", {"model": "gemini-web", "input": "hello", "stream": True})
+    assert streamed.status == 200
+    assert streamed.headers["content-type"].startswith("text/event-stream")
+    names = [event.get("event") for event in streamed.sse_events()]
+    assert "response.completed" in names
+    assert names.index("response.output_item.added") < names.index("response.output_text.delta")
 
-class HTTPErrorContext:
-    def __init__(self, code: int) -> None:
-        self.code = code
+    messages = post("/v1/messages", {"model": "chatgpt-web", "messages": [{"role": "user", "content": "hello"}]})
+    assert messages.json()["content"][0]["text"] == "gateway-ok"
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, kind, value, _traceback):
-        return kind is HTTPError and value.code == self.code
+    gemini = post(
+        "/v1beta/models/gemini-web:generateContent",
+        {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+    )
+    assert gemini.json()["candidates"][0]["content"]["parts"][0]["text"] == "gateway-ok"
