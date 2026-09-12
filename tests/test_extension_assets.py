@@ -74,3 +74,16 @@ def test_chromium_manifest_requires_websocket_service_worker_lifetime_support(tm
     chrome = export_extension("chrome", tmp_path / "chrome-min-version")
     manifest = json.loads((chrome / "manifest.json").read_text())
     assert int(manifest["minimum_chrome_version"]) >= 116
+
+
+def test_continue_generation_is_scoped_to_the_current_response(tmp_path: Path) -> None:
+    site = (export_extension("chrome", tmp_path / "chrome-current-turn") / "site_chatgpt.js").read_text()
+
+    # A stale button on an older ChatGPT turn must not keep a completed job
+    # alive until its timeout. The current response is bound first, then only
+    # that turn's subtree is searched for a continuation control.
+    bind_position = site.index("if (boundId == null)")
+    continue_position = site.index("const continueButton")
+    assert bind_position < continue_position
+    assert "findButtonByText(/continue generating/i, boundTurns[0])" in site
+    assert 'findButtonByText(/continue generating/i);' not in site

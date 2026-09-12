@@ -231,6 +231,13 @@ class ReviewEngine:
             context = self.context_builder.build(request, manifest)
             self.store.write_model(request_id, "context-pack.json", context)
             final_request = self.final_request_builder.build(request_id, request, route, manifest, context)
+            if planner_response.conversation_id:
+                # Keep both turns of one request in the same ChatGPT thread:
+                # without this, a fresh persistent-mode request would have the
+                # planner and final turns each start their own separate saved
+                # conversation (visibly duplicated, often with the same
+                # auto-generated title) instead of one continuous thread.
+                final_request.metadata["conversation_id"] = planner_response.conversation_id
             final_prompt_path = self.store.write_text(request_id, "final-prompt.md", final_request.prompt)
             self.store.transition(
                 request_id,
