@@ -4,6 +4,8 @@ import fnmatch
 import hashlib
 import os
 import subprocess
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import ContextRequirementError, ContextSecurityError, ContextTooLargeError
@@ -17,17 +19,53 @@ from .models import (
     ResearchManifest,
 )
 from .request_sanitizer import candidate_paths
+from .secret_policy import SecretPolicy
 
 _PRIORITY_RANK = {Priority.P0: 0, Priority.P1: 1, Priority.P2: 2, Priority.P3: 3, Priority.P4: 4}
 _HARD_PRUNE_DIRS = {
     ".git", ".venv", ".fancy-gpt", ".pytest_cache", "__pycache__", "node_modules",
     "build", "dist", ".wheel-sim", ".wheel-test", ".mypy_cache", ".ruff_cache",
+    "downloads", "sstate-cache",
 }
 
 
+@dataclass
+class _AcquisitionBudget:
+    max_files: int
+    max_bytes: int
+    deadline: float
+    files: int = 0
+    bytes: int = 0
+
+    def consume(self, size: int) -> bool:
+        if time.monotonic() > self.deadline:
+            return False
+        if self.files + 1 > self.max_files or self.bytes + size > self.max_bytes:
+            return False
+        self.files += 1
+        self.bytes += size
+        return True
+
+
 class ContextBuilder:
-    def __init__(self, max_file_bytes: int = 512_000) -> None:
+    def __init__(
+        self,
+        max_file_bytes: int = 512_000,
+        *,
+        max_scan_files: int = 20_000,
+        max_scan_bytes: int = 256 * 1024 * 1024,
+        max_scan_seconds: float = 10.0,
+        git_timeout_seconds: float = 5.0,
+        git_output_bytes: int = 2 * 1024 * 1024,
+        secret_policy: SecretPolicy | None = None,
+    ) -> None:
         self.max_file_bytes = max_file_bytes
+        self.max_scan_files = max_scan_files
+        self.max_scan_bytes = max_scan_bytes
+        self.max_scan_seconds = max_scan_seconds
+        self.git_timeout_seconds = git_timeout_seconds
+        self.git_output_bytes = git_output_bytes
+        self.secret_policy = secret_policy or SecretPolicy()
 
     def build(self, request: RawRequest, manifest: ResearchManifest) -> ContextPack:
         root = Path(request.repo_root).expanduser().resolve()
@@ -37,6 +75,11 @@ class ContextBuilder:
         excluded_candidate_paths = candidate_paths(request)
         candidates: dict[Path, Priority] = {}
         omitted: list[str] = []
+        acquisition = _AcquisitionBudget(
+            max_files=self.max_scan_files,
+            max_bytes=self.max_scan_bytes,
+            deadline=time.monotonic() + self.max_scan_seconds,
+        )
 
         if request.mode != RequestMode.DESIGN:
             for pattern in request.include:
@@ -50,7 +93,16 @@ class ContextBuilder:
             for pattern in req.patterns:
                 self._collect_pattern(root, pattern, req.priority, request.exclude, candidates, excluded_candidate_paths)
             if req.search_terms:
-                self._search_terms(root, req.search_terms, req.priority, request.exclude, candidates, excluded_candidate_paths)
+                complete = self._search_terms(
+                    root, req.search_terms, req.priority, request.exclude, candidates,
+                    excluded_candidate_paths, acquisition,
+                )
+                if not complete:
+                    omitted.append(f"acquisition-budget:{req.id}")
+                    if req.required:
+                        raise ContextRequirementError(
+                            f"required local context search exceeded acquisition budget: {req.id}"
+                        )
 
         artifacts: list[ContextArtifact] = []
         for spec in request.artifacts:
@@ -58,17 +110,25 @@ class ContextBuilder:
                 omitted.append("independence:candidate-solution")
                 continue
             if spec.content is not None:
-                raw = spec.content.encode("utf-8")
+                label = spec.name or "inline"
+                secret = self.secret_policy.sanitize(label, spec.content)
+                if not secret.allowed:
+                    omitted.append(f"secret-policy:{label}:{secret.reason}")
+                    continue
+                text = secret.content
+                if secret.redactions:
+                    omitted.append(f"secret-redacted:{label}:{secret.redactions}")
+                raw = text.encode("utf-8")
                 artifacts.append(ContextArtifact(
-                    id=self._artifact_id(spec.name or "inline", raw),
+                    id=self._artifact_id(label, raw),
                     source="inline",
-                    path=spec.name or "inline",
+                    path=label,
                     kind=spec.kind,
                     role=spec.role,
                     priority=spec.priority,
                     sha256=hashlib.sha256(raw).hexdigest(),
                     size=len(raw),
-                    content=spec.content,
+                    content=text,
                 ))
             elif spec.path:
                 self._collect_exact(root, spec.path, spec.priority, candidates, excluded_candidate_paths)
@@ -77,6 +137,11 @@ class ContextBuilder:
         # therefore excludes it by policy even if the raw request asked for it.
         if request.include_git_diff and request.mode != RequestMode.DESIGN:
             diff = self._git_diff(root)
+            if diff:
+                secret = self.secret_policy.sanitize("<git-diff>", diff)
+                diff = secret.content if secret.allowed else ""
+                if secret.redactions:
+                    omitted.append(f"secret-redacted:<git-diff>:{secret.redactions}")
             if diff:
                 raw = diff.encode("utf-8")
                 artifacts.append(ContextArtifact(
@@ -116,12 +181,22 @@ class ContextBuilder:
             except UnicodeDecodeError:
                 omitted.append(f"non-utf8:{self._relative(root, path)}")
                 continue
+            rel = path.relative_to(root).as_posix()
+            secret = self.secret_policy.sanitize(rel, text)
+            if not secret.allowed:
+                if priority == Priority.P0:
+                    raise ContextRequirementError(f"required P0 context denied by secret policy: {rel}")
+                omitted.append(f"secret-policy:{rel}:{secret.reason}")
+                continue
+            text = secret.content
+            raw = text.encode("utf-8")
+            if secret.redactions:
+                omitted.append(f"secret-redacted:{rel}:{secret.redactions}")
             if total + len(raw) > budget:
                 if priority == Priority.P0:
                     raise ContextTooLargeError("required P0 context does not fit context budget")
                 omitted.append(f"budget:{self._relative(root, path)}")
                 continue
-            rel = path.relative_to(root).as_posix()
             artifacts.append(ContextArtifact(
                 id=self._artifact_id(rel, raw),
                 source="filesystem",
@@ -187,6 +262,8 @@ class ContextBuilder:
         rel = path.relative_to(root).as_posix()
         parts = set(path.relative_to(root).parts)
         if parts & _HARD_PRUNE_DIRS or any(part.endswith(".egg-info") for part in parts):
+            return True
+        if any(part.startswith("build-") or part.startswith("tmp-") or part == "tmp" for part in parts):
             return True
         for pattern in excludes:
             variants = [pattern]
@@ -256,10 +333,11 @@ class ContextBuilder:
         excludes: list[str],
         candidates: dict[Path, Priority],
         excluded_candidate_paths: set[str],
-    ) -> None:
+        acquisition: _AcquisitionBudget,
+    ) -> bool:
         lowered = [term.lower() for term in terms if term]
         if not lowered:
-            return
+            return True
         for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
             current = Path(dirpath)
             kept: list[str] = []
@@ -280,14 +358,18 @@ class ContextBuilder:
                     continue
                 try:
                     safe = self._safe_path(root, path)
-                    if safe.stat().st_size > self.max_file_bytes:
+                    size = safe.stat().st_size
+                    if size > self.max_file_bytes:
                         continue
+                    if not acquisition.consume(size):
+                        return False
                     text = safe.read_text(encoding="utf-8", errors="strict")
                 except (OSError, UnicodeError):
                     continue
                 low = text.lower()
                 if any(term in low for term in lowered):
                     self._add_candidate(safe, priority, candidates)
+        return True
 
     @staticmethod
     def _add_candidate(path: Path, priority: Priority, candidates: dict[Path, Priority]) -> None:
@@ -304,22 +386,28 @@ class ContextBuilder:
         suffix = path.suffix.lower().lstrip(".")
         return suffix or "text"
 
-    @staticmethod
-    def _git_revision(root: Path) -> str | None:
-        result = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "HEAD"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False,
-        )
-        value = result.stdout.strip()
-        return value if result.returncode == 0 and value else None
+    def _run_git(self, root: Path, args: list[str]) -> str:
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), *args],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False,
+                timeout=self.git_timeout_seconds,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return ""
+        if result.returncode != 0:
+            return ""
+        raw = result.stdout.encode("utf-8", errors="replace")
+        if len(raw) > self.git_output_bytes:
+            return raw[: self.git_output_bytes].decode("utf-8", errors="ignore") + "\n<git-output-truncated>\n"
+        return result.stdout
 
-    @staticmethod
-    def _git_diff(root: Path) -> str:
-        result = subprocess.run(
-            ["git", "-C", str(root), "diff", "--no-ext-diff", "--"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=False,
-        )
-        return result.stdout if result.returncode == 0 else ""
+    def _git_revision(self, root: Path) -> str | None:
+        value = self._run_git(root, ["rev-parse", "HEAD"]).strip()
+        return value or None
+
+    def _git_diff(self, root: Path) -> str:
+        return self._run_git(root, ["diff", "--no-ext-diff", "--no-textconv", "--"])
 
     def _validate_required_context(self, manifest: ResearchManifest, artifacts: list[ContextArtifact]) -> list[str]:
         satisfied: list[str] = []

@@ -61,3 +61,60 @@ def test_required_context_fails_after_filter(tmp_path: Path):
     p["local_context_requirements"]=[{"id":"LC1","description":"candidate","patterns":["candidate.md"],"exact_paths":[],"search_terms":[],"priority":"P0","required":True}]
     req=RawRequest(mode="design",objective="design",repo_root=str(tmp_path),artifacts=[ArtifactSpec(path="candidate.md",role=ArtifactRole.CANDIDATE_SOLUTION)])
     with pytest.raises(ContextRequirementError): ContextBuilder().build(req,ResearchManifest.model_validate(p))
+
+
+def test_secret_policy_denies_secret_files_and_redacts_high_confidence_tokens(tmp_path: Path):
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456\n")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "config.txt").write_text("token=ghp_abcdefghijklmnopqrstuvwxyz123456\nnormal=value\n")
+    p = planner_payload()
+    p["online_research"] = []
+    p["tool_plan"] = []
+    p["local_context_requirements"] = [{
+        "id": "LC", "description": "config", "patterns": ["src/config.txt", ".env"],
+        "exact_paths": [], "search_terms": [], "priority": "P1", "required": False,
+    }]
+    pack = ContextBuilder().build(
+        RawRequest(mode="review", objective="review config", repo_root=str(tmp_path)),
+        ResearchManifest.model_validate(p),
+    )
+    assert all(item.path != ".env" for item in pack.artifacts)
+    assert any("secret-policy:.env" in item for item in pack.omitted)
+    config = next(item for item in pack.artifacts if item.path == "src/config.txt")
+    assert "ghp_" not in config.content
+    assert "<redacted:github-token>" in config.content
+    assert "normal=value" in config.content
+
+
+def test_required_p0_secret_context_fails_closed(tmp_path: Path):
+    (tmp_path / "private.pem").write_text("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n")
+    p = planner_payload()
+    p["online_research"] = []
+    p["tool_plan"] = []
+    p["local_context_requirements"] = [{
+        "id": "LC", "description": "private key", "patterns": [],
+        "exact_paths": ["private.pem"], "search_terms": [], "priority": "P0", "required": True,
+    }]
+    with pytest.raises(ContextRequirementError, match="secret policy"):
+        ContextBuilder().build(
+            RawRequest(mode="review", objective="inspect key", repo_root=str(tmp_path)),
+            ResearchManifest.model_validate(p),
+        )
+
+
+def test_search_acquisition_budget_fails_closed_for_required_context(tmp_path: Path):
+    (tmp_path / "src").mkdir()
+    for i in range(4):
+        (tmp_path / "src" / f"f{i}.txt").write_text("needle " + ("x" * 50))
+    p = planner_payload()
+    p["online_research"] = []
+    p["tool_plan"] = []
+    p["local_context_requirements"] = [{
+        "id": "LC", "description": "search", "patterns": [], "exact_paths": [],
+        "search_terms": ["needle"], "priority": "P0", "required": True,
+    }]
+    with pytest.raises(ContextRequirementError, match="acquisition budget"):
+        ContextBuilder(max_scan_files=1).build(
+            RawRequest(mode="review", objective="find needle", repo_root=str(tmp_path)),
+            ResearchManifest.model_validate(p),
+        )
