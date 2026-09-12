@@ -96,6 +96,21 @@ class ExecutionStore:
     def save(self, status: ExecutionStatus) -> None:
         self._atomic_write(self._path(status.execution_id), status.model_dump_json(indent=2))
 
+    def save_raw_response(self, execution_id: str, raw_text: str) -> Path:
+        """Keep the model's own words next to the execution record.
+
+        A team or focused turn that fails schema/JSON validation is otherwise
+        undiagnosable: the two-pass review path writes final-response.json, but
+        these one-turn paths kept nothing at all.
+        """
+        path = self.root / f"{execution_id}.response.txt"
+        self._atomic_write(path, raw_text)
+        return path
+
+    def raw_response(self, execution_id: str) -> str | None:
+        path = self.root / f"{execution_id}.response.txt"
+        return path.read_text(encoding="utf-8") if path.exists() else None
+
     def load(self, execution_id: str) -> ExecutionStatus:
         return ExecutionStatus.model_validate_json(self._path(execution_id).read_text(encoding="utf-8"))
 
@@ -197,7 +212,12 @@ class ExecutionCoordinator:
                 status = self._update(status, phase=current_phase)
                 current_phase = ExecutionPhase.FOCUSED_WAIT
                 status = self._update(status, phase=current_phase)
-                answer = self.focused_engine.run(question, provider, request_id=status.request_id)
+                answer = self.focused_engine.run(
+                    question,
+                    provider,
+                    request_id=status.request_id,
+                    on_raw_response=lambda text: self.store.save_raw_response(status.execution_id, text),
+                )
             status = self._update(status, phase=ExecutionPhase.COMPLETE)
             return answer
         except Exception as exc:
@@ -231,7 +251,12 @@ class ExecutionCoordinator:
                 status = self._update(status, phase=current_phase)
                 current_phase = ExecutionPhase.AGENT_WAIT
                 status = self._update(status, phase=current_phase)
-                outcome = self.agent_engine.run(assignment, provider, request_id=status.request_id)
+                outcome = self.agent_engine.run(
+                    assignment,
+                    provider,
+                    request_id=status.request_id,
+                    on_raw_response=lambda text: self.store.save_raw_response(status.execution_id, text),
+                )
             status = self._update(status, phase=ExecutionPhase.COMPLETE)
             return outcome
         except Exception as exc:

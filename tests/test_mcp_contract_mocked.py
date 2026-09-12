@@ -20,7 +20,7 @@ def test_mcp_tool_surface_can_be_registered_without_real_transport(monkeypatch):
       "list_skills","list_workflows","list_domains","server_stats",
       "create_session","get_session","list_sessions","close_session","create_chat","list_chats",
       "select_chat","archive_chat","list_session_requests","session_capabilities","inspect_session",
-      "create_project","bootstrap_project_cycle","get_project_status","continue_project","retry_project_work_item",
+      "create_project","bootstrap_project_cycle","add_project_work_item","set_project_work_item_context","get_project_status","continue_project","retry_project_work_item",
       "get_relevant_project_context","get_project_history","start_project_session","submit_agent_outcome","finish_project_session",
       "record_project_evidence","update_project_criterion","record_project_finding","resolve_project_finding","record_project_artifact",
       "run_project_next","run_project_until_pause","ask_focused",

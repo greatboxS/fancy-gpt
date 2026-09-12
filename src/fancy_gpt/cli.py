@@ -13,10 +13,10 @@ from .engine import ReviewEngine
 from .execution import ExecutionCoordinator, ExecutionStore
 from .mcp_clients import MCPClientKind, MCPClientRegistry
 from .io import load_mapping
-from .models import ChatPolicy, FinalReport, InspectedChat, RawRequest, ResearchManifest, SessionInspection
+from .models import ChatPolicy, FinalReport, InspectedChat, LocalContextRequirement, Priority, RawRequest, ResearchManifest, SessionInspection
 from .focused import FocusedAnswerEngine, FocusedQuestion
 from .orchestrator import TeamOrchestrator
-from .project_models import AcceptanceCriterion, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus
+from .project_models import AcceptanceCriterion, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus, WorkExecutionMode
 from .project_service import ProjectService
 from .project_runner import ProjectRunner
 from .relevance import ResponseIntent
@@ -902,6 +902,71 @@ def project_bootstrap(
     service = _project_service(workdir)
     ids = TeamOrchestrator(service).bootstrap_developer_cycle(project_id)
     typer.echo(json.dumps({"project_id": project_id, "work_item_ids": ids}, indent=2))
+
+
+def _context_requirement(
+    patterns: list[str] | None, paths: list[str] | None, terms: list[str] | None, required: bool
+) -> list[LocalContextRequirement]:
+    if not (patterns or paths or terms):
+        return []
+    return [
+        LocalContextRequirement(
+            id="LC1",
+            description="operator-declared work-item context",
+            patterns=list(patterns or []),
+            exact_paths=list(paths or []),
+            search_terms=list(terms or []),
+            priority=Priority.P0 if required else Priority.P1,
+            required=required,
+        )
+    ]
+
+
+@project_app.command("work-item")
+def project_work_item(
+    project_id: Annotated[str, typer.Argument()],
+    title: Annotated[str, typer.Option("--title")],
+    objective: Annotated[str, typer.Option("--objective")],
+    role: Annotated[AgentRole, typer.Option("--role")],
+    depends_on: Annotated[list[str] | None, typer.Option("--depends-on")] = None,
+    external: Annotated[bool, typer.Option("--external")] = False,
+    pattern: Annotated[list[str] | None, typer.Option("--pattern")] = None,
+    path: Annotated[list[str] | None, typer.Option("--path")] = None,
+    search: Annotated[list[str] | None, typer.Option("--search")] = None,
+    required_context: Annotated[bool, typer.Option("--required-context")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    """Add one work item, optionally declaring the repository source it needs."""
+    item = _project_service(workdir).add_work_item(
+        project_id,
+        title=title,
+        objective=objective,
+        role=role,
+        execution_mode=WorkExecutionMode.EXTERNAL_AGENT if external else WorkExecutionMode.MODEL,
+        dependencies=list(depends_on or []),
+        context_requirements=_context_requirement(pattern, path, search, required_context),
+    )
+    typer.echo(item.model_dump_json(indent=2))
+
+
+@project_app.command("context-requirements")
+def project_context_requirements(
+    project_id: Annotated[str, typer.Argument()],
+    work_item_id: Annotated[str, typer.Argument()],
+    pattern: Annotated[list[str] | None, typer.Option("--pattern")] = None,
+    path: Annotated[list[str] | None, typer.Option("--path")] = None,
+    search: Annotated[list[str] | None, typer.Option("--search")] = None,
+    required_context: Annotated[bool, typer.Option("--required-context")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    """Point an existing work item at the repository source it must read.
+
+    Passing no selector clears the declaration, so the item reads nothing.
+    """
+    item = _project_service(workdir).set_context_requirements(
+        project_id, work_item_id, _context_requirement(pattern, path, search, required_context)
+    )
+    typer.echo(item.model_dump_json(indent=2))
 
 
 @project_app.command("status")

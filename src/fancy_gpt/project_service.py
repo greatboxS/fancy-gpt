@@ -1,7 +1,21 @@
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path
+
+from .context_builder import ContextBuilder
+from .models import (
+    ContextArtifact,
+    Freshness,
+    LocalContextRequirement,
+    RawRequest,
+    ReportContract,
+    RequestMode,
+    ResearchBudget,
+    ResearchManifest,
+    ResearchQuestion,
+)
 
 from .project_models import (
     AcceptanceCriterion,
@@ -38,8 +52,73 @@ from .relevance import RelevanceSufficiencyPolicy, ResponseIntent, relevant_subs
 
 
 class ProjectService:
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        context_builder: ContextBuilder | None = None,
+        allowed_roots: list[Path | str] | None = None,
+        max_context_bytes: int = 180_000,
+    ) -> None:
         self.store = ProjectStore(root)
+        self.context_builder = context_builder or ContextBuilder()
+        self.allowed_roots = self._resolve_allowed_roots(allowed_roots)
+        self.max_context_bytes = max_context_bytes
+
+    @staticmethod
+    def _resolve_allowed_roots(values: list[Path | str] | None) -> list[Path]:
+        # Same contract as ReviewEngine: a project's repo_root is never trusted
+        # just because it was persisted in the journal.
+        if values is not None:
+            roots = [Path(value).expanduser().resolve() for value in values]
+        else:
+            env = os.getenv("FANCY_GPT_ALLOWED_ROOTS", "").strip()
+            roots = (
+                [Path(item).expanduser().resolve() for item in env.split(os.pathsep) if item]
+                if env
+                else [Path.cwd().resolve()]
+            )
+        if not roots:
+            raise ValueError("at least one allowed root is required")
+        return roots
+
+    @staticmethod
+    def _has_selector(requirements: list[LocalContextRequirement]) -> bool:
+        return any(req.patterns or req.exact_paths or req.search_terms for req in requirements)
+
+    def _acquire_repository_source(
+        self, repo_root: str, requirements: list[LocalContextRequirement]
+    ) -> tuple[list[ContextArtifact], list[str], str | None]:
+        """Materialize only what the work item asked for.
+
+        Acquisition is delegated to ContextBuilder so assignments inherit the
+        same SecretPolicy, size and time bounds as the review path rather than
+        growing a second, weaker reader.
+        """
+        if not self._has_selector(requirements):
+            return [], [], None
+        # Validate before any filesystem read, not after.
+        root = self.context_builder.validate_allowed_root(repo_root, self.allowed_roots)
+        request = RawRequest(
+            mode=RequestMode.REVIEW,
+            objective="materialize declared work-item context",
+            repo_root=str(root),
+            max_context_bytes=self.max_context_bytes,
+        )
+        manifest = ResearchManifest(
+            intent=[RequestMode.REVIEW],
+            domains=[],
+            research_goal="materialize declared work-item context",
+            research_questions=[
+                ResearchQuestion(id="RQ1", question="what source does this work item need?", rationale="work-item declaration")
+            ],
+            local_context_requirements=requirements,
+            freshness=Freshness.VERSION_SPECIFIC,
+            report_contract=ReportContract(sections=["context"]),
+            research_budget=ResearchBudget(max_context_bytes=self.max_context_bytes),
+        )
+        pack = self.context_builder.build(request, manifest)
+        return pack.artifacts, pack.omitted, pack.revision
 
     @staticmethod
     def _id(prefix: str) -> str:
@@ -86,6 +165,7 @@ class ProjectService:
         acceptance_notes: list[str] | None = None,
         required_for_completion: bool = True,
         activation_condition: WorkActivationCondition = WorkActivationCondition.ALWAYS,
+        context_requirements: list[LocalContextRequirement] | None = None,
         work_item_id: str | None = None,
     ) -> WorkItem:
         snapshot = self.snapshot(project_id)
@@ -108,9 +188,23 @@ class ProjectService:
             acceptance_notes=acceptance_notes or [],
             required_for_completion=required_for_completion,
             activation_condition=activation_condition,
+            context_requirements=context_requirements or [],
         )
         self.store.append(project_id, ProjectEventType.WORK_ITEM_CREATED, item.model_dump(mode="json"))
         return item
+
+    def set_context_requirements(
+        self, project_id: str, work_item_id: str, requirements: list[LocalContextRequirement]
+    ) -> WorkItem:
+        """Declare what of the repository a work item needs.
+
+        Bootstrapped cycle items start with none, so this is how an operator
+        points an existing role at the source it must actually read.
+        """
+        current = self.snapshot(project_id).work_item(work_item_id)
+        updated = current.model_copy(update={"context_requirements": list(requirements)})
+        self.store.append(project_id, ProjectEventType.WORK_ITEM_CREATED, updated.model_dump(mode="json"))
+        return updated
 
     def set_work_item_state(self, project_id: str, work_item_id: str, state: WorkItemState, *, result_summary: str | None = None) -> WorkItem:
         current = self.snapshot(project_id).work_item(work_item_id)
@@ -440,6 +534,9 @@ class ProjectService:
         evidence = [item for item in snapshot.evidence if not item.source_session_id or item.source_session_id in relevant_sessions]
         findings = [item for item in snapshot.findings if item.status == FindingStatus.OPEN and (not item.source_session_id or item.source_session_id in relevant_sessions)]
         artifacts = [item for item in snapshot.artifacts if not item.source_session_id or item.source_session_id in relevant_sessions]
+        repo_artifacts, repo_omitted, repo_revision = self._acquire_repository_source(
+            snapshot.project.repo_root, current.context_requirements if current else []
+        )
         return RelevantProjectContext(
             project_id=project_id,
             target=snapshot.project.target.statement,
@@ -453,6 +550,9 @@ class ProjectService:
             open_work_items=open_items,
             next_actions=snapshot.next_actions,
             principles=snapshot.project.principles,
+            repository_source=repo_artifacts,
+            repository_omitted=repo_omitted,
+            repository_revision=repo_revision,
         )
 
     def start_assignment(

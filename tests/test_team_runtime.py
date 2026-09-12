@@ -15,6 +15,7 @@ from fancy_gpt.project_models import (
 from fancy_gpt.project_runner import ProjectRunner
 from fancy_gpt.project_service import ProjectService
 from fancy_gpt.providers import ChatGPTWebAutomationProvider
+from fancy_gpt.team_agent import TeamAgentEngine
 
 
 def _response(*, summary: str, status: str = "complete", decisions=None, evidence=None, findings=None, finding_resolutions=None, artifacts=None, criterion_assessments=None, next_actions=None):
@@ -327,3 +328,22 @@ def test_implementer_outcome_can_resolve_review_finding(tmp_path: Path) -> None:
     snapshot = service.snapshot(project.project_id)
     assert snapshot.findings[0].status.value == "resolved"
     assert snapshot.work_item(work.work_item_id).state == WorkItemState.DONE
+
+
+def test_agent_prompt_states_every_identity_field_it_later_enforces(tmp_path: Path) -> None:
+    # The runtime rejects an outcome whose request_id/session_id/work_item_id/role
+    # differ from the assignment. A real model can only satisfy that if the prompt
+    # actually tells it those values; FakeBrowserDriver echoes them, so only an
+    # explicit check keeps the prompt and the validation in agreement.
+    service = ProjectService(tmp_path)
+    project = service.create_project(name="p", target="ship the thing")
+    item = service.add_work_item(
+        project.project_id, title="Research", objective="collect facts", role=AgentRole.RESEARCHER
+    )
+    assignment = service.start_assignment(project.project_id, item.work_item_id)
+    request = TeamAgentEngine().build_request(assignment, request_id="req-identity-1")
+
+    assert "req-identity-1" in request.prompt
+    assert assignment.session.session_id in request.prompt
+    assert assignment.work_item_id in request.prompt
+    assert assignment.role.value in request.prompt

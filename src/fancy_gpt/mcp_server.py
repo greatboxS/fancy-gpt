@@ -11,7 +11,7 @@ from .engine import ReviewEngine
 from .execution import ExecutionCoordinator, ExecutionStatus, ExecutionStore
 from .focused import FocusedAnswer, FocusedAnswerEngine, FocusedQuestion
 from .orchestrator import TeamOrchestrator
-from .project_models import AcceptanceCriterion, AgentAssignment, AgentOutcome, ConversationStrategy, CriterionStatus, ProjectArtifactRecord, FindingRecord, ProjectEvent, ProjectRecord, ProjectSnapshot, RelevantProjectContext, SessionRecord, TeamCyclePlan, TeamStepResult, WorkItem
+from .project_models import AcceptanceCriterion, AgentAssignment, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus, ProjectArtifactRecord, FindingRecord, ProjectEvent, ProjectRecord, ProjectSnapshot, RelevantProjectContext, SessionRecord, TeamCyclePlan, TeamStepResult, WorkExecutionMode, WorkItem
 from .project_service import ProjectService
 from .project_runner import ProjectRunner
 from .relevance import ResponseIntent
@@ -20,6 +20,8 @@ from .models import (
     ContextPack,
     FinalReport,
     InteractionRequired,
+    LocalContextRequirement,
+    Priority,
     SessionInspection,
     RawRequest,
     RequestStatus,
@@ -311,6 +313,61 @@ def create_project(
 def bootstrap_project_cycle(project_id: str) -> list[str]:
     service = _project_service()
     return TeamOrchestrator(service).bootstrap_developer_cycle(project_id)
+
+
+def _context_requirements(
+    patterns: list[str] | None, paths: list[str] | None, required: bool
+) -> list[LocalContextRequirement]:
+    if not (patterns or paths):
+        return []
+    return [
+        LocalContextRequirement(
+            id="LC1",
+            description="caller-declared work-item context",
+            patterns=list(patterns or []),
+            exact_paths=list(paths or []),
+            priority=Priority.P0 if required else Priority.P1,
+            required=required,
+        )
+    ]
+
+
+@mcp.tool()
+def add_project_work_item(
+    project_id: str,
+    title: str,
+    objective: str,
+    role: AgentRole,
+    dependencies: list[str] | None = None,
+    external_agent: bool = False,
+    context_patterns: list[str] | None = None,
+    context_paths: list[str] | None = None,
+    context_required: bool = False,
+) -> WorkItem:
+    """Add one work item, optionally declaring the repository source it needs."""
+    return _project_service().add_work_item(
+        project_id,
+        title=title,
+        objective=objective,
+        role=role,
+        execution_mode=WorkExecutionMode.EXTERNAL_AGENT if external_agent else WorkExecutionMode.MODEL,
+        dependencies=dependencies or [],
+        context_requirements=_context_requirements(context_patterns, context_paths, context_required),
+    )
+
+
+@mcp.tool()
+def set_project_work_item_context(
+    project_id: str,
+    work_item_id: str,
+    context_patterns: list[str] | None = None,
+    context_paths: list[str] | None = None,
+    context_required: bool = False,
+) -> WorkItem:
+    """Point an existing work item at the repository source it must read."""
+    return _project_service().set_context_requirements(
+        project_id, work_item_id, _context_requirements(context_patterns, context_paths, context_required)
+    )
 
 
 @mcp.tool()

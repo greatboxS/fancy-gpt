@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
-from .models import StrictModel
+from .models import ContextArtifact, LocalContextRequirement, StrictModel
 from .relevance import RelevanceAssessment, RelevanceSufficiencyPolicy, ResponseIntent
 
 
@@ -125,6 +126,10 @@ class WorkItem(StrictModel):
     result_summary: str | None = None
     required_for_completion: bool = True
     activation_condition: WorkActivationCondition = WorkActivationCondition.ALWAYS
+    # What of the repository this work item needs to see. Empty means the
+    # assignment carries no source at all and performs no repository read;
+    # the whole tree is never sent implicitly.
+    context_requirements: list[LocalContextRequirement] = Field(default_factory=list)
 
 
 class SessionRecord(StrictModel):
@@ -271,6 +276,11 @@ class RelevantProjectContext(StrictModel):
     open_work_items: list[WorkItem] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
     principles: RelevanceSufficiencyPolicy = Field(default_factory=RelevanceSufficiencyPolicy)
+    # Bounded, secret-filtered repository source for the current work item.
+    # Each artifact carries the path and sha256 a teammate can cite as evidence.
+    repository_source: list[ContextArtifact] = Field(default_factory=list)
+    repository_omitted: list[str] = Field(default_factory=list)
+    repository_revision: str | None = None
 
 
 class ProjectSnapshot(StrictModel):
@@ -359,6 +369,18 @@ def conversation_turn_metadata(
     return {"conversation_id": resumable, "conversation_mode": "persistent"}
 
 
+# Mirrors CONVERSATION_ID_PATTERN in the browser extension, which is what
+# actually parses /c/<id> out of the ChatGPT URL and reports it back.
+_CONVERSATION_ID = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+
+
 def is_chatgpt_conversation(binding: str) -> bool:
-    """True when a binding identifies a real, resumable ChatGPT conversation."""
-    return binding.startswith("https://chatgpt.com/c/") or binding.startswith("fake-conv-")
+    """True when a binding identifies a real, resumable ChatGPT conversation.
+
+    The driver layer reports a bare conversation id, the form the extension
+    reads from the page URL. A full /c/<id> URL is accepted too so a binding
+    pasted by hand still works.
+    """
+    if binding.startswith("https://chatgpt.com/c/"):
+        binding = binding[len("https://chatgpt.com/c/"):].split("?", 1)[0].strip("/")
+    return bool(_CONVERSATION_ID.match(binding))

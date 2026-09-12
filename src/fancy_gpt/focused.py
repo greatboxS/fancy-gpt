@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Callable
+
 import json
 import uuid
 from pathlib import Path
@@ -62,6 +64,11 @@ class FocusedAnswerEngine:
 Resolve the caller's current question with the minimum sufficient information needed to use the answer correctly.
 This is NOT a request for a broad review or tutorial unless the question itself requires one.
 
+## RESPONSE IDENTITY
+Copy this value verbatim into the `request_id` field of your JSON response.
+It identifies this turn and is rejected if altered or invented.
+- request_id: {request_id}
+
 ## QUESTION
 {question.question}
 
@@ -110,13 +117,23 @@ Return ONLY one JSON object matching this schema:
             },
         )
 
-    def run(self, question: FocusedQuestion, provider: AutomaticModelProvider, *, request_id: str | None = None) -> FocusedAnswer:
+    def run(
+        self,
+        question: FocusedQuestion,
+        provider: AutomaticModelProvider,
+        *,
+        request_id: str | None = None,
+        on_raw_response: Callable[[str], None] | None = None,
+    ) -> FocusedAnswer:
         request = self.build_request(question, request_id=request_id)
         provider_started = False
         try:
             provider.start()
             provider_started = True
             response: AutomatedModelResponse = provider.execute(request)
+            if on_raw_response is not None:
+                # Persist before parsing so a malformed reply is still inspectable.
+                on_raw_response(response.raw_text)
             payload = parse_json_object(response.raw_text)
             answer = FocusedAnswer.model_validate(payload)
             if answer.request_id != request.request_id:
