@@ -112,3 +112,29 @@ def test_build_id_changes_when_the_adapter_changes() -> None:
 
     source = files("fancy_gpt").joinpath("extension_assets/chromium/site_chatgpt.js").read_text(encoding="utf-8")
     assert adapter_build_id(source) != adapter_build_id(source + "\n// drift\n")
+
+
+def test_provider_refuses_a_browser_running_a_different_adapter_build() -> None:
+    # The browser is usually on another machine, so an extension that was never
+    # reloaded looks exactly like one that was, until it fails somewhere that
+    # has nothing to do with the real cause.
+    import pytest
+
+    from fancy_gpt.browser import BrowserUiDriftError
+    from fancy_gpt.extension_utils import adapter_build_id
+    from fancy_gpt.providers import ChatGPTWebAutomationProvider
+
+    require = ChatGPTWebAutomationProvider._require_current_adapter
+    require({"ok": True, "build": adapter_build_id()})
+
+    with pytest.raises(BrowserUiDriftError, match="too old to report one"):
+        require({"ok": True})
+    with pytest.raises(BrowserUiDriftError, match="build deadbeef"):
+        require({"ok": True, "build": "deadbeef"})
+
+
+def test_adapter_drift_can_be_overridden_deliberately(monkeypatch) -> None:
+    from fancy_gpt.providers import ChatGPTWebAutomationProvider
+
+    monkeypatch.setenv("FANCY_GPT_ALLOW_ADAPTER_DRIFT", "1")
+    ChatGPTWebAutomationProvider._require_current_adapter({"ok": True})

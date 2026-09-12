@@ -3,8 +3,11 @@ from __future__ import annotations
 import threading
 from typing import Callable
 
+import os
+
 from fancy_gpt.bridge.client import SiteHealthUnsupported
-from fancy_gpt.browser import BrowserDriver, BrowserPromptTooLargeError
+from fancy_gpt.extension_utils import adapter_build_id
+from fancy_gpt.browser import BrowserDriver, BrowserPromptTooLargeError, BrowserUiDriftError
 from fancy_gpt.models import AutomatedModelResponse, ModelRequest
 
 
@@ -45,7 +48,7 @@ class ChatGPTWebAutomationProvider:
                 site_health = getattr(self.driver, "site_health", None)
                 if callable(site_health):
                     try:
-                        site_health(timeout_s=min(20.0, self.timeout_s))
+                        self._require_current_adapter(site_health(timeout_s=min(20.0, self.timeout_s)))
                     except SiteHealthUnsupported:
                         # An older extension cannot answer the readiness probe.
                         # That is exactly the pre-probe behaviour, so continue
@@ -58,6 +61,29 @@ class ChatGPTWebAutomationProvider:
                 self.driver.stop()
                 raise
             self._started = True
+
+    @staticmethod
+    def _require_current_adapter(payload: dict) -> None:
+        """Refuse to drive a browser running a different build of the adapter.
+
+        The browser usually runs on another machine, so an extension that was
+        never reloaded is indistinguishable from one that was -- until it fails
+        somewhere unrelated, like a selector that this build no longer uses.
+        Stopping here costs one second; the alternative costs a model turn and
+        points at the wrong thing.
+        """
+        if os.getenv("FANCY_GPT_ALLOW_ADAPTER_DRIFT"):
+            return
+        expected = adapter_build_id()
+        live = str(payload.get("build") or "")
+        if live == expected:
+            return
+        running = f"build {live}" if live else "a build too old to report one"
+        raise BrowserUiDriftError(
+            f"the browser extension is running {running}, but this install ships {expected}. "
+            "Re-export it with 'fancy-gpt extension export-all <dir>' and reload it in the browser. "
+            "Set FANCY_GPT_ALLOW_ADAPTER_DRIFT=1 to run anyway."
+        )
 
     def stop(self) -> None:
         if self._started:

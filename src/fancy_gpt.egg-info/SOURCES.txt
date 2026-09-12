@@ -115,6 +115,7 @@ tests/test_catalog_routing.py
 tests/test_code_change.py
 tests/test_context.py
 tests/test_conversation_continuity.py
+tests/test_conversation_index.py
 tests/test_engine.py
 tests/test_execution.py
 tests/test_extension_assets.py
