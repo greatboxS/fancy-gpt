@@ -13,7 +13,7 @@ from .engine import ReviewEngine
 from .execution import ExecutionCoordinator, ExecutionStore
 from .mcp_clients import MCPClientKind, MCPClientRegistry
 from .io import load_mapping
-from .models import ChatPolicy, FinalReport, InspectedChat, LocalContextRequirement, Priority, RawRequest, ResearchManifest, SessionInspection
+from .models import ChatPolicy, FinalReport, InspectedChat, LocalContextRequirement, Priority, RawRequest, RequestState, ResearchManifest, SessionInspection
 from .focused import FocusedAnswerEngine, FocusedQuestion
 from .orchestrator import TeamOrchestrator
 from .project_models import AcceptanceCriterion, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus, WorkExecutionMode
@@ -34,6 +34,7 @@ from .web.sites import SiteRegistry
 from .web.transport import TransportRegistry
 from .self_test import run_self_test
 from . import __version__
+from .gateway import serve_gateway
 
 
 def _truncate(text: str, width: int) -> str:
@@ -145,6 +146,8 @@ sessions_app = typer.Typer(help="Manage persistent FancyGPT work sessions")
 chats_app = typer.Typer(help="Manage chats inside a FancyGPT session")
 project_app = typer.Typer(help="Persistent engineering projects, sessions, work items, and evidence")
 execution_app = typer.Typer(help="Inspect tracked execution lifecycle and structured failures")
+gateway_app = typer.Typer(help="Serve OpenAI, Anthropic, and Gemini-compatible model APIs")
+requests_app = typer.Typer(help="Inspect FancyGPT requests across review, focused, and agent runs")
 clients_app = typer.Typer(help="Inspect/register FancyGPT with MCP clients such as Codex and Claude Code")
 app.add_typer(catalogs_app, name="catalogs")
 app.add_typer(validate_app, name="validate")
@@ -159,6 +162,8 @@ app.add_typer(sessions_app, name="sessions")
 app.add_typer(chats_app, name="chats")
 app.add_typer(project_app, name="project")
 app.add_typer(execution_app, name="execution")
+app.add_typer(gateway_app, name="gateway")
+app.add_typer(requests_app, name="requests")
 app.add_typer(clients_app, name="clients")
 
 
@@ -353,6 +358,7 @@ def ask_cmd(
         ),
         tunnel_id=tunnel,
         tunnel_policy=tunnel_policy,
+        chat_resolution=resolution,
     )
     if session and answer.conversation_binding:
         service.bind_session_conversation(project_id, session.session_id, answer.conversation_binding)
@@ -494,6 +500,45 @@ def final_import(
 @app.command()
 def status(request_id: str, workdir: Annotated[Path | None, typer.Option("--workdir")] = None) -> None:
     typer.echo(_engine(workdir).status(request_id).model_dump_json(indent=2))
+
+
+@requests_app.command("list")
+def requests_list(
+    session_id: Annotated[str | None, typer.Option("--session")] = None,
+    state: Annotated[RequestState | None, typer.Option("--state")] = None,
+    kind: Annotated[str | None, typer.Option("--kind")] = None,
+    limit: Annotated[int, typer.Option("--limit", min=1, max=1000)] = 100,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    items = _engine(workdir).list_requests(session_id=session_id, state=state, kind=kind, limit=limit)
+    if json_output:
+        typer.echo(json.dumps([item.model_dump(mode="json") for item in items], indent=2))
+        return
+    typer.echo(_table(
+        ["REQUEST", "KIND", "STATE", "SESSION", "OBJECTIVE"],
+        [[item.request_id, item.kind, item.state.value, session_id or "-", item.objective] for item in items],
+        max_widths=[None, None, None, None, 60],
+    ))
+
+
+@requests_app.command("inspect")
+def requests_inspect(
+    request_id: str,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_engine(workdir).inspect_request(request_id).model_dump_json(indent=2))
+
+
+@requests_app.command("raw")
+def requests_raw(
+    request_id: str,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    raw = _engine(workdir).request_raw_response(request_id)
+    if raw is None:
+        raise typer.BadParameter("request has no captured model response")
+    typer.echo(raw)
 
 
 @sessions_app.command("create")
@@ -923,6 +968,17 @@ def execution_recent(
 ) -> None:
     root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
     typer.echo(json.dumps([item.model_dump(mode="json") for item in ExecutionStore(root).list_recent(limit)], indent=2))
+
+
+@gateway_app.command("serve")
+def gateway_serve(
+    host: Annotated[str, typer.Option("--host")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port")] = 8787,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+    token: Annotated[str | None, typer.Option("--token", envvar="FANCY_GPT_GATEWAY_TOKEN")] = None,
+) -> None:
+    """Run the direct model-provider gateway."""
+    serve_gateway(host, port, workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt")), token)
 
 
 @project_app.command("init")

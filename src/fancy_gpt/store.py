@@ -84,10 +84,14 @@ class RequestStore:
         session_id: str | None = None,
         chat_id: str | None = None,
         chat_policy: ChatPolicy | None = None,
+        kind: str = "review",
+        execution_id: str | None = None,
     ) -> RequestStatus:
         now = _now()
         status = RequestStatus(
             request_id=request_id,
+            kind=kind,
+            execution_id=execution_id,
             state=RequestState.NEW,
             route_kind=route_kind,
             route_name=route_name,

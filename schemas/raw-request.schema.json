@@ -273,6 +273,11 @@
       "title": "Max Context Bytes",
       "type": "integer"
     },
+    "site": {
+      "default": "chatgpt",
+      "title": "Site",
+      "type": "string"
+    },
     "tunnel": {
       "anyOf": [
         {

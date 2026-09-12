@@ -30,9 +30,9 @@ Install-once independent technical reasoning toolkit with MCP, an online pre-req
 Development is organized around two stable, independent integration surfaces:
 
 - **MCP tools** let an existing agent delegate bounded work to FancyGPT.
-- **Model Gateway** will let Codex, Claude Code, and Gemini-compatible clients use a FancyGPT web model as their direct model provider.
+- **Model Gateway** lets Codex, Claude Code, and Gemini CLI use a FancyGPT web model as their direct model provider.
 
-The current delivery order and acceptance gates are tracked in [ROADMAP.md](docs/ROADMAP.md). The planned gateway protocols and context model are specified in [MODEL_GATEWAY.md](docs/MODEL_GATEWAY.md).
+The current delivery order and acceptance gates are tracked in [ROADMAP.md](docs/ROADMAP.md). Gateway setup, protocols, and context behavior are specified in [MODEL_GATEWAY.md](docs/MODEL_GATEWAY.md).
 
 ## Install once
 

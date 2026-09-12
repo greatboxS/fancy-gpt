@@ -21,10 +21,12 @@ from .models import (
     ContextPack,
     FinalReport,
     InteractionRequired,
+    InspectedRequest,
     LocalContextRequirement,
     Priority,
     SessionInspection,
     RawRequest,
+    RequestState,
     RequestStatus,
     ResearchManifest,
     RoutingDecision,
@@ -143,6 +145,29 @@ def submit_final_result(request_id: str, result: FinalReport) -> FinalReport:
 @tracked("get_request_status")
 def get_request_status(request_id: str) -> RequestStatus:
     return _engine().status(request_id)
+
+
+@mcp.tool()
+@tracked("inspect_request")
+def inspect_request(request_id: str) -> InspectedRequest:
+    return _engine().inspect_request(request_id)
+
+
+@mcp.tool()
+@tracked("list_requests")
+def list_requests(
+    session_id: str | None = None,
+    state: RequestState | None = None,
+    kind: str | None = None,
+    limit: int = 100,
+) -> list[InspectedRequest]:
+    return _engine().list_requests(session_id=session_id, state=state, kind=kind, limit=limit)
+
+
+@mcp.tool()
+@tracked("get_request_raw_response")
+def get_request_raw_response(request_id: str) -> str | None:
+    return _engine().request_raw_response(request_id)
 
 
 @mcp.tool()
@@ -571,6 +596,7 @@ def ask_focused(
         ),
         tunnel_id=tunnel_id,
         tunnel_policy=tunnel_policy,
+        chat_resolution=resolution,
     )
     if session and answer.conversation_binding:
         service.bind_session_conversation(project_id, session.session_id, answer.conversation_binding)

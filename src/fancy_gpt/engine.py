@@ -391,6 +391,31 @@ class ReviewEngine:
     def inspect_session(self, session_id: str) -> SessionInspection:
         return SessionInspectionService(self.session_store, self.store).inspect_session(session_id)
 
+    def inspect_request(self, request_id: str):
+        return SessionInspectionService.inspect_request(self.store.load_status(request_id))
+
+    def list_requests(
+        self, *, session_id: str | None = None, state: RequestState | None = None,
+        kind: str | None = None, limit: int = 100,
+    ):
+        statuses = self.list_session_requests(session_id) if session_id else self.store.list_statuses()
+        if state is not None:
+            statuses = [item for item in statuses if item.state == state]
+        if kind is not None:
+            statuses = [item for item in statuses if item.kind == kind]
+        return [SessionInspectionService.inspect_request(item) for item in statuses[:max(0, min(limit, 1000))]]
+
+    def request_raw_response(self, request_id: str) -> str | None:
+        status = self.store.load_status(request_id)
+        path_value = status.final_response_file or status.planner_response_file
+        if not path_value:
+            return None
+        path = Path(path_value).expanduser().resolve()
+        root = Path(self.store.root).expanduser().resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("request response file is outside the work directory")
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+
     def inspect_context(self, request_id: str) -> ContextPack:
         return self.store.read_model(request_id, "context-pack.json", ContextPack)
 

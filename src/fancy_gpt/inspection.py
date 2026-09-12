@@ -70,7 +70,8 @@ class SessionInspectionService:
         )
 
     def _inspect_chat(self, chat: ChatRecord, active_chat_id: str | None) -> InspectedChat:
-        latest = self._latest_request(chat)
+        requests = self._requests(chat)
+        latest = requests[0] if requests else None
         return InspectedChat(
             chat_id=chat.chat_id,
             title=chat.title,
@@ -82,20 +83,26 @@ class SessionInspectionService:
             tunnel_id=chat.tunnel_id or (latest.tunnel_id if latest else None),
             request_count=len(chat.request_ids),
             latest_request=latest,
+            requests=requests,
         )
 
-    def _latest_request(self, chat: ChatRecord) -> InspectedRequest | None:
+    def _requests(self, chat: ChatRecord) -> list[InspectedRequest]:
         statuses: list[RequestStatus] = []
         for request_id in chat.request_ids:
             try:
                 statuses.append(self.requests.load_status(request_id))
             except FileNotFoundError:
                 continue
-        if not statuses:
-            return None
-        latest = sorted(statuses, key=lambda item: (item.created_at, item.updated_at, item.request_id))[-1]
+        statuses.sort(key=lambda item: (item.created_at, item.updated_at, item.request_id), reverse=True)
+        return [self.inspect_request(item) for item in statuses]
+
+    @staticmethod
+    def inspect_request(latest: RequestStatus) -> InspectedRequest:
         return InspectedRequest(
             request_id=latest.request_id,
+            kind=latest.kind,
+            execution_id=latest.execution_id,
+            objective=latest.objective,
             mode=latest.mode,
             route_kind=latest.route_kind,
             route_name=latest.route_name,
@@ -112,6 +119,8 @@ class SessionInspectionService:
             partial_text_updated_at=latest.partial_text_updated_at,
             error=latest.error,
             recovery_hint=recovery_hint_for(latest.error) if latest.state == RequestState.FAILED else None,
+            response_file=latest.final_response_file or latest.planner_response_file,
+            result_file=latest.result_file,
         )
 
     @staticmethod

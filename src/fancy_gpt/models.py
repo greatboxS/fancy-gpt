@@ -516,6 +516,8 @@ class FinalReport(StrictModel):
 
 class RequestStatus(StrictModel):
     request_id: str
+    kind: Literal["review", "focused", "agent", "gateway"] = "review"
+    execution_id: str | None = None
     state: RequestState
     route_kind: Literal["skill", "workflow"]
     route_name: str
@@ -547,6 +549,9 @@ class RecoveryHint(StrictModel):
 
 class InspectedRequest(StrictModel):
     request_id: str
+    kind: Literal["review", "focused", "agent", "gateway"] = "review"
+    execution_id: str | None = None
+    objective: str
     mode: RequestMode
     route_kind: Literal["skill", "workflow"]
     route_name: str
@@ -563,6 +568,8 @@ class InspectedRequest(StrictModel):
     partial_text_updated_at: str | None = None
     error: str | None = None
     recovery_hint: RecoveryHint | None = None
+    response_file: str | None = None
+    result_file: str | None = None
 
 
 class InspectedChat(StrictModel):
@@ -576,6 +583,7 @@ class InspectedChat(StrictModel):
     tunnel_id: str | None = None
     request_count: int
     latest_request: InspectedRequest | None = None
+    requests: list[InspectedRequest] = Field(default_factory=list)
 
 
 class InspectedTunnel(StrictModel):
@@ -587,7 +595,7 @@ class InspectedTunnel(StrictModel):
 
 
 class SessionInspection(StrictModel):
-    schema_version: str = "1.0"
+    schema_version: str = "1.1"
     session_id: str
     title: str
     repo_root: str

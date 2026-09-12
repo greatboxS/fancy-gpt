@@ -15,7 +15,7 @@ from .engine import ReviewEngine
 from .focused import FocusedAnswer, FocusedAnswerEngine, FocusedQuestion
 from .project_models import AgentAssignment, AgentOutcome
 from .team_agent import TeamAgentEngine
-from .models import FinalReport, RawRequest
+from .models import ChatResolution, FinalReport, RawRequest, RequestMode, RequestState
 from .tunnels import TunnelManager
 
 
@@ -194,11 +194,28 @@ class ExecutionCoordinator:
         *,
         tunnel_id: str | None = None,
         tunnel_policy: str = "auto",
+        chat_resolution: ChatResolution | None = None,
     ) -> FocusedAnswer:
         status = self._new_status(
             kind="focused",
             project_id=question.project_context.project_id if question.project_context else None,
+            session_id=chat_resolution.session_id if chat_resolution else None,
         )
+        self.engine.store.create_status(
+            status.request_id,
+            route_kind="skill",
+            route_name="focused-answer",
+            skill="technical-consult",
+            mode=RequestMode.CONSULT,
+            objective=question.question,
+            kind="focused",
+            execution_id=status.execution_id,
+            session_id=chat_resolution.session_id if chat_resolution else None,
+            chat_id=chat_resolution.chat_id if chat_resolution else None,
+            chat_policy=chat_resolution.policy if chat_resolution else None,
+        )
+        if chat_resolution:
+            self.engine.conversations.attach_request(chat_resolution, status.request_id)
         current_phase = ExecutionPhase.CREATED
         try:
             current_phase = ExecutionPhase.TUNNEL_SELECT
@@ -206,6 +223,12 @@ class ExecutionCoordinator:
             selection = self.manager.select(tunnel_id=tunnel_id, policy=tunnel_policy, require_automatic=True)
             status = self._update(status, tunnel_id=selection.tunnel_id)
             provider = self.manager.provider(selection)
+            self.engine.store.update_status(
+                status.request_id,
+                state=RequestState.RUNNING_FINAL,
+                tunnel_id=selection.tunnel_id,
+                provider=provider.name,
+            )
             lock = self.tunnel_lock_factory(selection.tunnel_id) if self.tunnel_lock_factory else nullcontext()
             with lock:
                 current_phase = ExecutionPhase.FOCUSED_DISPATCH
@@ -216,14 +239,24 @@ class ExecutionCoordinator:
                     question,
                     provider,
                     request_id=status.request_id,
-                    on_raw_response=lambda text: self.store.save_raw_response(status.execution_id, text),
+                    on_raw_response=lambda text: self._save_focused_response(status, text),
                 )
             status = self._update(status, phase=ExecutionPhase.COMPLETE)
+            self.engine.store.update_status(
+                status.request_id,
+                state=RequestState.COMPLETE,
+                conversation_id=answer.conversation_binding,
+            )
             return answer
         except Exception as exc:
             error = self._error_for(current_phase, exc)
             status = self._update(status, phase=ExecutionPhase.FAILED, error=error)
+            self.engine.store.fail(status.request_id, error.message)
             raise ExecutionFailed(status) from exc
+
+    def _save_focused_response(self, status: ExecutionStatus, text: str) -> None:
+        path = self.store.save_raw_response(status.execution_id, text)
+        self.engine.store.update_status(status.request_id, final_response_file=str(path))
 
     def run_agent(
         self,

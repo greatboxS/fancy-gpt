@@ -14,6 +14,45 @@ application adapter; the existing MCP server remains supported and independent.
 | Claude Code | Anthropic Messages API | `POST /v1/messages` |
 | Gemini clients | Gemini `generateContent` API | `POST /v1beta/models/{model}:generateContent` |
 
+Start the local gateway after the browser bridge worker is connected:
+
+```bash
+fancy-gpt gateway serve --host 127.0.0.1 --port 8787
+```
+
+Loopback access needs no token. Binding to another interface requires `--token`.
+The supported aliases are `chatgpt-web`, `gemini-web`, and `claude-web`; aliases
+select the site, while `x-fancy-tunnel-id` is an optional, independent browser
+route hint.
+
+Codex configuration:
+
+```toml
+model = "gemini-web"
+model_provider = "fancy-local"
+
+[model_providers.fancy-local]
+name = "FancyGPT Local"
+base_url = "http://127.0.0.1:8787/v1"
+env_key = "FANCY_GPT_LOCAL_KEY"
+wire_api = "responses"
+```
+
+Claude Code and Gemini CLI can be launched directly against the same process:
+
+```bash
+ANTHROPIC_BASE_URL=http://127.0.0.1:8787 ANTHROPIC_API_KEY=local \
+  claude --bare --model chatgpt-web
+
+GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8787 GEMINI_API_KEY=local \
+  gemini --model gemini-web
+```
+
+`FANCY_GPT_GATEWAY_MAX_INPUT_UNITS` sets the conservative character-based input
+budget (default `200000`). Oversized inputs are rejected before browser dispatch.
+Each turn is visible through `fancy-gpt requests list/inspect/raw` and persists a
+context ledger without browser authentication state.
+
 Streaming is part of the contract, not an optional presentation feature. Each
 adapter maps its wire events into one internal turn/event model and maps internal
 events back without leaking site-specific DOM details.
@@ -28,8 +67,8 @@ NormalizedTurn
   - output constraints
   - context/session hints
         |
-GatewayTurnService
-  - idempotency and cancellation
+GatewayService
+  - request lifecycle and inspection
   - context ledger
   - tool-loop state
   - usage accounting
@@ -62,18 +101,17 @@ conversation and verifies the binding before using continuation mode.
 
 ### Context ledger
 
-Each logical gateway session stores:
+The current context ledger stores:
 
 - stable gateway session and turn IDs;
-- client protocol and client-provided conversation metadata;
-- normalized message IDs and content digests;
+- client protocol and request/instruction digests;
 - system/developer instruction digest and version;
 - model alias, resolved site/model profile, and tunnel used;
-- provider conversation ID/URL and represented-message watermark;
-- tool definitions digest, pending tool calls, and received tool results;
+- provider conversation ID and predecessor response ID;
+- emitted tool call IDs;
 - estimated tokens/characters before dispatch and observed output size;
-- compaction generation, summary provenance, and dropped-content manifest;
-- request idempotency key, retry lineage, status, and cancellation state.
+- compaction generation;
+- request lifecycle, route, provider, response artifact, and failure state.
 
 The ledger contains no browser authentication material. Site cookies and tokens
 remain inside the browser boundary.
@@ -107,11 +145,10 @@ against oversized prompts, Unicode, attachments, and large tool schemas.
 
 ### Concurrent turns and retries
 
-Turns sharing one provider conversation are serialized. Different conversations
-may run concurrently. An idempotent retry can reuse a completed result; an uncertain
-browser submission cannot be blindly repeated. The adapter first determines whether
-the prior turn reached the provider and either resumes observation or reconstructs
-on a new conversation.
+Provider turns are serialized so two client turns cannot concurrently mutate one
+browser conversation. Codex continuation uses `previous_response_id`; clients that
+send a complete transcript are reconstructed safely, while callers may provide
+`x-fancy-session-id` to reuse the latest recorded provider binding.
 
 ## Tool calling
 

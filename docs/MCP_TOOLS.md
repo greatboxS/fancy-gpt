@@ -8,17 +8,18 @@ Tools:
 2. `run_request_automatic` — automatic planner + final browser workflow.
 3. `submit_planner_result` — import planner ResearchManifest.
 4. `submit_final_result` — import FinalReport.
-5. `get_request_status` — workflow state.
-6. `inspect_routing` — deterministic skill/workflow/domain/capability decision without a model call.
-7. `inspect_context` — filtered ContextPack after planner stage.
-8. `list_skills` — six primitive skills.
-9. `list_workflows` — four orchestration profiles.
-10. `list_domains` — thirteen technical policies.
-11. `server_stats` — MCP process call/error counters plus a live bridge worker/job snapshot.
-12. `create_session`, `get_session`, `list_sessions`, `close_session` — session lifecycle.
-13. `create_chat`, `list_chats`, `select_chat`, `archive_chat` — multi-chat management.
-14. `list_session_requests` — request history for all chats in a session.
-15. `session_capabilities` — machine-readable behavior/profile advertisement.
+5. `get_request_status` — backward-compatible workflow state.
+6. `inspect_request`, `list_requests`, `get_request_raw_response` — unified request inspection for review, focused, and agent runs.
+7. `inspect_routing` — deterministic skill/workflow/domain/capability decision without a model call.
+8. `inspect_context` — filtered ContextPack after planner stage.
+9. `list_skills` — six primitive skills.
+10. `list_workflows` — four orchestration profiles.
+11. `list_domains` — thirteen technical policies.
+12. `server_stats` — MCP process call/error counters plus a live bridge worker/job snapshot.
+13. `create_session`, `get_session`, `list_sessions`, `close_session` — session lifecycle.
+14. `create_chat`, `list_chats`, `select_chat`, `archive_chat` — multi-chat management.
+15. `list_session_requests` — request history for all chats in a session.
+16. `session_capabilities` — machine-readable behavior/profile advertisement.
 
 Repository access is constrained by `FANCY_GPT_ALLOWED_ROOTS`.
 

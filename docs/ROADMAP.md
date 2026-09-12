@@ -38,7 +38,7 @@ test on that browser; offline fixtures alone do not establish live UI compatibil
 
 ## Phase 2: Gateway core and context ledger
 
-Status: **planned**
+Status: **implemented (hardening continues)**
 
 Deliverables:
 
@@ -60,7 +60,7 @@ Exit gate:
 
 ## Phase 3: Codex support
 
-Status: **planned**
+Status: **protocol and tool-loop conformance implemented**
 
 Deliverables:
 
@@ -78,7 +78,7 @@ Exit gate:
 
 ## Phase 4: Claude Code support
 
-Status: **planned**
+Status: **protocol and tool-loop conformance implemented**
 
 Deliverables:
 
@@ -94,7 +94,7 @@ Exit gate:
 
 ## Phase 5: Gemini client support
 
-Status: **planned**
+Status: **protocol and tool-loop conformance implemented**
 
 Deliverables:
 

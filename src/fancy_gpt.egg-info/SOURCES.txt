@@ -14,6 +14,7 @@ src/fancy_gpt/execution.py
 src/fancy_gpt/extension_utils.py
 src/fancy_gpt/file_lock.py
 src/fancy_gpt/focused.py
+src/fancy_gpt/gateway.py
 src/fancy_gpt/inspection.py
 src/fancy_gpt/io.py
 src/fancy_gpt/mcp_clients.py
@@ -124,6 +125,7 @@ tests/test_conversation_index.py
 tests/test_engine.py
 tests/test_execution.py
 tests/test_extension_assets.py
+tests/test_gateway.py
 tests/test_install_once.py
 tests/test_mcp_clients.py
 tests/test_mcp_contract_mocked.py

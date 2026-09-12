@@ -27,6 +27,11 @@
     "kind": {
       "$ref": "#/$defs/ChatKind"
     },
+    "site": {
+      "default": "chatgpt",
+      "title": "Site",
+      "type": "string"
+    },
     "conversation_id": {
       "anyOf": [
         {

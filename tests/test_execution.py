@@ -98,6 +98,10 @@ def test_execution_tracks_focused_answer(tmp_path: Path) -> None:
     assert status.kind == "focused"
     assert status.phase == ExecutionPhase.COMPLETE
     assert status.request_id == answer.request_id
+    request = coordinator.engine.status(answer.request_id)
+    assert request.state.value == "complete"
+    assert request.route_name == "focused-answer"
+    assert request.final_response_file
 
 
 def test_execution_tracks_team_assignment(tmp_path: Path) -> None:
