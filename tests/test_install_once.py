@@ -175,7 +175,7 @@ fi
     assert "preset-secret" not in result.stdout
     if deployment == "remote":
         assert "preset-secret" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
-        assert f"{browser}-extension-ws-remote" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
+        assert f"{browser}-remote" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")
         assert (bundle / "PAIRING.txt").stat().st_mode & 0o777 == 0o600
     else:
         assert not (bundle / "PAIRING.txt").exists()
@@ -193,7 +193,7 @@ def test_native_config_derives_browser_specific_tunnel(monkeypatch, tmp_path: Pa
     assert result.exit_code == 0
     payload = json.loads((data_home / "native-host.json").read_text(encoding="utf-8"))
     assert payload["browser"] == "edge"
-    assert payload["tunnel_ids"] == ["edge-extension-native-local"]
+    assert payload["tunnel_ids"] == ["edge-remote"]
 
 
 def test_native_config_rejects_unknown_browser(monkeypatch, tmp_path: Path) -> None:

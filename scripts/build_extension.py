@@ -27,19 +27,19 @@ PROFILES = [
 
 
 def patch_defaults(text: str, browser: str) -> str:
-    remote = f"{browser}-extension-ws-remote"
+    remote = f"{browser}-remote"
     return (
         text
-        .replace('tunnelId: "chrome-extension-ws-remote"', f'tunnelId: "{remote}"')
+        .replace('tunnelId: "chrome-remote"', f'tunnelId: "{remote}"')
         .replace('browserName: "chrome"', f'browserName: "{browser}"')
-        .replace('value="chrome-extension-ws-remote"', f'value="{remote}"')
+        .replace('value="chrome-remote"', f'value="{remote}"')
         .replace('value="chrome"', f'value="{browser}"')
     )
 
 
 def adapter_source_names() -> list[str]:
     sites = sorted(n for n in FILES if n.startswith("site_") and n != "site_kit.js")
-    return ["site_kit.js", "content.js", *sites]
+    return ["background.js", "bridge_transport.js", "site_kit.js", "content.js", *sites]
 
 
 def adapter_build_id() -> str:

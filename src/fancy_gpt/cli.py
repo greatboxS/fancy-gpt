@@ -137,6 +137,7 @@ validate_app = typer.Typer(help="Validate structured payloads")
 browser_app = typer.Typer(help="ChatGPT Web browser automation utilities")
 skills_app = typer.Typer(help="Validate/export Agent Skill bundles")
 tunnels_app = typer.Typer(help="Inspect, probe, and select browser tunnels")
+sites_app = typer.Typer(help="Inspect model-site adapters")
 bridge_app = typer.Typer(help="Run/pair the browser bridge used by extension tunnels")
 extension_app = typer.Typer(help="Export/configure Chrome, Edge, and Firefox tunnel extensions")
 conversations_app = typer.Typer(help="Inspect the ChatGPT threads this runtime opened")
@@ -150,6 +151,7 @@ app.add_typer(validate_app, name="validate")
 app.add_typer(browser_app, name="browser")
 app.add_typer(skills_app, name="skills")
 app.add_typer(tunnels_app, name="tunnels")
+app.add_typer(sites_app, name="sites")
 app.add_typer(bridge_app, name="bridge")
 app.add_typer(extension_app, name="extension")
 app.add_typer(conversations_app, name="conversations")
@@ -312,6 +314,7 @@ def ask_cmd(
     workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
     tunnel: Annotated[str | None, typer.Option("--tunnel")] = None,
     tunnel_policy: Annotated[str, typer.Option("--tunnel-policy")] = "auto",
+    site: Annotated[str | None, typer.Option("--site")] = None,
     timeout_s: Annotated[float, typer.Option("--timeout")] = 300.0,
 ) -> None:
     """Ask one focused technical question without forcing a full review report."""
@@ -319,6 +322,8 @@ def ask_cmd(
     session = service.session(project_id, session_id) if project_id and session_id else None
     if session and work_item_id and session.work_item_id != work_item_id:
         raise typer.BadParameter("--session belongs to a different work item")
+    if session and site and session.site != site:
+        raise typer.BadParameter("--session belongs to a different site")
     effective_work_item = session.work_item_id if session else work_item_id
     context = service.relevant_context(project_id, effective_work_item) if project_id else None
     manager = TunnelManager(timeout_s=timeout_s)
@@ -333,6 +338,7 @@ def ask_cmd(
             project_context=context,
             conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
             conversation_binding=session.conversation_binding if session else None,
+            site=site or (session.site if session else None),
         ),
         tunnel_id=tunnel,
         tunnel_policy=tunnel_policy,
@@ -694,18 +700,15 @@ def validate_result(path: Annotated[Path, typer.Argument(exists=True, dir_okay=F
 
 @tunnels_app.command("components")
 def tunnels_components(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
-    """Show independently testable site/runtime/transport layer contracts."""
+    """Show independently testable runtime and transport contracts."""
     payload = {
-        "sites": [item.model_dump(mode="json") for item in SiteRegistry().all()],
         "runtimes": [item.model_dump(mode="json") for item in RuntimeRegistry().all()],
         "transports": [item.model_dump(mode="json") for item in TransportRegistry().all()],
     }
     if json_output:
         typer.echo(json.dumps(payload, indent=2))
         return
-    typer.echo("SITES")
-    typer.echo(_table(["ID", "HOSTS"], [[s["id"], ", ".join(s.get("hosts", []))] for s in payload["sites"]]))
-    typer.echo("\nRUNTIMES")
+    typer.echo("RUNTIMES")
     typer.echo(_table(["ID", "AUTO", "EXT"], [
         [r["id"], _yn(r.get("automatic")), _yn(r.get("requires_extension"))] for r in payload["runtimes"]
     ]))
@@ -713,6 +716,16 @@ def tunnels_components(json_output: Annotated[bool, typer.Option("--json")] = Fa
     typer.echo(_table(["ID", "REMOTE", "BRIDGE"], [
         [t["id"], _yn(t.get("remote_capable")), _yn(t.get("requires_bridge"))] for t in payload["transports"]
     ]))
+
+
+@sites_app.command("list")
+def sites_list(json_output: Annotated[bool, typer.Option("--json")] = False) -> None:
+    """List model sites supported by the installed adapters."""
+    sites = [item.model_dump(mode="json") for item in SiteRegistry().all()]
+    if json_output:
+        typer.echo(json.dumps(sites, indent=2))
+        return
+    typer.echo(_table(["ID", "HOSTS"], [[s["id"], ", ".join(s.get("hosts", []))] for s in sites]))
 
 
 @tunnels_app.command("explain")
@@ -854,7 +867,7 @@ def extension_native_config(
 ) -> None:
     if browser not in {"chrome", "edge", "firefox"}:
         raise typer.BadParameter("--browser must be chrome, edge, or firefox")
-    selected_tunnel = tunnel_id or f"{browser}-extension-native-local"
+    selected_tunnel = tunnel_id or f"{browser}-remote"
     token = load_or_create_token(default_bridge_token_file())
     path = default_bridge_native_config()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -965,7 +978,7 @@ def project_work_item(
 ) -> None:
     """Add one work item, optionally declaring the repository source it needs.
 
-    Work items given the same --thread share one ChatGPT conversation, so several
+    Work items given the same --thread and --site share one site conversation, so several
     requests continue in the same chat instead of each opening a new one.
     """
     item = _project_service(workdir).add_work_item(

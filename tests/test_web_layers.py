@@ -15,7 +15,6 @@ def make_spec(**overrides):
     data = dict(
         id="test-extension-remote",
         description="test",
-        site="chatgpt",
         runtime=TunnelRuntime.EXTENSION,
         transport=TunnelTransport.WEBSOCKET,
         scope=TunnelScope.REMOTE,
@@ -86,10 +85,9 @@ def test_composition_layer_rejects_invalid_cross_layer_tuple() -> None:
         validator.validate(invalid)
 
 
-def test_layer_inspector_reports_all_four_layers() -> None:
+def test_layer_inspector_keeps_site_out_of_tunnel_layers() -> None:
     layers = TunnelLayerInspector().inspect(make_spec())
     assert {item.layer for item in layers} == {
-        LayerKind.SITE,
         LayerKind.RUNTIME,
         LayerKind.TRANSPORT,
         LayerKind.COMPOSITION,

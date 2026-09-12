@@ -7,7 +7,7 @@ const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
   token: "",
-  tunnelId: "firefox-extension-ws-remote",
+  tunnelId: "firefox-remote",
   browserName: "firefox",
   nativeHost: "com.fancygpt.bridge",
   autoConnect: true,
@@ -39,8 +39,7 @@ async function taskWindowFor(url) {
 
 async function getConfig() {
   const value = await ext.storage.local.get(DEFAULTS);
-  const config = {...DEFAULTS, ...value};
-  return {...config, tunnelIds: tunnelIdsFor(config)};
+  return {...DEFAULTS, ...value};
 }
 
 async function sendToContent(tabId, message, retries = 50) {
@@ -89,7 +88,6 @@ const SITES = {
     // inherit whichever mode the UI was last left in.
     persistent: "https://chatgpt.com/?temporary-chat=false",
     fresh: "https://chatgpt.com/?temporary-chat=true",
-    tunnelSuffix: "extension-ws-remote",
   },
   gemini: {
     hosts: ["gemini.google.com"],
@@ -98,19 +96,8 @@ const SITES = {
     // conversation is the same page in both modes.
     persistent: "https://gemini.google.com/app",
     fresh: "https://gemini.google.com/app",
-    tunnelSuffix: "gemini-ws-remote",
   },
 };
-
-// One browser can serve every site it has an adapter for, so the worker
-// registers a tunnel id per site rather than forcing a second browser profile.
-function tunnelIdsFor(config) {
-  const ids = new Set([config.tunnelId]);
-  for (const policy of Object.values(SITES)) {
-    if (policy.tunnelSuffix) ids.add(`${config.browserName}-${policy.tunnelSuffix}`);
-  }
-  return [...ids].filter(Boolean);
-}
 
 function taskUrlFor(site, conversation) {
   const policy = SITES[site];

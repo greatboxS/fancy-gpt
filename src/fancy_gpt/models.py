@@ -115,6 +115,7 @@ class RawRequest(StrictModel):
     freshness: Freshness = Freshness.VERSION_SPECIFIC
     risk: RiskLevel = RiskLevel.NORMAL
     max_context_bytes: int = Field(default=180_000, ge=4096, le=50_000_000)
+    site: str = "chatgpt"
     tunnel: str | None = None
     tunnel_policy: str = "auto"
     conversation_id: str | None = None
@@ -160,6 +161,7 @@ class ChatRecord(StrictModel):
     session_id: str
     title: str
     kind: ChatKind
+    site: str = "chatgpt"
     conversation_id: str | None = None
     tunnel_id: str | None = None
     request_ids: list[str] = Field(default_factory=list)
@@ -170,6 +172,7 @@ class ChatRecord(StrictModel):
 
 class ChatResolution(StrictModel):
     policy: ChatPolicy
+    site: str = "chatgpt"
     session_id: str | None = None
     chat_id: str | None = None
     conversation_id: str | None = None

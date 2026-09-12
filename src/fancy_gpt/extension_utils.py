@@ -6,12 +6,12 @@ from pathlib import Path
 
 
 def _patch_browser_defaults(text: str, browser: str) -> str:
-    remote_tunnel = f"{browser}-extension-ws-remote"
+    remote_tunnel = f"{browser}-remote"
     return (
         text
-        .replace('tunnelId: "chrome-extension-ws-remote"', f'tunnelId: "{remote_tunnel}"')
+        .replace('tunnelId: "chrome-remote"', f'tunnelId: "{remote_tunnel}"')
         .replace('browserName: "chrome"', f'browserName: "{browser}"')
-        .replace('value="chrome-extension-ws-remote"', f'value="{remote_tunnel}"')
+        .replace('value="chrome-remote"', f'value="{remote_tunnel}"')
         .replace('value="chrome"', f'value="{browser}"')
     )
 
@@ -21,7 +21,7 @@ _BUILD_PLACEHOLDER = "__FANCYGPT_ADAPTER_BUILD__"
 
 # The scripts that together decide how a page is driven. A change to any of them
 # changes how the browser behaves, so all of them define the build.
-ADAPTER_SOURCES = ("site_kit.js", "content.js")
+ADAPTER_SOURCES = ("background.js", "bridge_transport.js", "site_kit.js", "content.js")
 
 
 def _adapter_source_names(family: str = "chromium") -> list[str]:

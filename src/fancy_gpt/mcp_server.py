@@ -238,9 +238,9 @@ def inspect_context(request_id: str) -> ContextPack:
     return _engine().inspect_context(request_id)
 
 @mcp.tool()
-@tracked("list_tunnel_sites")
-def list_tunnel_sites() -> list[SiteContract]:
-    """List site-adapter contracts available for tunnel composition."""
+@tracked("list_sites")
+def list_sites() -> list[SiteContract]:
+    """List model-site adapters independently of browser tunnels."""
     return SiteRegistry().all()
 
 
@@ -261,7 +261,7 @@ def list_tunnel_transports() -> list[TransportContract]:
 @mcp.tool()
 @tracked("inspect_tunnel_layers")
 def inspect_tunnel_layers(tunnel_id: str) -> list[LayerHealth]:
-    """Inspect static site/runtime/transport/composition health independently."""
+    """Inspect static runtime/transport/composition health independently."""
     manager = _manager()
     return TunnelLayerInspector().inspect(manager.registry.get(tunnel_id))
 
@@ -345,8 +345,9 @@ def add_project_work_item(
     context_patterns: list[str] | None = None,
     context_paths: list[str] | None = None,
     context_required: bool = False,
+    site: str | None = None,
 ) -> WorkItem:
-    """Add one work item, optionally declaring the repository source it needs."""
+    """Add one work item, optionally choosing which supported site answers it."""
     return _project_service().add_work_item(
         project_id,
         title=title,
@@ -355,6 +356,7 @@ def add_project_work_item(
         execution_mode=WorkExecutionMode.EXTERNAL_AGENT if external_agent else WorkExecutionMode.MODEL,
         dependencies=dependencies or [],
         context_requirements=_context_requirements(context_patterns, context_paths, context_required),
+        site=site,
     )
 
 
@@ -532,11 +534,14 @@ def ask_focused(
     session_id: str | None = None,
     tunnel_id: str | None = None,
     tunnel_policy: str = "auto",
+    site: str | None = None,
 ) -> FocusedAnswer:
     service = _project_service()
     session = service.session(project_id, session_id) if project_id and session_id else None
     if session and work_item_id and session.work_item_id != work_item_id:
         raise ValueError("session belongs to a different work item")
+    if session and site and session.site != site:
+        raise ValueError("session belongs to a different site")
     effective_work_item = session.work_item_id if session else work_item_id
     context = service.relevant_context(project_id, effective_work_item) if project_id else None
     manager = _manager()
@@ -551,6 +556,7 @@ def ask_focused(
             project_context=context,
             conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
             conversation_binding=session.conversation_binding if session else None,
+            site=site or (session.site if session else None),
         ),
         tunnel_id=tunnel_id,
         tunnel_policy=tunnel_policy,

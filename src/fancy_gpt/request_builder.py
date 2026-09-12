@@ -30,6 +30,7 @@ class PlannerRequestBuilder:
                 "route_name": route.route_name,
                 "skill": route.primary_skill,
                 "mode": request.mode.value,
+                "site": request.site,
                 # Planning is an implementation detail, not part of the
                 # user's long-lived discussion history.
                 "conversation_mode": "temporary",
@@ -61,6 +62,7 @@ class FinalRequestBuilder:
                 "route_name": route.route_name,
                 "skill": route.primary_skill,
                 "mode": request.mode.value,
+                "site": request.site,
                 "context_hash": context.context_hash,
                 **_conversation_metadata(resolution),
             },

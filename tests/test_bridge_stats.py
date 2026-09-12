@@ -12,7 +12,7 @@ class FakeConnection:
 
 
 def make_worker() -> BrowserWorker:
-    return BrowserWorker(connection=FakeConnection(), tunnel_ids={"chrome-extension-ws-remote"}, browser="chrome")
+    return BrowserWorker(connection=FakeConnection(), tunnel_ids={"chrome-remote"}, browser="chrome")
 
 
 def test_worker_counts_successful_job():

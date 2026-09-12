@@ -26,6 +26,8 @@ class FocusedQuestion(BaseModel):
     project_context: RelevantProjectContext | None = None
     conversation_strategy: ConversationStrategy = ConversationStrategy.FRESH
     conversation_binding: str | None = None
+    # Which site should answer; None lets the tunnel's default decide.
+    site: str | None = None
 
 
 class FocusedAnswer(BaseModel):
@@ -113,6 +115,7 @@ Return ONLY one JSON object matching this schema:
                 "project_id": question.project_context.project_id if question.project_context else None,
                 "conversation_strategy": question.conversation_strategy.value,
                 "conversation_binding": question.conversation_binding,
+                "site": question.site,
                 **conversation_turn_metadata(question.conversation_strategy, question.conversation_binding),
             },
         )

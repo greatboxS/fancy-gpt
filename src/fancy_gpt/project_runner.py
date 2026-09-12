@@ -73,15 +73,6 @@ class ProjectRunner:
 
         # Deterministic graph order: work-items are materialized in journal order.
         item = plan.ready_work_items[0]
-        if item.site and tunnel_id:
-            # A work item pinned to a site must not be handed to another site's
-            # model; its conversation history and its prompt both assume one.
-            spec_site = self.manager.registry.get(tunnel_id).site
-            if spec_site != item.site:
-                raise ValueError(
-                    f"work item {item.work_item_id} targets site {item.site}, "
-                    f"but tunnel {tunnel_id} drives {spec_site}"
-                )
         assignment = self.service.start_assignment(project_id, item.work_item_id)
         if item.execution_mode == WorkExecutionMode.EXTERNAL_AGENT:
             return TeamStepResult(

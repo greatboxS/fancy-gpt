@@ -30,6 +30,7 @@ class _DriverWithProgress:
         stage: str,
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
+        site=None,
     ) -> BrowserTurn:
         return BrowserTurn(turn_id=f"t-{stage}", request_id=request_id, stage=stage)
 

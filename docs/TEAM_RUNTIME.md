@@ -83,7 +83,7 @@ fancy-gpt project init Demo --target "Ship verified feature" --acceptance "Runti
 fancy-gpt project bootstrap <project-id>
 fancy-gpt project status <project-id>
 fancy-gpt project continue <project-id>
-fancy-gpt project run-next <project-id> --tunnel edge-extension-ws-remote
+fancy-gpt project run-next <project-id> --tunnel edge-remote
 fancy-gpt project sessions <project-id>
 fancy-gpt project history <project-id>
 fancy-gpt project context <project-id>

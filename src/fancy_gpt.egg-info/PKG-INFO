@@ -121,7 +121,7 @@ Inspect them:
 ```bash
 fancy-gpt tunnels list
 fancy-gpt tunnels components
-fancy-gpt tunnels explain chrome-extension-ws-remote
+fancy-gpt tunnels explain chrome-remote
 fancy-gpt tunnels health
 fancy-gpt tunnels select --policy prefer-remote
 ```
@@ -129,13 +129,13 @@ fancy-gpt tunnels select --policy prefer-remote
 Choose one at runtime:
 
 ```bash
-fancy-gpt run request.yaml --tunnel firefox-extension-ws-remote
+fancy-gpt run request.yaml --tunnel firefox-remote
 ```
 
 or encode it in the request:
 
 ```yaml
-tunnel: chrome-extension-ws-remote
+tunnel: chrome-remote
 ```
 
 Policy selection is also available:
@@ -192,7 +192,7 @@ For browser and FancyGPT on the same machine:
 fancy-gpt bridge init
 fancy-gpt bridge serve
 fancy-gpt extension export chrome ./fancy-gpt-extension
-fancy-gpt extension native-config --browser chrome --tunnel chrome-extension-native-local
+fancy-gpt extension native-config --browser chrome --tunnel chrome-remote
 fancy-gpt extension native-manifest --browser chrome --extension-id <extension-id>
 ```
 

@@ -20,44 +20,23 @@ from fancy_gpt.tunnels import (
 def test_tunnel_catalog_has_expected_compositions() -> None:
     registry = TunnelRegistry()
     ids = {item.id for item in registry.all()}
-    assert len(ids) == 13
-    # Every site the runtime knows must be reachable through a real tunnel,
-    # otherwise a site contract exists that nothing can actually select.
-    sites = {spec.site for spec in registry.all()}
-    assert sites == {"chatgpt", "gemini"}
-    assert {"chrome-gemini-ws-remote", "edge-gemini-ws-remote", "firefox-gemini-ws-remote"} <= ids
-    assert {
-        "chrome-extension-native-local",
-        "edge-extension-native-local",
-        "firefox-extension-native-local",
-        "chrome-extension-ws-remote",
-        "edge-extension-ws-remote",
-        "firefox-extension-ws-remote",
-        "chrome-cdp-local",
-        "playwright-chromium-local",
-        "playwright-firefox-local",
-        "interactive-manual",
-        "chrome-gemini-ws-remote",
-        "edge-gemini-ws-remote",
-        "firefox-gemini-ws-remote",
-    } == ids
+    assert ids == {"chrome-remote", "edge-remote", "firefox-remote"}
+    assert all("site" not in spec.model_dump() for spec in registry.all())
 
 
 def test_tunnel_resolver_policy_and_explicit_selection() -> None:
     registry = TunnelRegistry()
 
     def probe(spec):
-        state = TunnelHealthState.HEALTHY if spec.id in {
-            "chrome-extension-ws-remote", "playwright-chromium-local"
-        } else TunnelHealthState.UNAVAILABLE
+        state = TunnelHealthState.HEALTHY if spec.id in {"chrome-remote", "edge-remote"} else TunnelHealthState.UNAVAILABLE
         return TunnelHealth(tunnel_id=spec.id, state=state, detail=state.value)
 
     resolver = TunnelResolver(registry, probe)
     selected = resolver.select(policy="prefer-remote")
-    assert selected.tunnel_id == "chrome-extension-ws-remote"
-    explicit = resolver.select(tunnel_id="playwright-chromium-local")
+    assert selected.tunnel_id == "chrome-remote"
+    explicit = resolver.select(tunnel_id="edge-remote")
     assert explicit.explicit is True
-    assert explicit.tunnel_id == "playwright-chromium-local"
+    assert explicit.tunnel_id == "edge-remote"
 
 
 def test_bridge_driver_routes_to_exact_registered_tunnel() -> None:
@@ -71,7 +50,7 @@ def test_bridge_driver_routes_to_exact_registered_tunnel() -> None:
         connection = connect(endpoint)
         connection.send(dumps(hello(
             role="browser", token=token,
-            tunnel_ids=["chrome-extension-ws-remote"], browser="chrome"
+            tunnel_ids=["chrome-remote"], browser="chrome"
         )))
         assert loads(connection.recv(timeout=5))["type"] == "hello_ack"
         try:
@@ -92,10 +71,10 @@ def test_bridge_driver_routes_to_exact_registered_tunnel() -> None:
     thread = threading.Thread(target=browser_worker, daemon=True)
     thread.start()
     deadline = time.monotonic() + 2
-    while server.hub.worker_for("chrome-extension-ws-remote") is None and time.monotonic() < deadline:
+    while server.hub.worker_for("chrome-remote") is None and time.monotonic() < deadline:
         time.sleep(0.01)
 
-    driver = BridgeBrowserDriver(endpoint, token, "chrome-extension-ws-remote")
+    driver = BridgeBrowserDriver(endpoint, token, "chrome-remote")
     try:
         driver.start()
         driver.health_check()
@@ -124,7 +103,7 @@ def test_bridge_driver_poll_progress_reads_in_flight_text() -> None:
         connection = connect(endpoint)
         connection.send(dumps(hello(
             role="browser", token=token,
-            tunnel_ids=["chrome-extension-ws-remote"], browser="chrome"
+            tunnel_ids=["chrome-remote"], browser="chrome"
         )))
         assert loads(connection.recv(timeout=5))["type"] == "hello_ack"
         try:
@@ -147,10 +126,10 @@ def test_bridge_driver_poll_progress_reads_in_flight_text() -> None:
     thread = threading.Thread(target=browser_worker, daemon=True)
     thread.start()
     deadline = time.monotonic() + 2
-    while server.hub.worker_for("chrome-extension-ws-remote") is None and time.monotonic() < deadline:
+    while server.hub.worker_for("chrome-remote") is None and time.monotonic() < deadline:
         time.sleep(0.01)
 
-    driver = BridgeBrowserDriver(endpoint, token, "chrome-extension-ws-remote")
+    driver = BridgeBrowserDriver(endpoint, token, "chrome-remote")
     try:
         driver.start()
         driver.health_check()
@@ -185,7 +164,7 @@ def test_bridge_driver_rejects_unregistered_tunnel() -> None:
     token = "test-token"
     server = BridgeServer("127.0.0.1", 0, token)
     server.start_background()
-    driver = BridgeBrowserDriver(f"ws://127.0.0.1:{server.port}", token, "chrome-extension-ws-remote")
+    driver = BridgeBrowserDriver(f"ws://127.0.0.1:{server.port}", token, "chrome-remote")
     try:
         driver.start()
         with pytest.raises(RuntimeError, match="unavailable"):
@@ -199,9 +178,8 @@ def test_custom_tunnel_catalog_is_explicit_and_validated(tmp_path, monkeypatch) 
     custom = tmp_path / "tunnels.yaml"
     custom.write_text("""
 tunnels:
-  - id: chrome-extension-ws-remote-alt
+  - id: chrome-remote-alt
     description: alternate forwarded Chrome tunnel
-    site: chatgpt
     runtime: extension
     transport: websocket
     scope: remote
@@ -220,19 +198,19 @@ tunnels:
 """, encoding="utf-8")
     monkeypatch.setenv("FANCY_GPT_TUNNELS_FILE", str(custom))
     registry = TunnelRegistry()
-    assert registry.get("chrome-extension-ws-remote-alt").endpoint == "ws://127.0.0.1:9876"
+    assert registry.get("chrome-remote-alt").endpoint == "ws://127.0.0.1:9876"
 
 
 def test_explicit_disabled_tunnel_is_rejected(monkeypatch) -> None:
     registry = TunnelRegistry()
-    monkeypatch.setenv("FANCY_GPT_DISABLED_TUNNELS", "playwright-chromium-local")
+    monkeypatch.setenv("FANCY_GPT_DISABLED_TUNNELS", "firefox-remote")
 
     def probe(spec):
         return TunnelHealth(tunnel_id=spec.id, state=TunnelHealthState.HEALTHY, detail="ok")
 
     resolver = TunnelResolver(registry, probe)
     with pytest.raises(RuntimeError, match="disabled"):
-        resolver.select(tunnel_id="playwright-chromium-local")
+        resolver.select(tunnel_id="firefox-remote")
 
 
 def test_bridge_refuses_non_loopback_by_default() -> None:
@@ -256,10 +234,10 @@ def test_bridge_rejects_wildcard_worker_and_marks_stale_workers() -> None:
             pass
 
     hub = BridgeHub("token", stale_after_s=0.01)
-    worker = BrowserWorker(Connection(), {"chrome-extension-ws-remote"}, "chrome")
+    worker = BrowserWorker(Connection(), {"chrome-remote"}, "chrome")
     hub.register(worker)
     worker.last_seen -= 1
-    assert hub.worker_for("chrome-extension-ws-remote") is None
+    assert hub.worker_for("chrome-remote") is None
     assert hub.snapshot()[0]["state"] == "stale"
     assert not hub.snapshot()[0]["alive"]
 
@@ -283,12 +261,12 @@ def test_bridge_hub_routes_concurrent_workers_by_exact_tunnel() -> None:
             pass
 
     hub = BridgeHub("token")
-    chrome = BrowserWorker(Connection(), {"chrome-extension-ws-remote"}, "chrome")
-    firefox = BrowserWorker(Connection(), {"firefox-extension-ws-remote"}, "firefox")
+    chrome = BrowserWorker(Connection(), {"chrome-remote"}, "chrome")
+    firefox = BrowserWorker(Connection(), {"firefox-remote"}, "firefox")
     hub.register(chrome)
     hub.register(firefox)
-    assert hub.worker_for("chrome-extension-ws-remote") is chrome
-    assert hub.worker_for("firefox-extension-ws-remote") is firefox
+    assert hub.worker_for("chrome-remote") is chrome
+    assert hub.worker_for("firefox-remote") is firefox
     assert len(hub.snapshot()) == 2
 
 
@@ -318,7 +296,7 @@ def test_bridge_snapshot_probe_lists_registered_tunnels() -> None:
         connection = connect(endpoint)
         connection.send(dumps(hello(
             role="browser", token=token,
-            tunnel_ids=["chrome-extension-ws-remote", "edge-extension-ws-remote"],
+            tunnel_ids=["chrome-remote", "edge-remote"],
             browser="chrome",
         )))
         assert loads(connection.recv(timeout=5))["type"] == "hello_ack"
@@ -335,12 +313,12 @@ def test_bridge_snapshot_probe_lists_registered_tunnels() -> None:
     thread = threading.Thread(target=browser_worker, daemon=True)
     thread.start()
     deadline = time.monotonic() + 2
-    while server.hub.worker_for("chrome-extension-ws-remote") is None and time.monotonic() < deadline:
+    while server.hub.worker_for("chrome-remote") is None and time.monotonic() < deadline:
         time.sleep(0.01)
     try:
         workers = probe_bridge_workers(endpoint, token, open_timeout_s=1)
         ids = available_tunnels(workers)
-        assert {"chrome-extension-ws-remote", "edge-extension-ws-remote"} <= ids
+        assert {"chrome-remote", "edge-remote"} <= ids
     finally:
         stop.set()
         server.shutdown()
@@ -358,7 +336,7 @@ def test_bridge_site_health_round_trip() -> None:
         connection = connect(endpoint)
         connection.send(dumps(hello(
             role="browser", token=token,
-            tunnel_ids=["edge-extension-ws-remote"], browser="edge"
+            tunnel_ids=["edge-remote"], browser="edge"
         )))
         assert loads(connection.recv(timeout=5))["type"] == "hello_ack"
         try:
@@ -377,13 +355,13 @@ def test_bridge_site_health_round_trip() -> None:
 
     threading.Thread(target=browser_worker, daemon=True).start()
     deadline = time.monotonic() + 2
-    while server.hub.worker_for("edge-extension-ws-remote") is None and time.monotonic() < deadline:
+    while server.hub.worker_for("edge-remote") is None and time.monotonic() < deadline:
         time.sleep(0.01)
-    driver = BridgeBrowserDriver(endpoint, token, "edge-extension-ws-remote")
+    driver = BridgeBrowserDriver(endpoint, token, "edge-remote")
     try:
         driver.start()
         driver.health_check()
-        assert driver.site_health(timeout_s=5)["reason"] == "ready"
+        assert driver.site_health("gemini", timeout_s=5)["reason"] == "ready"
     finally:
         driver.stop()
         stop.set()

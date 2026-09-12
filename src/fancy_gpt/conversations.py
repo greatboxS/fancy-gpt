@@ -29,7 +29,7 @@ class ConversationManager:
         # session persistence. Persistent legacy requests join the repo's
         # default session unless a session is supplied.
         if request.conversation_mode == "temporary" or policy == ChatPolicy.TEMPORARY:
-            return ChatResolution(policy=ChatPolicy.TEMPORARY)
+            return ChatResolution(policy=ChatPolicy.TEMPORARY, site=request.site)
 
         session = self.store.ensure_session(repo_root=request.repo_root, session_id=request.session_id)
         chat: ChatRecord
@@ -43,6 +43,7 @@ class ConversationManager:
                 title=request.objective,
                 kind=ChatKind.STANDARD,
                 make_active=True,
+                site=request.site,
             )
         elif policy == ChatPolicy.INDEPENDENT:
             chat = self.store.create_chat(
@@ -50,9 +51,13 @@ class ConversationManager:
                 title=request.objective,
                 kind=ChatKind.INDEPENDENT,
                 make_active=False,
+                site=request.site,
             )
         else:
-            chat = self.store.get_or_create_main_chat(session.session_id)
+            chat = self.store.get_or_create_main_chat(session.session_id, site=request.site)
+
+        if chat.site != request.site:
+            raise ValueError(f"chat belongs to site {chat.site}; request targets {request.site}")
 
         if request.conversation_id:
             if chat.conversation_id and chat.conversation_id != request.conversation_id:
@@ -66,6 +71,7 @@ class ConversationManager:
 
         return ChatResolution(
             policy=policy,
+            site=request.site,
             session_id=session.session_id,
             chat_id=chat.chat_id,
             conversation_id=chat.conversation_id,

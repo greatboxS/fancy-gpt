@@ -17,6 +17,9 @@ class BrowserTurn:
     stage: str
     conversation_id: str | None = None
     conversation_mode: str = "temporary"
+    # Which site should answer this turn. A driver that reaches only one site
+    # ignores it; the bridge driver routes on it.
+    site: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ class BrowserDriver(Protocol):
         stage: str,
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
+        site: str | None = None,
     ) -> BrowserTurn:
         """Create/lease a task-bound browser surface for a turn.
 

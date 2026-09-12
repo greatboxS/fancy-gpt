@@ -30,14 +30,14 @@ def test_a_bound_chat_is_listed_with_a_link(tmp_path: Path) -> None:
     session = engine.create_session(str(tmp_path), "Work")
     chat = engine.create_chat(session.session_id, "Main")
     engine.session_store.update_chat(
-        session.session_id, chat.chat_id, conversation_id=CONV_A, tunnel_id="edge-extension-ws-remote"
+        session.session_id, chat.chat_id, conversation_id=CONV_A, tunnel_id="edge-remote"
     )
 
     [found] = ConversationIndex(tmp_path).all()
     assert found.origin == "session"
     assert found.conversation_id == CONV_A
     assert found.url == f"https://chatgpt.com/c/{CONV_A}"
-    assert found.tunnel_id == "edge-extension-ws-remote"
+    assert found.tunnel_id == "edge-remote"
 
 
 def test_work_items_sharing_a_thread_count_as_one_conversation(tmp_path: Path) -> None:

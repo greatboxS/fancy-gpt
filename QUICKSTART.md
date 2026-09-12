@@ -69,7 +69,7 @@ this form:
 
 ```text
 Endpoint: ws://127.0.0.1:8765
-Tunnel ID: edge-extension-ws-remote
+Tunnel ID: edge-remote
 Browser: edge
 Pair token: <secret-token>
 ```
@@ -149,7 +149,7 @@ using the values from `PAIRING.txt`:
 | Transport | `WebSocket / SSH` | same |
 | Bridge endpoint | `ws://127.0.0.1:8765` | same |
 | Pair token | value after `Pair token:` | same |
-| Tunnel ID | `edge-extension-ws-remote` | replace `edge` with the browser name |
+| Tunnel ID | `edge-remote` | replace `edge` with the browser name |
 | Browser name | `edge` | `chrome` or `firefox` |
 
 Click **Save & reconnect**. The extension stores these values in its local
@@ -201,7 +201,7 @@ On the development host, run:
 
 ```bash
 fancy-gpt tunnels health
-fancy-gpt tunnels explain edge-extension-ws-remote
+fancy-gpt tunnels explain edge-remote
 ```
 
 Replace `edge` with your browser name. If the tunnel is healthy, select the
@@ -222,6 +222,7 @@ If verification fails, check these items in order:
 Useful diagnostics:
 
 ```bash
+fancy-gpt sites list
 fancy-gpt tunnels components
 fancy-gpt tunnels list
 fancy-gpt tunnels health
@@ -240,7 +241,7 @@ Edit the generated `fancy-gpt-request.yaml`, then run it through the exact
 browser tunnel:
 
 ```bash
-fancy-gpt run fancy-gpt-request.yaml --tunnel edge-extension-ws-remote
+fancy-gpt run fancy-gpt-request.yaml --tunnel edge-remote
 ```
 
 Replace `edge` with `chrome` or `firefox` when applicable. Keep the browser
@@ -285,20 +286,14 @@ Replace `edge` with your browser name, then:
 
 4. run `fancy-gpt bridge serve`;
 5. open **FancyGPT Tunnel**, select `Native Messaging`, confirm the browser
-   name and `<browser>-extension-native-local` tunnel ID, then click
+   name and `<browser>-remote` tunnel ID, then click
    **Save & reconnect**.
 
 Windows native-host registration is platform-specific and is not automated by
 the Linux installer.
 
-## Other connection options
-
-| Situation | Setup | Tunnel ID |
-|---|---|---|
-| Managed local Chromium | `./install.sh --with-playwright` | `playwright-chromium-local` |
-| Managed local Firefox | install the optional Playwright Firefox runtime | `playwright-firefox-local` |
-| Existing debug-enabled Chrome | configure loopback-only CDP | `chrome-cdp-local` |
-| Manual copy/paste fallback | no browser setup | `interactive-manual` |
+The three tunnel IDs are `chrome-remote`, `edge-remote`, and `firefox-remote`.
+Site selection is independent, for example `--site gemini --tunnel edge-remote`.
 
 See [`docs/TUNNEL_SETUP.md`](docs/TUNNEL_SETUP.md) for full tunnel setup and
 security details.

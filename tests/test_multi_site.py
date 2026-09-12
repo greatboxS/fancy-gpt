@@ -11,22 +11,54 @@ from fancy_gpt.tunnels.factory import TunnelDriverFactory
 from fancy_gpt.web.sites import SiteRegistry
 
 
-def test_every_registered_site_is_reachable_through_a_tunnel() -> None:
-    # A site contract nothing can select is a contract that will silently rot.
-    sites = {item.id for item in SiteRegistry().all()}
-    reachable = {spec.site for spec in TunnelRegistry().all()}
-    assert sites == reachable
+def test_a_tunnel_is_not_bound_to_one_site(tmp_path: Path) -> None:
+    # A tunnel says how a browser is reached; which model answers is chosen per
+    # request. Tying them together would multiply browsers by sites into ids.
+    from fancy_gpt.browser import FakeBrowserDriver
+    from fancy_gpt.models import ModelRequest
+    from fancy_gpt.providers import ChatGPTWebAutomationProvider
+
+    driver = FakeBrowserDriver(['{"ok": true}'])
+    provider = ChatGPTWebAutomationProvider(driver)
+    request = ModelRequest(
+        request_id="r1", stage="agent", title="t", prompt="p",
+        response_schema={}, metadata={"site": "gemini"},
+    )
+    provider.start()
+    try:
+        provider.execute(request)
+    finally:
+        provider.stop()
+    assert driver.turns[-1].site == "gemini"
 
 
-def test_a_tunnel_drives_the_site_its_spec_declares() -> None:
-    # The job used to carry a hardcoded "chatgpt" regardless of the spec, so a
-    # Gemini tunnel would have been handed to the ChatGPT adapter.
-    factory = TunnelDriverFactory()
-    registry = TunnelRegistry()
-    for tunnel_id, expected in [("edge-extension-ws-remote", "chatgpt"), ("edge-gemini-ws-remote", "gemini")]:
-        driver = factory.build(registry.get(tunnel_id))
-        assert isinstance(driver, BridgeBrowserDriver)
-        assert driver.site == expected
+def test_review_request_site_reaches_planner_and_final_model_requests(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from fancy_gpt.models import RawRequest
+    from fancy_gpt.request_builder import FinalRequestBuilder, PlannerRequestBuilder
+
+    request = RawRequest(mode="review", objective="review this", site="gemini")
+    route = SimpleNamespace(route_kind="workflow", route_name="standard-review", primary_skill="review-code")
+    prompt_builder = SimpleNamespace(build_prompt=lambda *args: "prompt")
+    planner = PlannerRequestBuilder(planner=prompt_builder).build("request-1", request, route)
+    final = FinalRequestBuilder(compiler=prompt_builder).build(
+        "request-1", request, route, SimpleNamespace(), SimpleNamespace(context_hash="hash"),
+        SimpleNamespace(policy=SimpleNamespace(value="temporary"), conversation_id=None),
+    )
+
+    assert planner.metadata["site"] == "gemini"
+    assert final.metadata["site"] == "gemini"
+
+
+def test_the_job_carries_the_requested_site(tmp_path: Path) -> None:
+    # The bridge driver carries only the site explicitly attached to the turn;
+    # it never derives one from the tunnel.
+    from fancy_gpt.bridge import BridgeBrowserDriver
+
+    driver = BridgeBrowserDriver("ws://127.0.0.1:1", "token", "edge-remote")
+    assert driver.begin_turn(request_id="r", stage="agent").site is None
+    assert driver.begin_turn(request_id="r", stage="agent", site="gemini").site == "gemini"
 
 
 def test_site_contracts_do_not_share_a_host() -> None:
@@ -56,15 +88,14 @@ def test_runtime_layer_knows_where_to_open_each_site(tmp_path: Path) -> None:
             assert host in background
 
 
-def test_one_browser_registers_a_tunnel_per_site(tmp_path: Path) -> None:
-    # A single browser can drive every site it has an adapter for; requiring a
-    # separate profile per site would be an artificial limit.
+def test_one_browser_registers_one_browser_tunnel(tmp_path: Path) -> None:
+    # A single browser tunnel can drive every site for which it ships an adapter.
     background = (export_extension("edge", tmp_path / "edge-ids") / "background.js").read_text(encoding="utf-8")
-    assert "function tunnelIdsFor(config)" in background
-    assert "tunnelSuffix" in background
+    assert "function tunnelIdsFor(config)" not in background
+    assert "tunnelSuffix" not in background
 
     transport = (export_extension("edge", tmp_path / "edge-ids") / "bridge_transport.js").read_text(encoding="utf-8")
-    assert "config.tunnelIds ?? [config.tunnelId]" in transport
+    assert "tunnel_ids: [config.tunnelId]" in transport
 
 
 @pytest.mark.parametrize("site_id", ["chatgpt", "gemini"])
@@ -113,15 +144,14 @@ def test_a_binding_is_never_reused_across_sites(tmp_path: Path) -> None:
     assert third.session.conversation_binding == "6aa52775-9f48-83ec-a24e-c8e42"
 
 
-def test_a_pinned_work_item_refuses_another_sites_tunnel(tmp_path: Path) -> None:
-    from fancy_gpt.project_models import AgentRole
-    from fancy_gpt.project_runner import ProjectRunner
-    from fancy_gpt.project_service import ProjectService
+def test_review_chat_cannot_reuse_a_conversation_on_another_site(tmp_path: Path) -> None:
+    from fancy_gpt.conversations import ConversationManager
+    from fancy_gpt.models import RawRequest
+    from fancy_gpt.store import SessionStore
 
-    service = ProjectService(tmp_path)
-    project = service.create_project(name="p", target="ship it", repo_root=str(tmp_path))
-    service.add_work_item(
-        project.project_id, title="Gemini only", objective="ask", role=AgentRole.RESEARCHER, site="gemini"
-    )
-    with pytest.raises(ValueError, match="targets site gemini"):
-        ProjectRunner(service).run_next(project.project_id, tunnel_id="edge-extension-ws-remote")
+    manager = ConversationManager(SessionStore(tmp_path))
+    first = manager.resolve(RawRequest(mode="review", objective="first", repo_root=str(tmp_path), site="chatgpt"))
+    manager.bind_conversation(first, "chatgpt-conversation", "edge-remote")
+
+    with pytest.raises(ValueError, match="use a new chat for gemini"):
+        manager.resolve(RawRequest(mode="review", objective="second", repo_root=str(tmp_path), site="gemini"))

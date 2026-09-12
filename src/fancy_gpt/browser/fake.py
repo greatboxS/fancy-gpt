@@ -30,6 +30,7 @@ class FakeBrowserDriver:
     started: bool = False
     events: list[tuple[str, str, str]] = field(default_factory=list)
     prompts: list[tuple[str, str, str]] = field(default_factory=list)
+    turns: list[BrowserTurn] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self._responses = deque(self.responses)
@@ -60,6 +61,7 @@ class FakeBrowserDriver:
         stage: str,
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
+        site: str | None = None,
     ) -> BrowserTurn:
         self.health_check()
         if len(self._active) >= self.max_concurrent_turns:
@@ -71,9 +73,12 @@ class FakeBrowserDriver:
             stage=stage,
             conversation_id=conversation_id,
             conversation_mode=conversation_mode,
+            site=site,
         )
         self._active[turn.turn_id] = turn
+        self.turns.append(turn)
         self.events.append(("begin", request_id, stage))
+        self.events.append(("site", site or "", ""))
         self.events.append(("conversation", conversation_mode, conversation_id or ""))
         return turn
 

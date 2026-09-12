@@ -118,6 +118,7 @@ class ChatGPTSiteDriver:
         stage: str,
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
+        site: str | None = None,
     ) -> BrowserTurn:
         if len(self._leases) >= self.max_concurrent_turns:
             raise BrowserCapacityError("maximum concurrent ChatGPT Web turns reached")

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fancy_gpt.web.runtime import RuntimeRegistry
-from fancy_gpt.web.sites import SiteRegistry
 from fancy_gpt.web.transport import TransportRegistry
 
 from .models import TunnelSpec
@@ -21,21 +20,14 @@ class TunnelCompositionValidator:
     def __init__(
         self,
         *,
-        sites: SiteRegistry | None = None,
         runtimes: RuntimeRegistry | None = None,
         transports: TransportRegistry | None = None,
     ) -> None:
-        self.sites = sites or SiteRegistry()
         self.runtimes = runtimes or RuntimeRegistry()
         self.transports = transports or TransportRegistry()
 
     def check(self, spec: TunnelSpec) -> CompositionCheck:
         errors: list[str] = []
-        try:
-            site = self.sites.get(spec.site)
-        except KeyError as exc:
-            errors.append(str(exc))
-            site = None
         try:
             runtime = self.runtimes.get(spec.runtime.value)
         except KeyError as exc:
@@ -64,10 +56,6 @@ class TunnelCompositionValidator:
                 errors.append(
                     f"runtime {runtime.id} requires_browser_install={runtime.requires_browser_install} conflicts with tunnel capability"
                 )
-            if site is not None:
-                missing = sorted(set(site.required_browser_features) - set(runtime.features))
-                if missing:
-                    errors.append(f"runtime {runtime.id} lacks site-required features: {', '.join(missing)}")
             if runtime.automatic != spec.capabilities.automatic:
                 errors.append(
                     f"runtime {runtime.id} automatic={runtime.automatic} conflicts with tunnel capability automatic={spec.capabilities.automatic}"
@@ -93,9 +81,6 @@ class TunnelCompositionValidator:
 
         if spec.capabilities.browser_families and spec.browser not in spec.capabilities.browser_families and "any" not in spec.capabilities.browser_families:
             errors.append(f"tunnel browser {spec.browser} is absent from browser_families")
-
-        if site is not None and spec.capabilities.supports_fresh_conversation and not site.supports_fresh_conversation:
-            errors.append(f"site {site.id} does not support fresh conversations")
 
         return CompositionCheck(ok=not errors, errors=tuple(errors))
 

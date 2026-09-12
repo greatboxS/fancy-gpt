@@ -24,7 +24,7 @@ Then from any remote project:
 
 ```bash
 fancy-gpt init
-fancy-gpt run fancy-gpt-request.yaml --tunnel chrome-extension-ws-remote
+fancy-gpt run fancy-gpt-request.yaml --tunnel chrome-remote
 ```
 
 The user does not need to activate a Python environment or install a second browser for the default extension path.
@@ -61,7 +61,7 @@ A long-lived engineering target can be managed without replaying the whole chat 
 fancy-gpt project init my-project --target "Deliver the feature" --acceptance "Runtime behavior is proven"
 fancy-gpt project bootstrap my-project
 fancy-gpt project status my-project
-fancy-gpt project run my-project --tunnel edge-extension-ws-remote
+fancy-gpt project run my-project --tunnel edge-remote
 ```
 
 When the lifecycle reaches an implementation work item, FancyGPT returns a structured external-agent assignment for Codex/Claude instead of pretending a browser model changed local files. The external agent submits one structured outcome containing decisions/evidence/artifacts/finding resolutions, after which the project continues from durable state.

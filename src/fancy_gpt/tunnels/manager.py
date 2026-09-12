@@ -16,8 +16,6 @@ from fancy_gpt.bridge import (
     probe_bridge_stats,
     probe_bridge_workers,
 )
-from fancy_gpt.bridge.client import SiteHealthUnsupported
-from fancy_gpt.extension_utils import adapter_build_id
 from fancy_gpt.providers import ChatGPTWebAutomationProvider
 from fancy_gpt.runtime_paths import user_data_dir
 
@@ -187,50 +185,8 @@ class TunnelManager:
         )
 
     def inspect(self, spec: TunnelSpec) -> TunnelHealth:
-        """Deep diagnostic health including the live site adapter when possible."""
-        health = self.probe(spec)
-        if health.state == TunnelHealthState.UNAVAILABLE or spec.runtime.value != "extension":
-            return health
-        driver = self.driver_factory.build(spec)
-        site_health = getattr(driver, "site_health", None)
-        if not callable(site_health):
-            return health
-        try:
-            driver.start()
-            driver.health_check()
-            payload = site_health(timeout_s=min(20.0, self.timeout_s))
-            health.metadata["site_health"] = payload
-            expected = adapter_build_id()
-            live = str(payload.get("build") or "")
-            health.metadata["adapter_build"] = {"live": live or None, "expected": expected}
-            if live and live != expected:
-                # The browser is often on another machine, so a reload that never
-                # happened looks exactly like one that did.
-                health.detail = (
-                    f"browser worker connected, but it is running adapter build {live} "
-                    f"while this install ships {expected}; re-export the extension and reload it"
-                )
-                return health
-            health.detail = f"browser worker connected and {spec.site} site adapter is ready"
-            health.state = TunnelHealthState.HEALTHY
-            return health
-        except SiteHealthUnsupported as exc:
-            # The worker is connected and usable; it is simply too old to be
-            # asked. Report that plainly instead of calling the tunnel broken.
-            health.metadata["site_ready"] = None
-            health.metadata["site_health_error"] = str(exc)
-            health.detail = f"browser worker connected but site readiness is unverifiable: {exc}"
-            return health
-        except Exception as exc:
-            health.state = TunnelHealthState.UNAVAILABLE
-            health.detail = f"browser worker connected but site is not ready: {type(exc).__name__}: {exc}"
-            health.metadata["site_ready"] = False
-            return health
-        finally:
-            try:
-                driver.stop()
-            except Exception:
-                pass
+        """Inspect the browser route without opening or assuming a model site."""
+        return self.probe(spec)
 
     def select(
         self,

@@ -289,6 +289,7 @@ class SessionStore:
         kind: ChatKind = ChatKind.STANDARD,
         make_active: bool = False,
         conversation_id: str | None = None,
+        site: str = "chatgpt",
     ) -> ChatRecord:
         chat_id = f"chat-{uuid.uuid4().hex[:12]}"
         now = _now()
@@ -297,6 +298,7 @@ class SessionStore:
             session_id=session_id,
             title=title,
             kind=kind,
+            site=site,
             conversation_id=conversation_id,
             created_at=now,
             updated_at=now,
@@ -317,7 +319,7 @@ class SessionStore:
             RequestStore._atomic_write(session_path, SessionRecord.model_validate(payload).model_dump_json(indent=2))
         return chat
 
-    def get_or_create_main_chat(self, session_id: str) -> ChatRecord:
+    def get_or_create_main_chat(self, session_id: str, *, site: str = "chatgpt") -> ChatRecord:
         """Atomically resolve the active chat, creating the main chat once."""
         with exclusive_file_lock(self._lock_path(session_id)):
             session_path = self._session_path(session_id)
@@ -326,13 +328,17 @@ class SessionStore:
                 raise InvalidStateError(f"session is closed: {session_id}")
             if session.active_chat_id:
                 path = self._chat_path(session_id, session.active_chat_id)
-                return ChatRecord.model_validate_json(path.read_text(encoding="utf-8"))
+                chat = ChatRecord.model_validate_json(path.read_text(encoding="utf-8"))
+                if chat.site != site:
+                    raise ValueError(f"active chat belongs to site {chat.site}; use a new chat for {site}")
+                return chat
             now = _now()
             chat = ChatRecord(
                 chat_id=f"chat-{uuid.uuid4().hex[:12]}",
                 session_id=session_id,
                 title="Main discussion",
                 kind=ChatKind.MAIN,
+                site=site,
                 created_at=now,
                 updated_at=now,
             )

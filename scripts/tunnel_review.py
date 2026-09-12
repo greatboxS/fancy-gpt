@@ -16,18 +16,13 @@ inspector = TunnelLayerInspector()
 specs = registry.all()
 ids = {item.id for item in specs}
 
-expected_extension = {
-    f"{browser}-extension-{suffix}"
-    for browser in ("chrome", "edge", "firefox")
-    for suffix in ("native-local", "ws-remote")
-}
-assert expected_extension <= ids
+expected_tunnels = {f"{browser}-remote" for browser in ("chrome", "edge", "firefox")}
+assert ids == expected_tunnels
 assert {item.id for item in RuntimeRegistry().all()} >= {"extension", "playwright", "cdp", "interactive"}
 assert {item.id for item in TransportRegistry().all()} >= {"native-messaging", "websocket", "local-process", "cdp", "human"}
 sites = {item.id for item in SiteRegistry().all()}
 assert sites == {"chatgpt", "gemini"}
-# Every site must be selectable through a tunnel, or its contract can rot unnoticed.
-assert {spec.site for spec in specs} == sites
+assert all("site" not in spec.model_dump() for spec in specs)
 
 layer_failures = {}
 for spec in specs:
@@ -80,7 +75,7 @@ result = {
     "sites": len(SiteRegistry().all()),
     "runtimes": len(RuntimeRegistry().all()),
     "transports": len(TransportRegistry().all()),
-    "extension_tunnels": len(expected_extension),
+    "browser_tunnels": len(expected_tunnels),
     "static_layer_failures": layer_failures,
 }
 print(json.dumps(result, indent=2))

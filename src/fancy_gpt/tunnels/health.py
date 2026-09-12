@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fancy_gpt.web.models import LayerHealth, LayerKind
 from fancy_gpt.web.runtime import RuntimeRegistry
-from fancy_gpt.web.sites import SiteRegistry
 from fancy_gpt.web.transport import TransportRegistry
 
 from .composition import TunnelCompositionValidator
@@ -13,11 +12,9 @@ class TunnelLayerInspector:
     """Static, side-effect-free health inspection for each tunnel layer."""
 
     def __init__(self) -> None:
-        self.sites = SiteRegistry()
         self.runtimes = RuntimeRegistry()
         self.transports = TransportRegistry()
         self.compositions = TunnelCompositionValidator(
-            sites=self.sites,
             runtimes=self.runtimes,
             transports=self.transports,
         )
@@ -25,7 +22,6 @@ class TunnelLayerInspector:
     def inspect(self, spec: TunnelSpec) -> list[LayerHealth]:
         layers: list[LayerHealth] = []
         for kind, component, getter in (
-            (LayerKind.SITE, spec.site, self.sites.get),
             (LayerKind.RUNTIME, spec.runtime.value, self.runtimes.get),
             (LayerKind.TRANSPORT, spec.transport.value, self.transports.get),
         ):

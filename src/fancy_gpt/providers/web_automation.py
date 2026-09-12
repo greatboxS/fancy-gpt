@@ -38,25 +38,13 @@ class ChatGPTWebAutomationProvider:
         if tunnel_id:
             self.name = f"chatgpt-web-automation:{tunnel_id}"
         self._started = False
-        self.site_health_checked: bool | None = None
+        self.site_health_checked: set[str] = set()
 
     def start(self) -> None:
         if not self._started:
             self.driver.start()
             try:
                 self.driver.health_check()
-                site_health = getattr(self.driver, "site_health", None)
-                if callable(site_health):
-                    try:
-                        self._require_current_adapter(site_health(timeout_s=min(20.0, self.timeout_s)))
-                    except SiteHealthUnsupported:
-                        # An older extension cannot answer the readiness probe.
-                        # That is exactly the pre-probe behaviour, so continue
-                        # rather than making the whole runtime unusable until
-                        # the browser-side bundle is reloaded.
-                        self.site_health_checked = False
-                    else:
-                        self.site_health_checked = True
             except Exception:
                 self.driver.stop()
                 raise
@@ -103,11 +91,20 @@ class ChatGPTWebAutomationProvider:
                 f"compiled prompt has {len(request.prompt)} characters; "
                 f"configured browser limit is {self.max_prompt_chars}"
             )
+        site = str(request.metadata.get("site") or "chatgpt")
+        site_health = getattr(self.driver, "site_health", None)
+        if callable(site_health) and site not in self.site_health_checked:
+            try:
+                self._require_current_adapter(site_health(site, timeout_s=min(20.0, self.timeout_s)))
+            except SiteHealthUnsupported:
+                pass
+            self.site_health_checked.add(site)
         turn = self.driver.begin_turn(
             request_id=request.request_id,
             stage=request.stage,
             conversation_id=request.metadata.get("conversation_id"),
             conversation_mode=request.metadata.get("conversation_mode", "temporary"),
+            site=site,
         )
         poller = self._start_progress_poller(turn.turn_id, on_progress)
         try:

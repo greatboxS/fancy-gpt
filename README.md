@@ -24,6 +24,7 @@ After installation:
 fancy-gpt test
 fancy-gpt doctor
 fancy-gpt tunnels list
+fancy-gpt sites list
 fancy-gpt tunnels components
 ```
 
@@ -99,8 +100,9 @@ Inspect them:
 
 ```bash
 fancy-gpt tunnels list
+fancy-gpt sites list
 fancy-gpt tunnels components
-fancy-gpt tunnels explain chrome-extension-ws-remote
+fancy-gpt tunnels explain chrome-remote
 fancy-gpt tunnels health
 fancy-gpt tunnels select --policy prefer-remote
 ```
@@ -108,13 +110,13 @@ fancy-gpt tunnels select --policy prefer-remote
 Choose one at runtime:
 
 ```bash
-fancy-gpt run request.yaml --tunnel firefox-extension-ws-remote
+fancy-gpt run request.yaml --tunnel firefox-remote
 ```
 
 or encode it in the request:
 
 ```yaml
-tunnel: chrome-extension-ws-remote
+tunnel: chrome-remote
 ```
 
 Policy selection is also available:
@@ -159,7 +161,7 @@ fancy-gpt extension export chrome ./fancy-gpt-extension
 # edge / firefox are also supported
 ```
 
-Load the unpacked extension, configure the pair token printed by `fancy-gpt bridge init`, keep endpoint `ws://127.0.0.1:8765`, and select the browser-specific `*-extension-ws-remote` tunnel.
+Load the unpacked extension, configure the pair token printed by `fancy-gpt bridge init`, keep endpoint `ws://127.0.0.1:8765`, and select the browser route `chrome-remote`, `edge-remote`, or `firefox-remote`.
 
 The remote bridge binds loopback by default. This is intentional: use SSH forwarding rather than exposing the bridge on LAN/WAN.
 
@@ -171,7 +173,7 @@ For browser and FancyGPT on the same machine:
 fancy-gpt bridge init
 fancy-gpt bridge serve
 fancy-gpt extension export chrome ./fancy-gpt-extension
-fancy-gpt extension native-config --browser chrome --tunnel chrome-extension-native-local
+fancy-gpt extension native-config --browser chrome --tunnel chrome-remote
 fancy-gpt extension native-manifest --browser chrome --extension-id <extension-id>
 ```
 
@@ -183,7 +185,7 @@ Optional only:
 
 ```bash
 ./install.sh --with-playwright
-fancy-gpt run request.yaml --tunnel playwright-chromium-local
+fancy-gpt run request.yaml --tunnel chrome-remote
 ```
 
 This path uses a FancyGPT-owned persistent browser profile. It is not the preferred mode for the local-browser/remote-repo workflow.
@@ -201,7 +203,7 @@ MCP exposes reasoning tools plus tunnel inspection/selection, including:
 - `probe_tunnels`
 - `inspect_tunnel`
 - `select_tunnel`
-- `list_tunnel_sites`
+- `list_sites`
 - `list_tunnel_runtimes`
 - `list_tunnel_transports`
 - `inspect_tunnel_layers`

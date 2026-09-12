@@ -677,6 +677,7 @@ class ProjectService:
             objective=item.objective,
             relevant_context=context,
             role_instructions=self.role_instructions(item.role),
+            site=item.site,
         )
 
     @staticmethod

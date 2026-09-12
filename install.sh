@@ -130,7 +130,7 @@ browser = sys.argv[3]
 target.parent.mkdir(parents=True, exist_ok=True)
 target.write_text(
     "Endpoint: ws://127.0.0.1:8765\n"
-    f"Tunnel ID: {browser}-extension-ws-remote\n"
+    f"Tunnel ID: {browser}-remote\n"
     f"Browser: {browser}\n"
     f"Pair token: {info['pair_token']}\n",
     encoding="utf-8",

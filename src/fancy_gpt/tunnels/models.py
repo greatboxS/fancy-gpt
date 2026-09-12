@@ -61,7 +61,6 @@ class TunnelCapabilities(StrictModel):
 class TunnelSpec(StrictModel):
     id: str
     description: str
-    site: str = "chatgpt"
     runtime: TunnelRuntime
     transport: TunnelTransport
     scope: TunnelScope = TunnelScope.LOCAL

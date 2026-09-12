@@ -37,8 +37,8 @@ def add_failed_request(engine: ReviewEngine, session_id: str, chat_id: str) -> s
     engine.session_store.append_request(session_id, chat_id, request_id)
     engine.store.update_status(
         request_id,
-        provider="chatgpt-web-automation:edge-extension-ws-remote",
-        tunnel_id="edge-extension-ws-remote",
+        provider="chatgpt-web-automation:edge-remote",
+        tunnel_id="edge-remote",
         partial_text="planner json",
     )
     engine.store.fail(request_id, "ContextTooLargeError: required P0 context does not fit context budget")
@@ -58,7 +58,7 @@ def test_inspect_session_reports_failed_request_recovery_hint(tmp_path: Path) ->
     assert inspection.chat_count == 1
     [inspected_chat] = inspection.chats
     assert inspected_chat.conversation_binding_state == "unbound"
-    assert inspected_chat.tunnel_id == "edge-extension-ws-remote"
+    assert inspected_chat.tunnel_id == "edge-remote"
     assert inspected_chat.latest_request is not None
     assert inspected_chat.latest_request.state.value == "failed"
     assert inspected_chat.latest_request.has_partial_text is True

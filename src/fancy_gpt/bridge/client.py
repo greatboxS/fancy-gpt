@@ -26,6 +26,7 @@ class _PendingTurn:
     prompt: str | None = None
     conversation_id: str | None = None
     conversation_mode: str = "temporary"
+    site: str | None = None
 
 
 class BridgeBrowserDriver:
@@ -44,14 +45,11 @@ class BridgeBrowserDriver:
         token: str,
         tunnel_id: str,
         *,
-        site: str = "chatgpt",
         job_timeout_s: float = 300.0,
     ) -> None:
         self.endpoint = endpoint
         self.token = token
         self.tunnel_id = tunnel_id
-        # Which site adapter in the extension should handle this tunnel's jobs.
-        self.site = site
         self.job_timeout_s = job_timeout_s
         self._connection: ClientConnection | None = None
         self._turns: dict[str, _PendingTurn] = {}
@@ -87,14 +85,14 @@ class BridgeBrowserDriver:
             raise RuntimeError(f"browser bridge unavailable for {self.tunnel_id}")
         _ = time.monotonic() - started
 
-    def site_health(self, *, timeout_s: float = 20.0) -> dict:
+    def site_health(self, site: str, *, timeout_s: float = 20.0) -> dict:
         """Probe the actual site adapter through the registered browser worker."""
         job_id = f"health-{uuid.uuid4().hex}"
         self._conn().send(dumps({
             "type": "job",
             "job_id": job_id,
             "tunnel_id": self.tunnel_id,
-            "site": self.site,
+            "site": site,
             "operation": "site.health",
             "request_id": job_id,
             "stage": "health",
@@ -129,15 +127,19 @@ class BridgeBrowserDriver:
         stage: str,
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
+        site: str | None = None,
     ) -> BrowserTurn:
         turn_id = f"bridge-{uuid.uuid4().hex}"
-        self._turns[turn_id] = _PendingTurn(conversation_id=conversation_id, conversation_mode=conversation_mode)
+        self._turns[turn_id] = _PendingTurn(
+            conversation_id=conversation_id, conversation_mode=conversation_mode, site=site
+        )
         return BrowserTurn(
             turn_id=turn_id,
             request_id=request_id,
             stage=stage,
             conversation_id=conversation_id,
             conversation_mode=conversation_mode,
+            site=site,
         )
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:
@@ -157,7 +159,7 @@ class BridgeBrowserDriver:
             "type": "job",
             "job_id": turn.turn_id,
             "tunnel_id": self.tunnel_id,
-            "site": self.site,
+            "site": pending.site,
             "operation": "model.turn",
             "request_id": turn.request_id,
             "stage": turn.stage,

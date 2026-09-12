@@ -155,6 +155,7 @@ Return ONLY one JSON object matching this schema:
                 "agent_role": assignment.role.value,
                 "conversation_strategy": assignment.session.conversation_strategy.value,
                 "conversation_binding": assignment.session.conversation_binding,
+                "site": assignment.site,
                 **conversation_turn_metadata(
                     assignment.session.conversation_strategy, assignment.session.conversation_binding
                 ),

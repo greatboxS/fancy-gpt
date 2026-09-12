@@ -81,7 +81,7 @@ class _RecordingConnection:
 
 
 def test_bridge_client_sends_continue_payload_when_conversation_id_given():
-    driver = BridgeBrowserDriver("ws://example", "tok", "chrome-extension-ws-remote")
+    driver = BridgeBrowserDriver("ws://example", "tok", "chrome-remote")
     driver._connection = _RecordingConnection()
     turn = driver.begin_turn(request_id="r1", stage="planner", conversation_id="conv-abc")
     driver.submit(turn, "hello")
@@ -90,7 +90,7 @@ def test_bridge_client_sends_continue_payload_when_conversation_id_given():
 
 
 def test_bridge_client_sends_persistent_payload_when_mode_persistent_no_id():
-    driver = BridgeBrowserDriver("ws://example", "tok", "chrome-extension-ws-remote")
+    driver = BridgeBrowserDriver("ws://example", "tok", "chrome-remote")
     driver._connection = _RecordingConnection()
     turn = driver.begin_turn(request_id="r1", stage="planner", conversation_mode="persistent")
     driver.submit(turn, "hello")
@@ -99,7 +99,7 @@ def test_bridge_client_sends_persistent_payload_when_mode_persistent_no_id():
 
 
 def test_bridge_client_sends_fresh_payload_by_default():
-    driver = BridgeBrowserDriver("ws://example", "tok", "chrome-extension-ws-remote")
+    driver = BridgeBrowserDriver("ws://example", "tok", "chrome-remote")
     driver._connection = _RecordingConnection()
     turn = driver.begin_turn(request_id="r1", stage="planner")
     driver.submit(turn, "hello")
@@ -131,7 +131,7 @@ class _DistinctConversationDriver:
     def health_check(self) -> None:
         return None
 
-    def begin_turn(self, *, request_id, stage, conversation_id=None, conversation_mode="temporary"):
+    def begin_turn(self, *, request_id, stage, conversation_id=None, conversation_mode="temporary", site=None):
         self._counter += 1
         self.begin_turn_calls.append({"stage": stage, "conversation_id": conversation_id, "mode": conversation_mode})
         resolved = conversation_id or f"auto-conv-{self._counter}"

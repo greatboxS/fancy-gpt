@@ -408,6 +408,8 @@ class AgentAssignment(StrictModel):
     objective: str
     relevant_context: RelevantProjectContext
     role_instructions: list[str] = Field(default_factory=list)
+    # Which site answers this assignment; None lets the tunnel's default decide.
+    site: str | None = None
 
 
 

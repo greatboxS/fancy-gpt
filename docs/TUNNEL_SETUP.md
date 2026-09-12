@@ -1,101 +1,57 @@
 # Tunnel setup guide
 
-All bridge-backed tunnels bind `127.0.0.1` by default. Never replace it with
-`0.0.0.0`; use SSH LocalForward when browser and FancyGPT run on different hosts.
+FancyGPT exposes exactly three browser routes:
 
-## Remote extension: Chrome, Edge, Firefox (recommended)
+| Tunnel | Browser |
+|---|---|
+| `chrome-remote` | Chrome |
+| `edge-remote` | Edge |
+| `firefox-remote` | Firefox |
 
-On the FancyGPT Linux host, choose one browser:
+The requested model site is a separate CLI/MCP field and does not change the
+tunnel ID.
+
+## Remote extension
+
+On the FancyGPT host:
 
 ```bash
 ./install.sh --preset remote-extension --browser edge
 fancy-gpt bridge serve
 ```
 
-Valid browser values are `chrome`, `edge`, and `firefox`. The private bundle is
-`~/.local/share/fancy-gpt/remote-<browser>/`. Copy its `extension/` directory to
-the Windows or Linux browser workstation. Keep `PAIRING.txt` private.
+The private bundle is written below
+`~/.local/share/fancy-gpt/remote-<browser>/`. Move its `extension/` directory to
+the browser workstation and keep `PAIRING.txt` private.
 
-On a remote workstation, keep this running:
+Forward the bridge from the browser workstation:
 
 ```bash
 ssh -o ExitOnForwardFailure=yes -N -L 8765:127.0.0.1:8765 <fancy-gpt-host>
 ```
 
-Load `extension/` unpacked in `chrome://extensions`, `edge://extensions`, or
-`about:debugging#/runtime/this-firefox`, then enter the values from
-`PAIRING.txt`. Verify with:
+Load the unpacked extension, enter the endpoint and pair token, then verify the
+browser route:
 
 ```bash
-fancy-gpt tunnels explain <browser>-extension-ws-remote
+fancy-gpt tunnels explain edge-remote
 ```
 
-## Local Native Messaging: Chrome, Edge, Firefox
-
-Use this only when the browser and FancyGPT run on the same operating system:
+Use the same tunnel with either supported site:
 
 ```bash
-./install.sh --preset local-extension --browser <browser>
+fancy-gpt ask "Who are you?" --tunnel edge-remote --site chatgpt
+fancy-gpt ask "Who are you?" --tunnel edge-remote --site gemini
 ```
 
-This creates `~/.local/share/fancy-gpt/local-<browser>/extension` and the private
-native-host config. Load the extension, obtain its extension ID, then run the
-final command printed by the installer:
+## Local Native Messaging
+
+When browser and FancyGPT run on the same operating system:
 
 ```bash
-fancy-gpt extension native-manifest --browser <browser> --extension-id <id>
+./install.sh --preset local-extension --browser edge
+fancy-gpt extension native-manifest --browser edge --extension-id <id>
 ```
 
-The exact tunnel is `<browser>-extension-native-local`. Windows native-host
-registration is platform-specific and is not automated by the Linux installer.
-
-## Playwright Chromium or Firefox
-
-Playwright is optional:
-
-```bash
-./install.sh --with-playwright
-fancy-gpt tunnels explain playwright-chromium-local
-```
-
-Use `playwright-firefox-local` only after installing the Firefox Playwright
-browser in the same isolated tool environment. These tunnels own their browser
-process and do not use the extension.
-
-## Chrome/Chromium CDP
-
-Launch a dedicated browser profile with remote debugging restricted to
-localhost, then verify:
-
-```bash
-fancy-gpt tunnels explain chrome-cdp-local
-```
-
-Do not expose the CDP port to a network. Do not point CDP at a normal profile
-containing unrelated browsing data.
-
-## Interactive fallback
-
-No browser integration is installed:
-
-```bash
-fancy-gpt tunnels select --tunnel interactive-manual
-```
-
-FancyGPT prints the prompt for manual copy/paste and validates the imported
-response. This is the fallback when automated tunnels are unavailable.
-
-## Built-in mapping
-
-| Tunnel | Simplest setup |
-|---|---|
-| `chrome-extension-ws-remote` | `./install.sh --preset remote-extension --browser chrome` |
-| `edge-extension-ws-remote` | `./install.sh --preset remote-extension --browser edge` |
-| `firefox-extension-ws-remote` | `./install.sh --preset remote-extension --browser firefox` |
-| `chrome-extension-native-local` | `extension native-config --browser chrome` |
-| `edge-extension-native-local` | `extension native-config --browser edge` |
-| `firefox-extension-native-local` | `extension native-config --browser firefox` |
-| `playwright-chromium-local` | `./install.sh --with-playwright` |
-| `playwright-firefox-local` | install optional Playwright Firefox runtime |
-| `chrome-cdp-local` | launch a dedicated loopback-only CDP profile |
-| `interactive-manual` | no setup |
+Native Messaging is another transport for the same `edge-remote` browser route;
+it does not create a second tunnel ID.
