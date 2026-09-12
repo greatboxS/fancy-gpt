@@ -28,6 +28,8 @@ def run(command: list[str], *, cwd: Path = root, pythonpath: Path | None = root 
 
 registry = TunnelRegistry()
 inspector = TunnelLayerInspector()
+expected_tunnel_ids = {"chrome-remote", "edge-remote", "firefox-remote"}
+tunnel_ids = {spec.id for spec in registry.all()}
 tunnel_layer_errors = {
     spec.id: [item.detail for item in inspector.inspect(spec) if item.state != "healthy"]
     for spec in registry.all()
@@ -79,7 +81,8 @@ else:
 
 checks = {
     "version": __version__, "skills": len(load_skills()), "workflows": len(load_workflows()),
-    "domains": len(load_domains()), "tunnels": len(registry.all()),
+    "domains": len(load_domains()), "tunnels": len(tunnel_ids),
+    "tunnel_ids": sorted(tunnel_ids),
     "tunnel_layer_errors": tunnel_layer_errors,
     "skill_bundle_errors": validate_skill_bundle(packaged_skills_root()),
     "source_tests": source_tests, "functional_review": functional_review,
@@ -96,17 +99,20 @@ checks = {
         "examples/final-result.template.json"]),
     "tunnel_architecture_doc": (root / "docs/TUNNEL_ARCHITECTURE.md").is_file(),
     "session_architecture_doc": (root / "docs/SESSION_ARCHITECTURE.md").is_file(),
+    "model_gateway_doc": (root / "docs/MODEL_GATEWAY.md").is_file(),
+    "roadmap_doc": (root / "docs/ROADMAP.md").is_file(),
     "session_profile": session_profile_valid,
 }
 checks["pass"] = (
     checks["skills"] == 6 and checks["workflows"] == 4
-    and checks["domains"] == 13 and checks["tunnels"] == 13
+    and checks["domains"] == 13 and tunnel_ids == expected_tunnel_ids
     and not checks["tunnel_layer_errors"] and not checks["skill_bundle_errors"]
     and not source_tests["stderr"]
     and all(result["pass"] for result in [source_tests, functional_review, tunnel_review,
                                           extension_check, wheel_self_test])
     and not wheel_errors and checks["schemas_exist"] and checks["example_files_exist"]
     and checks["tunnel_architecture_doc"] and checks["session_architecture_doc"]
+    and checks["model_gateway_doc"] and checks["roadmap_doc"]
     and checks["session_profile"] and checks["session_schemas_exist"]
 )
 output = root / "dist" / "release-gate.json"
