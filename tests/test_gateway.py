@@ -72,8 +72,8 @@ def test_gateway_prompt_keeps_exact_output_requests_inside_json_envelope(tmp_pat
     service = GatewayService(tmp_path, manager=manager)
     service.execute(normalize_gemini({"contents": [{"role": "user", "parts": [{"text": "Return exactly HELLO"}]}]}, "gemini-web"))
     prompt = manager.model.requests[0].prompt
-    assert "OUTPUT TRANSPORT CONTRACT (HIGHEST PRIORITY)" in prompt
-    assert "apply to the `text` field" in prompt
+    assert "Return exactly one valid JSON object" in prompt
+    assert "exact output in the `text` field" in prompt
 
 
 def test_gateway_context_ledger_and_tool_calls(tmp_path: Path) -> None:
@@ -101,6 +101,20 @@ def test_gateway_tool_result_continues_existing_browser_conversation(tmp_path: P
     assert manager.model.requests[-1].metadata["conversation_id"] == "conversation-1"
 
 
+def test_gateway_correlates_full_transcript_to_one_provider_chat(tmp_path: Path) -> None:
+    manager = Manager()
+    service = GatewayService(tmp_path, manager=manager)
+    first = service.execute(normalize_anthropic({"model": "chatgpt-web", "messages": [{"role": "user", "content": "remember alpha"}]}))
+    second = service.execute(normalize_anthropic({"model": "chatgpt-web", "messages": [
+        {"role": "user", "content": "remember alpha"},
+        {"role": "assistant", "content": "gateway-ok"},
+        {"role": "user", "content": "what was it?"},
+    ]}))
+    assert second.session_id == first.session_id
+    assert manager.model.requests[-1].metadata["conversation_id"] == "conversation-1"
+    assert service.store.load(second.response_id).previous_response_id == first.response_id
+
+
 def test_codex_model_catalog_shape() -> None:
     catalog = codex_models()
     assert [model["slug"] for model in catalog["models"]] == ["chatgpt-web", "gemini-web", "claude-web"]
@@ -111,6 +125,11 @@ def test_gemini_function_response_is_normalized_as_tool_result() -> None:
     turn = normalize_gemini({"contents": [{"role": "user", "parts": [{"functionResponse": {"id": "call_1", "name": "read_file", "response": {"output": "contents"}}}]}]}, "gemini-web")
     assert "TOOL RESULT call_1" in turn.messages[0].text
     assert "contents" in turn.messages[0].text
+
+
+def test_gemini_model_role_is_canonicalized_for_context_matching() -> None:
+    turn = normalize_gemini({"contents": [{"role": "model", "parts": [{"text": "acknowledged"}]}]}, "gemini-web")
+    assert turn.messages[0].role == "assistant"
 
 
 def test_gateway_rejects_oversized_input_and_audits_failure(tmp_path: Path) -> None:
