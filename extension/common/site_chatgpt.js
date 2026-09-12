@@ -76,6 +76,14 @@
     return null;
   }
 
+  function selectAll(element) {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
   function setComposer(composer, prompt) {
     composer.focus();
     if (composer.tagName.toLowerCase() === "textarea") {
@@ -85,6 +93,19 @@
       composer.dispatchEvent(new Event("change", {bubbles: true}));
       return;
     }
+    // The composer is a rich-text editor that owns its own document model.
+    // Assigning textContent mutates the DOM behind its back, so the editor
+    // either reverts the change or never learns the field is non-empty -- and
+    // the send control, which only appears for a non-empty composer, never
+    // shows. insertText goes through the same input path a real keystroke uses,
+    // so the editor updates its model itself. Selecting first replaces any
+    // existing text rather than appending to it on a retry.
+    selectAll(composer);
+    const inserted = document.execCommand("insertText", false, prompt);
+    if (inserted && (composer.textContent ?? "").includes(prompt.slice(0, 32))) return;
+
+    // Older or differently-built editors may ignore execCommand; fall back to
+    // the direct write, which is still better than sending nothing.
     composer.textContent = prompt;
     composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
   }

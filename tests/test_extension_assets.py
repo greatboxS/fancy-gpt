@@ -138,3 +138,16 @@ def test_adapter_drift_can_be_overridden_deliberately(monkeypatch) -> None:
 
     monkeypatch.setenv("FANCY_GPT_ALLOW_ADAPTER_DRIFT", "1")
     ChatGPTWebAutomationProvider._require_current_adapter({"ok": True})
+
+
+def test_composer_writes_through_the_editor_input_path(tmp_path: Path) -> None:
+    # ChatGPT's composer is a rich-text editor that owns its document model.
+    # Assigning textContent mutates the DOM behind its back, so the editor never
+    # learns the field is non-empty and the send control never appears. The
+    # adapter must go through insertText, which is the path a keystroke uses.
+    site = (export_extension("edge", tmp_path / "edge-composer") / "site_chatgpt.js").read_text(encoding="utf-8")
+
+    insert = site.index('execCommand("insertText"')
+    fallback = site.index("composer.textContent = prompt")
+    assert insert < fallback, "the direct write must only be a fallback"
+    assert "selectAll(composer)" in site, "a retry must replace the text, not append to it"

@@ -81,7 +81,9 @@ function taskUrlFor(conversation) {
   if (mode === "continue" && CONVERSATION_ID_PATTERN.test(String(conversation.conversation_id ?? ""))) {
     return `https://chatgpt.com/c/${conversation.conversation_id}`;
   }
-  if (mode === "persistent") return "https://chatgpt.com/";
+  // Both modes are stated explicitly rather than letting the bare origin inherit
+  // whichever mode the UI was last left in.
+  if (mode === "persistent") return "https://chatgpt.com/?temporary-chat=false";
   return "https://chatgpt.com/?temporary-chat=true";
 }
 
