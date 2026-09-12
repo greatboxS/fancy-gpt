@@ -10,6 +10,7 @@ from pathlib import Path
 
 from fancy_gpt import __version__
 from fancy_gpt.catalog import load_domains, load_skills, load_workflows
+from fancy_gpt.models import SessionCapabilities
 from fancy_gpt.skills import packaged_skills_root, validate_skill_bundle
 from fancy_gpt.tunnels import TunnelLayerInspector, TunnelRegistry
 
@@ -37,6 +38,16 @@ source_tests = run([sys.executable, "-m", "pytest", "-ra"])
 functional_review = run([sys.executable, "scripts/functional_review.py"])
 tunnel_review = run([sys.executable, "scripts/tunnel_review.py"])
 extension_check = run([sys.executable, "scripts/build_extension.py", "--check"], pythonpath=None)
+profile_path = root / "profiles/session-management.json"
+session_profile_valid = False
+if profile_path.is_file():
+    try:
+        session_profile_valid = (
+            SessionCapabilities.model_validate_json(profile_path.read_text(encoding="utf-8"))
+            == SessionCapabilities()
+        )
+    except Exception:
+        session_profile_valid = False
 
 wheel = root / "dist" / f"fancy_gpt-{__version__}-py3-none-any.whl"
 wheel_errors: list[str] = []
@@ -78,10 +89,14 @@ checks = {
     "schemas_exist": all((root / "schemas" / name).exists() for name in [
         "raw-request.schema.json", "research-manifest.schema.json", "context-pack.schema.json",
         "final-report.schema.json", "request-status.schema.json", "routing-decision.schema.json"]),
+    "session_schemas_exist": all((root / "schemas" / name).exists() for name in [
+        "session-record.schema.json", "chat-record.schema.json", "session-capabilities.schema.json"]),
     "example_files_exist": all((root / name).exists() for name in [
         "examples/requests/qos-review.yaml", "examples/planner-result.example.json",
         "examples/final-result.template.json"]),
     "tunnel_architecture_doc": (root / "docs/TUNNEL_ARCHITECTURE.md").is_file(),
+    "session_architecture_doc": (root / "docs/SESSION_ARCHITECTURE.md").is_file(),
+    "session_profile": session_profile_valid,
 }
 checks["pass"] = (
     checks["version"] == "0.7.0" and checks["skills"] == 6 and checks["workflows"] == 4
@@ -91,7 +106,8 @@ checks["pass"] = (
     and all(result["pass"] for result in [source_tests, functional_review, tunnel_review,
                                           extension_check, wheel_self_test])
     and not wheel_errors and checks["schemas_exist"] and checks["example_files_exist"]
-    and checks["tunnel_architecture_doc"]
+    and checks["tunnel_architecture_doc"] and checks["session_architecture_doc"]
+    and checks["session_profile"] and checks["session_schemas_exist"]
 )
 output = root / "dist" / "release-gate.json"
 output.parent.mkdir(parents=True, exist_ok=True)

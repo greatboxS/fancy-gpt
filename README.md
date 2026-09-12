@@ -205,8 +205,39 @@ MCP exposes reasoning tools plus tunnel inspection/selection, including:
 - `list_tunnel_runtimes`
 - `list_tunnel_transports`
 - `inspect_tunnel_layers`
+- `create_session`, `list_sessions`, `get_session`, `close_session`
+- `create_chat`, `list_chats`, `select_chat`, `archive_chat`
+- `list_session_requests`, `session_capabilities`
 
 Thus the caller can select the online tunnel **per request at runtime** without changing ReviewEngine.
+
+## Sessions and conversations
+
+Planner turns always use Temporary Chat. Final answers use a durable session
+chat, so planning noise never appears in the main discussion and consecutive
+requests retain context.
+
+```yaml
+mode: review
+objective: Review the new routing design
+repo_root: .
+session_id: ses-0123456789ab   # omit for the repo-scoped default session
+chat_policy: continue          # continue | new_chat | independent | temporary
+```
+
+Use `independent` for a separate review that must not replace the active main
+chat. Use `new_chat` to branch into and select a new durable discussion. The
+full lifecycle, storage, recovery behavior, schemas, and clean layer boundaries
+are documented in [Session and chat architecture](docs/SESSION_ARCHITECTURE.md).
+
+The same choices are available without editing YAML:
+
+```bash
+fancy-gpt run request.yaml --session ses-0123456789ab --chat-policy continue
+fancy-gpt run review.yaml --session ses-0123456789ab --chat-policy independent
+fancy-gpt sessions list
+fancy-gpt chats list ses-0123456789ab
+```
 
 ## Security boundaries
 

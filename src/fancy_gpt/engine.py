@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import os
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 
 from .context_builder import ContextBuilder
+from .conversations import ConversationManager
 from .errors import InvalidStateError
 from .models import (
     ContextPack,
+    ChatRecord,
+    ChatPolicy,
+    ChatResolution,
     FinalReport,
     InteractionRequired,
     RawRequest,
@@ -15,6 +20,7 @@ from .models import (
     RequestStatus,
     ResearchManifest,
     RoutingDecision,
+    SessionRecord,
 )
 from .planner import PreRequestPlanner
 from .providers import ChatGPTWebInteractiveProvider
@@ -22,7 +28,7 @@ from .providers.base import AutomaticModelProvider
 from .request_builder import FinalRequestBuilder, PlannerRequestBuilder
 from .response_parser import parse_json_object
 from .routing import RequestClassifier
-from .store import RequestStore
+from .store import RequestStore, SessionStore
 
 
 class ReviewEngine:
@@ -33,6 +39,8 @@ class ReviewEngine:
         allowed_roots: list[Path | str] | None = None,
     ) -> None:
         self.store = RequestStore(Path(workdir))
+        self.session_store = SessionStore(Path(workdir))
+        self.conversations = ConversationManager(self.session_store)
         self.context_builder = ContextBuilder()
         self.planner = PreRequestPlanner()
         self.router = RequestClassifier()
@@ -65,7 +73,7 @@ class ReviewEngine:
         self.context_builder.validate_allowed_root(request.repo_root, self.allowed_roots)
         return self.router.classify(request, skill_name=skill_name, workflow_name=workflow_name)
 
-    def _new_request(self, request: RawRequest, route: RoutingDecision) -> str:
+    def _new_request(self, request: RawRequest, route: RoutingDecision, resolution: ChatResolution) -> str:
         request_id = uuid.uuid4().hex[:16]
         self.store.create_status(
             request_id,
@@ -74,10 +82,25 @@ class ReviewEngine:
             skill=route.primary_skill,
             mode=request.mode,
             objective=request.objective,
+            session_id=resolution.session_id,
+            chat_id=resolution.chat_id,
+            chat_policy=resolution.policy,
         )
         self.store.write_model(request_id, "request.json", request)
         self.store.write_model(request_id, "routing-decision.json", route)
+        self.conversations.attach_request(resolution, request_id)
         return request_id
+
+    def _resolution_for_status(self, status: RequestStatus) -> ChatResolution:
+        conversation_id = status.conversation_id
+        if status.session_id and status.chat_id:
+            conversation_id = self.session_store.get_chat(status.session_id, status.chat_id).conversation_id
+        return ChatResolution(
+            policy=status.chat_policy or ChatPolicy.TEMPORARY,
+            session_id=status.session_id,
+            chat_id=status.chat_id,
+            conversation_id=conversation_id,
+        )
 
     def _validate_manifest(self, payload: dict, route: RoutingDecision) -> ResearchManifest:
         manifest = ResearchManifest.model_validate(payload)
@@ -134,7 +157,8 @@ class ReviewEngine:
         open_browser: bool = False,
     ) -> InteractionRequired:
         route = self.route(request, skill_name=skill_name, workflow_name=workflow_name)
-        request_id = self._new_request(request, route)
+        resolution = self.conversations.resolve(request)
+        request_id = self._new_request(request, route, resolution)
         model_request = self.planner_request_builder.build(request_id, request, route)
         interaction = self.interactive_provider.prepare(
             model_request,
@@ -162,7 +186,8 @@ class ReviewEngine:
             self.store.write_model(request_id, "research-manifest.json", manifest)
             context = self.context_builder.build(request, manifest)
             self.store.write_model(request_id, "context-pack.json", context)
-            model_request = self.final_request_builder.build(request_id, request, route, manifest, context)
+            resolution = self._resolution_for_status(status)
+            model_request = self.final_request_builder.build(request_id, request, route, manifest, context, resolution)
             interaction = self.interactive_provider.prepare(
                 model_request,
                 self.store.request_dir(request_id) / "final-prompt.md",
@@ -205,7 +230,8 @@ class ReviewEngine:
         workflow_name: str | None = None,
     ) -> FinalReport:
         route = self.route(request, skill_name=skill_name, workflow_name=workflow_name)
-        request_id = self._new_request(request, route)
+        resolution = self.conversations.resolve(request)
+        request_id = self._new_request(request, route, resolution)
         provider_started = False
         try:
             planner_request = self.planner_request_builder.build(request_id, request, route)
@@ -230,14 +256,9 @@ class ReviewEngine:
 
             context = self.context_builder.build(request, manifest)
             self.store.write_model(request_id, "context-pack.json", context)
-            final_request = self.final_request_builder.build(request_id, request, route, manifest, context)
-            if planner_response.conversation_id:
-                # Keep both turns of one request in the same ChatGPT thread:
-                # without this, a fresh persistent-mode request would have the
-                # planner and final turns each start their own separate saved
-                # conversation (visibly duplicated, often with the same
-                # auto-generated title) instead of one continuous thread.
-                final_request.metadata["conversation_id"] = planner_response.conversation_id
+            final_request = self.final_request_builder.build(
+                request_id, request, route, manifest, context, resolution
+            )
             final_prompt_path = self.store.write_text(request_id, "final-prompt.md", final_request.prompt)
             self.store.transition(
                 request_id,
@@ -247,27 +268,47 @@ class ReviewEngine:
                 final_prompt_file=str(final_prompt_path),
             )
 
-            final_response = provider.execute(
-                final_request, on_progress=lambda text: self.store.update_progress(request_id, text)
+            chat_lock = (
+                self.session_store.chat_operation_lock(resolution.session_id, resolution.chat_id)
+                if resolution.session_id and resolution.chat_id
+                else nullcontext()
             )
-            final_response_path = self.store.write_model(request_id, "final-response.json", final_response)
-            report = self._validate_report(
-                request_id,
-                request,
-                route,
-                manifest,
-                parse_json_object(final_response.raw_text),
-            )
-            result_path = self.store.write_model(request_id, "final-result.json", report)
-            self.store.transition(
-                request_id,
-                RequestState.RUNNING_FINAL,
-                RequestState.COMPLETE,
-                final_response_file=str(final_response_path),
-                result_file=str(result_path),
-                conversation_id=final_response.conversation_id,
-            )
-            return report
+            with chat_lock:
+                # Re-read the conversation after waiting for another request
+                # on this chat; that request may have created its provider id.
+                if resolution.session_id and resolution.chat_id:
+                    chat = self.session_store.get_chat(resolution.session_id, resolution.chat_id)
+                    if chat.conversation_id:
+                        final_request.metadata["conversation_id"] = chat.conversation_id
+                final_response = provider.execute(
+                    final_request, on_progress=lambda text: self.store.update_progress(request_id, text)
+                )
+                # Persist provider identity before parsing/validation so a valid
+                # ChatGPT conversation remains recoverable after downstream errors.
+                self.conversations.bind_conversation(
+                    resolution,
+                    final_response.conversation_id,
+                    getattr(provider, "tunnel_id", None),
+                )
+                self.store.update_status(request_id, conversation_id=final_response.conversation_id)
+                final_response_path = self.store.write_model(request_id, "final-response.json", final_response)
+                report = self._validate_report(
+                    request_id,
+                    request,
+                    route,
+                    manifest,
+                    parse_json_object(final_response.raw_text),
+                )
+                result_path = self.store.write_model(request_id, "final-result.json", report)
+                self.store.transition(
+                    request_id,
+                    RequestState.RUNNING_FINAL,
+                    RequestState.COMPLETE,
+                    final_response_file=str(final_response_path),
+                    result_file=str(result_path),
+                    conversation_id=final_response.conversation_id,
+                )
+                return report
         except Exception as exc:
             self.store.fail(request_id, f"{type(exc).__name__}: {exc}")
             raise
@@ -277,6 +318,45 @@ class ReviewEngine:
 
     def status(self, request_id: str) -> RequestStatus:
         return self.store.load_status(request_id)
+
+    def create_session(self, repo_root: str, title: str | None = None) -> SessionRecord:
+        self.context_builder.validate_allowed_root(repo_root, self.allowed_roots)
+        return self.conversations.create_session(repo_root, title)
+
+    def get_session(self, session_id: str) -> SessionRecord:
+        return self.session_store.get_session(session_id)
+
+    def list_sessions(self) -> list[SessionRecord]:
+        return self.session_store.list_sessions()
+
+    def close_session(self, session_id: str) -> SessionRecord:
+        return self.session_store.close_session(session_id)
+
+    def create_chat(
+        self, session_id: str, title: str, *, independent: bool = False, make_active: bool = True
+    ) -> ChatRecord:
+        return self.conversations.create_chat(
+            session_id, title, independent=independent, make_active=make_active
+        )
+
+    def list_chats(self, session_id: str, *, include_archived: bool = False) -> list[ChatRecord]:
+        return self.session_store.list_chats(session_id, include_archived=include_archived)
+
+    def select_chat(self, session_id: str, chat_id: str) -> SessionRecord:
+        return self.session_store.select_chat(session_id, chat_id)
+
+    def archive_chat(self, session_id: str, chat_id: str) -> ChatRecord:
+        return self.session_store.archive_chat(session_id, chat_id)
+
+    def list_session_requests(self, session_id: str) -> list[RequestStatus]:
+        session = self.session_store.get_session(session_id)
+        request_ids = [
+            request_id
+            for chat in self.session_store.list_chats(session_id, include_archived=True)
+            for request_id in chat.request_ids
+        ]
+        # Preserve requests even if future chat metadata contains a duplicate.
+        return self.store.list_statuses(list(dict.fromkeys(request_ids)))
 
     def inspect_context(self, request_id: str) -> ContextPack:
         return self.store.read_model(request_id, "context-pack.json", ContextPack)

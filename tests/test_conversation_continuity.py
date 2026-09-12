@@ -152,11 +152,7 @@ class _DistinctConversationDriver:
         return None
 
 
-def test_final_turn_inherits_conversation_id_from_planner_turn(tmp_path: Path) -> None:
-    # Reproduces a real observed bug: with the persistent default and no
-    # explicit conversation_id, the planner and final turns each started
-    # their own separate saved ChatGPT conversation (both auto-titled the
-    # same, appearing as duplicates) instead of sharing one thread.
+def test_planner_is_temporary_and_main_chat_continues_across_requests(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     engine = ReviewEngine(tmp_path / "work", allowed_roots=[tmp_path])
     req = RawRequest(mode="review", objective="review architecture", repo_root=str(repo), domains=["architecture"])
@@ -164,15 +160,21 @@ def test_final_turn_inherits_conversation_id_from_planner_turn(tmp_path: Path) -
     driver = _DistinctConversationDriver([
         json.dumps(planner_payload(required_sections=route.required_sections)),
         lambda turn: json.dumps(final_payload(turn.request_id, sections=route.required_sections)),
+        json.dumps(planner_payload(required_sections=route.required_sections)),
+        lambda turn: json.dumps(final_payload(turn.request_id, sections=route.required_sections)),
     ])
     provider = ChatGPTWebAutomationProvider(driver, tunnel_id="distinct")
     engine.run_automatic(req, provider, skill_name="technical-review")
+    engine.run_automatic(req, provider, skill_name="technical-review")
 
-    assert len(driver.begin_turn_calls) == 2
-    planner_call, final_call = driver.begin_turn_calls
-    assert planner_call["stage"] == "planner"
-    assert planner_call["conversation_id"] is None  # nothing to inherit yet
-    assert final_call["stage"] == "final"
-    # The engine must have threaded the planner turn's resulting
-    # conversation id ("auto-conv-1") into the final turn's begin_turn call.
-    assert final_call["conversation_id"] == "auto-conv-1"
+    first_planner, first_final, second_planner, second_final = driver.begin_turn_calls
+    assert first_planner == {"stage": "planner", "conversation_id": None, "mode": "temporary"}
+    assert first_final == {"stage": "final", "conversation_id": None, "mode": "persistent"}
+    assert second_planner == {"stage": "planner", "conversation_id": None, "mode": "temporary"}
+    assert second_final == {"stage": "final", "conversation_id": "auto-conv-2", "mode": "persistent"}
+
+    [session] = engine.list_sessions()
+    [chat] = engine.list_chats(session.session_id)
+    assert session.active_chat_id == chat.chat_id
+    assert chat.conversation_id == "auto-conv-2"
+    assert len(chat.request_ids) == 2

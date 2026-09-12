@@ -1,0 +1,78 @@
+{
+  "$defs": {
+    "ChatPolicy": {
+      "enum": [
+        "continue",
+        "new_chat",
+        "independent",
+        "temporary"
+      ],
+      "title": "ChatPolicy",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "planner_conversation": {
+      "const": "temporary",
+      "default": "temporary",
+      "title": "Planner Conversation",
+      "type": "string"
+    },
+    "final_chat_policies": {
+      "items": {
+        "$ref": "#/$defs/ChatPolicy"
+      },
+      "title": "Final Chat Policies",
+      "type": "array"
+    },
+    "default_policy": {
+      "$ref": "#/$defs/ChatPolicy",
+      "default": "continue"
+    },
+    "default_session_scope": {
+      "const": "repo_root",
+      "default": "repo_root",
+      "title": "Default Session Scope",
+      "type": "string"
+    },
+    "supports_multiple_chats": {
+      "default": true,
+      "title": "Supports Multiple Chats",
+      "type": "boolean"
+    },
+    "supports_active_chat": {
+      "default": true,
+      "title": "Supports Active Chat",
+      "type": "boolean"
+    },
+    "supports_independent_review": {
+      "default": true,
+      "title": "Supports Independent Review",
+      "type": "boolean"
+    },
+    "supports_archiving": {
+      "default": true,
+      "title": "Supports Archiving",
+      "type": "boolean"
+    },
+    "supports_cross_process_recovery": {
+      "default": true,
+      "title": "Supports Cross Process Recovery",
+      "type": "boolean"
+    },
+    "conversation_binding_stage": {
+      "const": "before_result_validation",
+      "default": "before_result_validation",
+      "title": "Conversation Binding Stage",
+      "type": "string"
+    }
+  },
+  "title": "SessionCapabilities",
+  "type": "object"
+}

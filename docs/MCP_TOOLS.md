@@ -15,28 +15,37 @@ Tools:
 9. `list_workflows` — four orchestration profiles.
 10. `list_domains` — thirteen technical policies.
 11. `server_stats` — MCP process call/error counters plus a live bridge worker/job snapshot.
+12. `create_session`, `get_session`, `list_sessions`, `close_session` — session lifecycle.
+13. `create_chat`, `list_chats`, `select_chat`, `archive_chat` — multi-chat management.
+14. `list_session_requests` — request history for all chats in a session.
+15. `session_capabilities` — machine-readable behavior/profile advertisement.
 
 Repository access is constrained by `FANCY_GPT_ALLOWED_ROOTS`.
 
 ## Conversation continuity
 
-`RawRequest` carries two fields that control which ChatGPT conversation a
-`run_request_automatic`/`prepare_request` call lands in (extension-bridge
-tunnels only; Playwright/CDP tunnels always start a fresh temporary chat):
+Planner turns are always temporary. Final turns are controlled by:
+
+- `session_id`: explicit work session; omit it to use the repo-scoped default.
+- `chat_id`: explicitly target a chat belonging to that session.
+- `chat_policy`: `continue` (default), `new_chat`, `independent`, or `temporary`.
+
+`independent` creates a durable review chat without changing the active chat.
+`new_chat` creates and selects a durable chat. `temporary` creates no session
+or chat. See `SESSION_ARCHITECTURE.md` for lifecycle and recovery rules.
+
+The legacy fields remain supported:
 
 - `conversation_mode`: `"persistent"` (default) opens a real, saved ChatGPT
   conversation instead of a `?temporary-chat=true` one, so it appears in the
   account's history and its resulting id can be reused. `"temporary"` keeps
   the previous ephemeral, non-resumable behavior.
-- `conversation_id`: when set, the call continues that existing conversation
-  (both the planner and final turns run inside it) instead of starting a new
-  one. Ignored if empty.
+- `conversation_id`: binds an existing provider conversation to the resolved
+  final chat. The planner never uses it.
 
-After a call completes, call `get_request_status(request_id)` and read
-`.conversation_id` from the response — pass that value as the next request's
-`conversation_id` to keep the thread going across multiple
-`run_request_automatic` calls in the same session. Omit both fields (or set
-`conversation_mode: "temporary"`) for a one-off, unlinked request.
+`get_request_status` exposes `.session_id`, `.chat_id`, `.chat_policy`, and
+`.conversation_id`. Subsequent requests with the same session automatically
+reuse its active chat; callers no longer need to copy provider ids manually.
 
 `get_request_status` also exposes `.partial_text` /
 `.partial_text_updated_at`: a best-effort, ~1.5s-refreshed snapshot of what

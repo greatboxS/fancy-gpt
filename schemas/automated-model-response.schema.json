@@ -30,6 +30,18 @@
     "response_identity": {
       "title": "Response Identity",
       "type": "string"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
     }
   },
   "required": [

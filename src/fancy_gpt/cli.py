@@ -11,7 +11,7 @@ from .browser import FakeBrowserDriver, PlaywrightChatGPTDriver
 from .catalog import load_domains, load_skills, load_workflows
 from .engine import ReviewEngine
 from .io import load_mapping
-from .models import FinalReport, RawRequest, ResearchManifest
+from .models import ChatPolicy, FinalReport, RawRequest, ResearchManifest
 from .providers import ChatGPTWebAutomationProvider
 from .skills import export_packaged_skills, packaged_skills_root, validate_skill_bundle
 from .runtime_paths import default_browser_profile, user_data_dir, default_bridge_token_file, default_bridge_native_config
@@ -73,6 +73,8 @@ skills_app = typer.Typer(help="Validate/export Agent Skill bundles")
 tunnels_app = typer.Typer(help="Inspect, probe, and select browser tunnels")
 bridge_app = typer.Typer(help="Run/pair the browser bridge used by extension tunnels")
 extension_app = typer.Typer(help="Export/configure Chrome, Edge, and Firefox tunnel extensions")
+sessions_app = typer.Typer(help="Manage persistent FancyGPT work sessions")
+chats_app = typer.Typer(help="Manage chats inside a FancyGPT session")
 app.add_typer(catalogs_app, name="catalogs")
 app.add_typer(validate_app, name="validate")
 app.add_typer(browser_app, name="browser")
@@ -80,6 +82,8 @@ app.add_typer(skills_app, name="skills")
 app.add_typer(tunnels_app, name="tunnels")
 app.add_typer(bridge_app, name="bridge")
 app.add_typer(extension_app, name="extension")
+app.add_typer(sessions_app, name="sessions")
+app.add_typer(chats_app, name="chats")
 
 
 def _engine(workdir: Path | None, allowed_root: list[Path] | None = None) -> ReviewEngine:
@@ -192,9 +196,17 @@ def run_cmd(
     headless: Annotated[bool, typer.Option("--headless")] = True,
     tunnel: Annotated[str | None, typer.Option("--tunnel")] = None,
     tunnel_policy: Annotated[str | None, typer.Option("--tunnel-policy")] = None,
+    session_id: Annotated[str | None, typer.Option("--session")] = None,
+    chat_id: Annotated[str | None, typer.Option("--chat")] = None,
+    chat_policy: Annotated[ChatPolicy | None, typer.Option("--chat-policy")] = None,
 ) -> None:
     """Run through a runtime-selected tunnel; skill is inferred from mode by default."""
     request = RawRequest.model_validate(load_mapping(request_file))
+    request = request.model_copy(update={
+        **({"session_id": session_id} if session_id else {}),
+        **({"chat_id": chat_id} if chat_id else {}),
+        **({"chat_policy": chat_policy} if chat_policy else {}),
+    })
     skill, workflow = _auto_route(request, skill, workflow)
     manager = TunnelManager(timeout_s=timeout_s, headless=headless)
     selection = manager.select(tunnel_id=tunnel or request.tunnel, policy=(tunnel_policy or request.tunnel_policy))
@@ -237,9 +249,17 @@ def run_auto(
     profile_dir: Annotated[Path, typer.Option("--profile-dir")] = default_browser_profile(),
     timeout_s: Annotated[float, typer.Option("--timeout")] = 300.0,
     headless: Annotated[bool, typer.Option("--headless")] = False,
+    session_id: Annotated[str | None, typer.Option("--session")] = None,
+    chat_id: Annotated[str | None, typer.Option("--chat")] = None,
+    chat_policy: Annotated[ChatPolicy | None, typer.Option("--chat-policy")] = None,
 ) -> None:
     skill, workflow = _route_args(skill, workflow)
     request = RawRequest.model_validate(load_mapping(request_file))
+    request = request.model_copy(update={
+        **({"session_id": session_id} if session_id else {}),
+        **({"chat_id": chat_id} if chat_id else {}),
+        **({"chat_policy": chat_policy} if chat_policy else {}),
+    })
     provider = ChatGPTWebAutomationProvider(PlaywrightChatGPTDriver(profile_dir, headless=headless), timeout_s=timeout_s)
     result = _engine(workdir, allowed_root).run_automatic(
         request, provider, skill_name=skill, workflow_name=workflow
@@ -297,6 +317,89 @@ def final_import(
 @app.command()
 def status(request_id: str, workdir: Annotated[Path | None, typer.Option("--workdir")] = None) -> None:
     typer.echo(_engine(workdir).status(request_id).model_dump_json(indent=2))
+
+
+@sessions_app.command("create")
+def sessions_create(
+    repo_root: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path("."),
+    title: Annotated[str | None, typer.Option("--title")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_engine(workdir, [repo_root]).create_session(str(repo_root), title).model_dump_json(indent=2))
+
+
+@sessions_app.command("list")
+def sessions_list(workdir: Annotated[Path | None, typer.Option("--workdir")] = None) -> None:
+    sessions = _engine(workdir).list_sessions()
+    typer.echo(_table(
+        ["SESSION", "TITLE", "CHATS", "ACTIVE", "STATE"],
+        [[s.session_id, s.title, str(len(s.chat_ids)), s.active_chat_id or "-", "closed" if s.closed_at else "active"] for s in sessions],
+        max_widths=[None, 36, None, None, None],
+    ))
+
+
+@sessions_app.command("show")
+def sessions_show(
+    session_id: str,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_engine(workdir).get_session(session_id).model_dump_json(indent=2))
+
+
+@sessions_app.command("close")
+def sessions_close(
+    session_id: str,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_engine(workdir).close_session(session_id).model_dump_json(indent=2))
+
+
+@chats_app.command("create")
+def chats_create(
+    session_id: str,
+    title: Annotated[str, typer.Option("--title")],
+    independent: Annotated[bool, typer.Option("--independent")] = False,
+    no_select: Annotated[bool, typer.Option("--no-select")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    chat = _engine(workdir).create_chat(
+        session_id, title, independent=independent, make_active=not no_select
+    )
+    typer.echo(chat.model_dump_json(indent=2))
+
+
+@chats_app.command("list")
+def chats_list(
+    session_id: str,
+    include_archived: Annotated[bool, typer.Option("--all")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    engine = _engine(workdir)
+    session = engine.get_session(session_id)
+    chats = engine.list_chats(session_id, include_archived=include_archived)
+    typer.echo(_table(
+        ["CHAT", "KIND", "ACTIVE", "REQUESTS", "TITLE"],
+        [[c.chat_id, c.kind.value, "yes" if c.chat_id == session.active_chat_id else "", str(len(c.request_ids)), c.title] for c in chats],
+        max_widths=[None, None, None, None, 42],
+    ))
+
+
+@chats_app.command("select")
+def chats_select(
+    session_id: str,
+    chat_id: str,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_engine(workdir).select_chat(session_id, chat_id).model_dump_json(indent=2))
+
+
+@chats_app.command("archive")
+def chats_archive(
+    session_id: str,
+    chat_id: str,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_engine(workdir).archive_chat(session_id, chat_id).model_dump_json(indent=2))
 
 
 @app.command("show-prompt")

@@ -16,6 +16,8 @@ def test_planner_is_online_research_planner_not_solver(tmp_path: Path):
     assert "BODY MUST NOT ENTER PLANNER" not in prompt
     assert "domain_policies" in prompt
     assert "available_capabilities" in prompt
+    assert "count them before returning" in prompt
+    assert 'exact_paths: ["<git-diff>"]' in prompt
 
 
 def test_design_candidate_is_absent_even_as_metadata(tmp_path: Path):
@@ -35,6 +37,16 @@ def test_planner_rejects_unrouted_capability_and_missing_sections(tmp_path: Path
     manifest=ResearchManifest.model_validate(payload)
     with pytest.raises(ValueError,match="unavailable capability"):
         PreRequestPlanner().validate_manifest(manifest,route)
+
+
+def test_planner_rejects_required_context_without_machine_selectors(tmp_path: Path):
+    req = RawRequest(mode="review", objective="review", repo_root=str(tmp_path), domains=["architecture"])
+    route = ReviewEngine(tmp_path / "work", allowed_roots=[tmp_path]).route(req, skill_name="technical-review")
+    payload = planner_payload(required_sections=route.required_sections)
+    payload["local_context_requirements"][0].update(patterns=[], exact_paths=[], search_terms=[])
+    manifest = ResearchManifest.model_validate(payload)
+    with pytest.raises(ValueError, match="actionable selectors"):
+        PreRequestPlanner().validate_manifest(manifest, route)
 
 
 def test_final_prompt_does_not_reintroduce_candidate_or_host_path(tmp_path: Path):

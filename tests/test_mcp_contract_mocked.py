@@ -18,4 +18,6 @@ def test_mcp_tool_surface_can_be_registered_without_real_transport(monkeypatch):
       "inspect_routing","inspect_context","list_tunnel_sites","list_tunnel_runtimes","list_tunnel_transports","inspect_tunnel_layers",
       "list_tunnels","probe_tunnels","inspect_tunnel","select_tunnel",
       "list_skills","list_workflows","list_domains","server_stats"
+      ,"create_session","get_session","list_sessions","close_session","create_chat","list_chats",
+      "select_chat","archive_chat","list_session_requests","session_capabilities"
     }

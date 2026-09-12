@@ -1,0 +1,65 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "repo_root": {
+      "title": "Repo Root",
+      "type": "string"
+    },
+    "active_chat_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Active Chat Id"
+    },
+    "chat_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Chat Ids",
+      "type": "array"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "title": "Updated At",
+      "type": "string"
+    },
+    "closed_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Closed At"
+    }
+  },
+  "required": [
+    "session_id",
+    "title",
+    "repo_root",
+    "created_at",
+    "updated_at"
+  ],
+  "title": "SessionRecord",
+  "type": "object"
+}

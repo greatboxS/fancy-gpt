@@ -9,3 +9,7 @@
 - ChatGPT Web browser boundary is provider-neutral and mock-testable.
 - No OpenAI API/Codex dependency in the core design.
 - Filesystem and candidate-design isolation are code-level gates, not prompt-only guidance.
+- Planner turns are always temporary implementation details; only final turns may enter durable chats.
+- Session, chat, request, and model turn are separate lifecycle concepts.
+- Session behavior is exposed through a repository port; MCP/CLI and filesystem persistence remain adapters.
+- Persistent requests default to a repo-scoped session, while explicit sessions provide isolation and multiple chats.

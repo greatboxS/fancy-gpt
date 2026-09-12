@@ -49,6 +49,8 @@ You are the planning pass of a two-pass technical reasoning system. You MAY use 
 - For verify mode, create at least one explicit evidence requirement.
 - For investigate mode, plan evidence that can discriminate competing hypotheses.
 - For current/version-specific tasks, plan online research unless the request explicitly contains sufficient authoritative evidence.
+- The total number of strings across every `online_research[*].queries` array MUST be less than or equal to `research_budget.max_search_queries`; count them before returning.
+- Every required `local_context_requirements` item MUST contain at least one machine-actionable `patterns`, `exact_paths`, or `search_terms` entry. To require the requested git diff, use `exact_paths: ["<git-diff>"]`; prose in `description` is not a selector.
 
 ## INPUT
 ```json
@@ -80,6 +82,12 @@ Return ONLY one JSON object conforming to this JSON Schema. No markdown fences, 
         query_count = sum(len(task.queries) for task in manifest.online_research)
         if query_count > manifest.research_budget.max_search_queries:
             raise ValueError("planned online query count exceeds declared max_search_queries")
+        empty_required = [
+            item.id for item in manifest.local_context_requirements
+            if item.required and not (item.patterns or item.exact_paths or item.search_terms)
+        ]
+        if empty_required:
+            raise ValueError(f"required local context requirements need actionable selectors: {empty_required}")
         if route.mode not in manifest.intent:
             raise ValueError(f"planner manifest must include original mode: {route.mode.value}")
         unknown_domains = set(manifest.domains) - set(load_domains())

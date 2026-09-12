@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "planner_conversation": "temporary",
+  "final_chat_policies": ["continue", "new_chat", "independent", "temporary"],
+  "default_policy": "continue",
+  "default_session_scope": "repo_root",
+  "supports_multiple_chats": true,
+  "supports_active_chat": true,
+  "supports_independent_review": true,
+  "supports_archiving": true,
+  "supports_cross_process_recovery": true,
+  "conversation_binding_stage": "before_result_validation"
+}

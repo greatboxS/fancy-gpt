@@ -1,5 +1,15 @@
 {
   "$defs": {
+    "ChatPolicy": {
+      "enum": [
+        "continue",
+        "new_chat",
+        "independent",
+        "temporary"
+      ],
+      "title": "ChatPolicy",
+      "type": "string"
+    },
     "RequestMode": {
       "enum": [
         "review",
@@ -161,6 +171,77 @@
       ],
       "default": null,
       "title": "Error"
+    },
+    "partial_text": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Partial Text"
+    },
+    "partial_text_updated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Partial Text Updated At"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "session_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Session Id"
+    },
+    "chat_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chat Id"
+    },
+    "chat_policy": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChatPolicy"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

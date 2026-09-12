@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "ChatKind": {
+      "enum": [
+        "main",
+        "standard",
+        "independent"
+      ],
+      "title": "ChatKind",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "chat_id": {
+      "title": "Chat Id",
+      "type": "string"
+    },
+    "session_id": {
+      "title": "Session Id",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "kind": {
+      "$ref": "#/$defs/ChatKind"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "tunnel_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tunnel Id"
+    },
+    "request_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Request Ids",
+      "type": "array"
+    },
+    "created_at": {
+      "title": "Created At",
+      "type": "string"
+    },
+    "updated_at": {
+      "title": "Updated At",
+      "type": "string"
+    },
+    "archived_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Archived At"
+    }
+  },
+  "required": [
+    "chat_id",
+    "session_id",
+    "title",
+    "kind",
+    "created_at",
+    "updated_at"
+  ],
+  "title": "ChatRecord",
+  "type": "object"
+}

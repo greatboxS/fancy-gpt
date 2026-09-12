@@ -66,6 +66,16 @@
       "title": "ArtifactSpec",
       "type": "object"
     },
+    "ChatPolicy": {
+      "enum": [
+        "continue",
+        "new_chat",
+        "independent",
+        "temporary"
+      ],
+      "title": "ChatPolicy",
+      "type": "string"
+    },
     "Freshness": {
       "enum": [
         "static",
@@ -221,6 +231,55 @@
       "default": "auto",
       "title": "Tunnel Policy",
       "type": "string"
+    },
+    "conversation_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Conversation Id"
+    },
+    "conversation_mode": {
+      "default": "persistent",
+      "enum": [
+        "temporary",
+        "persistent"
+      ],
+      "title": "Conversation Mode",
+      "type": "string"
+    },
+    "session_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Session Id"
+    },
+    "chat_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chat Id"
+    },
+    "chat_policy": {
+      "$ref": "#/$defs/ChatPolicy",
+      "default": "continue"
     }
   },
   "required": [

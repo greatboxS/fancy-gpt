@@ -57,6 +57,19 @@ class RequestState(str, Enum):
     FAILED = "failed"
 
 
+class ChatPolicy(str, Enum):
+    CONTINUE = "continue"
+    NEW_CHAT = "new_chat"
+    INDEPENDENT = "independent"
+    TEMPORARY = "temporary"
+
+
+class ChatKind(str, Enum):
+    MAIN = "main"
+    STANDARD = "standard"
+    INDEPENDENT = "independent"
+
+
 class ArtifactSpec(StrictModel):
     path: str | None = None
     content: str | None = None
@@ -104,6 +117,9 @@ class RawRequest(StrictModel):
     tunnel_policy: str = "auto"
     conversation_id: str | None = None
     conversation_mode: Literal["temporary", "persistent"] = "persistent"
+    session_id: str | None = None
+    chat_id: str | None = None
+    chat_policy: ChatPolicy = ChatPolicy.CONTINUE
 
     @field_validator("domains")
     @classmethod
@@ -122,6 +138,51 @@ class RawRequest(StrictModel):
         if value not in allowed:
             raise ValueError(f"unsupported tunnel_policy: {value}")
         return value
+
+
+class SessionRecord(StrictModel):
+    session_id: str
+    title: str
+    repo_root: str
+    active_chat_id: str | None = None
+    chat_ids: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    closed_at: str | None = None
+
+
+class ChatRecord(StrictModel):
+    chat_id: str
+    session_id: str
+    title: str
+    kind: ChatKind
+    conversation_id: str | None = None
+    tunnel_id: str | None = None
+    request_ids: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
+
+
+class ChatResolution(StrictModel):
+    policy: ChatPolicy
+    session_id: str | None = None
+    chat_id: str | None = None
+    conversation_id: str | None = None
+
+
+class SessionCapabilities(StrictModel):
+    schema_version: str = "1.0"
+    planner_conversation: Literal["temporary"] = "temporary"
+    final_chat_policies: list[ChatPolicy] = Field(default_factory=lambda: list(ChatPolicy))
+    default_policy: ChatPolicy = ChatPolicy.CONTINUE
+    default_session_scope: Literal["repo_root"] = "repo_root"
+    supports_multiple_chats: bool = True
+    supports_active_chat: bool = True
+    supports_independent_review: bool = True
+    supports_archiving: bool = True
+    supports_cross_process_recovery: bool = True
+    conversation_binding_stage: Literal["before_result_validation"] = "before_result_validation"
 
 
 class Capability(StrictModel):
@@ -466,3 +527,6 @@ class RequestStatus(StrictModel):
     partial_text: str | None = None
     partial_text_updated_at: str | None = None
     conversation_id: str | None = None
+    session_id: str | None = None
+    chat_id: str | None = None
+    chat_policy: ChatPolicy | None = None

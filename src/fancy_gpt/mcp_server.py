@@ -9,6 +9,7 @@ from mcp.server import MCPServer
 from .catalog import load_domains, load_skills, load_workflows
 from .engine import ReviewEngine
 from .models import (
+    ChatRecord,
     ContextPack,
     FinalReport,
     InteractionRequired,
@@ -16,6 +17,8 @@ from .models import (
     RequestStatus,
     ResearchManifest,
     RoutingDecision,
+    SessionRecord,
+    SessionCapabilities,
 )
 from .server_stats import stats as _server_stats
 from .server_stats import tracked
@@ -108,6 +111,76 @@ def submit_final_result(request_id: str, result: FinalReport) -> FinalReport:
 @tracked("get_request_status")
 def get_request_status(request_id: str) -> RequestStatus:
     return _engine().status(request_id)
+
+
+@mcp.tool()
+@tracked("create_session")
+def create_session(repo_root: str = ".", title: str | None = None) -> SessionRecord:
+    """Create an isolated FancyGPT work session with its own chat collection."""
+    return _engine().create_session(repo_root, title)
+
+
+@mcp.tool()
+@tracked("get_session")
+def get_session(session_id: str) -> SessionRecord:
+    return _engine().get_session(session_id)
+
+
+@mcp.tool()
+@tracked("list_sessions")
+def list_sessions() -> list[SessionRecord]:
+    return _engine().list_sessions()
+
+
+@mcp.tool()
+@tracked("close_session")
+def close_session(session_id: str) -> SessionRecord:
+    return _engine().close_session(session_id)
+
+
+@mcp.tool()
+@tracked("create_chat")
+def create_chat(
+    session_id: str,
+    title: str,
+    independent: bool = False,
+    make_active: bool = True,
+) -> ChatRecord:
+    """Create a named chat; independent chats never replace the active main chat."""
+    return _engine().create_chat(
+        session_id, title, independent=independent, make_active=make_active
+    )
+
+
+@mcp.tool()
+@tracked("list_chats")
+def list_chats(session_id: str, include_archived: bool = False) -> list[ChatRecord]:
+    return _engine().list_chats(session_id, include_archived=include_archived)
+
+
+@mcp.tool()
+@tracked("select_chat")
+def select_chat(session_id: str, chat_id: str) -> SessionRecord:
+    return _engine().select_chat(session_id, chat_id)
+
+
+@mcp.tool()
+@tracked("archive_chat")
+def archive_chat(session_id: str, chat_id: str) -> ChatRecord:
+    return _engine().archive_chat(session_id, chat_id)
+
+
+@mcp.tool()
+@tracked("list_session_requests")
+def list_session_requests(session_id: str) -> list[RequestStatus]:
+    return _engine().list_session_requests(session_id)
+
+
+@mcp.tool()
+@tracked("session_capabilities")
+def session_capabilities() -> SessionCapabilities:
+    """Advertise session/chat behavior so MCP clients can build the right UX."""
+    return SessionCapabilities()
 
 
 @mcp.tool()

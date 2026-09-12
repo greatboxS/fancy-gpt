@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from .models import ContextPack, FinalReport, ModelRequest, RawRequest, ResearchManifest, RoutingDecision
+from .models import ChatResolution, ContextPack, FinalReport, ModelRequest, RawRequest, ResearchManifest, RoutingDecision
 from .planner import PreRequestPlanner
 from .prompt_compiler import FinalPromptCompiler
 
 
-def _conversation_metadata(request: RawRequest) -> dict[str, object]:
-    metadata: dict[str, object] = {"conversation_mode": request.conversation_mode}
-    if request.conversation_id:
-        metadata["conversation_id"] = request.conversation_id
+def _conversation_metadata(resolution: ChatResolution) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "conversation_mode": "temporary" if resolution.policy.value == "temporary" else "persistent"
+    }
+    if resolution.conversation_id:
+        metadata["conversation_id"] = resolution.conversation_id
     return metadata
 
 
@@ -28,7 +30,9 @@ class PlannerRequestBuilder:
                 "route_name": route.route_name,
                 "skill": route.primary_skill,
                 "mode": request.mode.value,
-                **_conversation_metadata(request),
+                # Planning is an implementation detail, not part of the
+                # user's long-lived discussion history.
+                "conversation_mode": "temporary",
             },
         )
 
@@ -44,6 +48,7 @@ class FinalRequestBuilder:
         route: RoutingDecision,
         manifest: ResearchManifest,
         context: ContextPack,
+        resolution: ChatResolution,
     ) -> ModelRequest:
         return ModelRequest(
             request_id=request_id,
@@ -57,6 +62,6 @@ class FinalRequestBuilder:
                 "skill": route.primary_skill,
                 "mode": request.mode.value,
                 "context_hash": context.context_hash,
-                **_conversation_metadata(request),
+                **_conversation_metadata(resolution),
             },
         )
