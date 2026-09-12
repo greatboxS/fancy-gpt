@@ -108,6 +108,9 @@ class ResolvedCapability:
             "output_modalities": sorted(item.value for item in self.output_modalities),
             "supports_tool_calls": self.supports_tool_calls,
             "supports_streaming": self.supports_streaming,
+            # The backing model is a web chat, so there is no tokenizer to
+            # count with. Usage is estimated and biased to over-count.
+            "usage_is_estimated": True,
             "notes": self.notes,
         }
 

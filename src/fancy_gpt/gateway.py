@@ -33,6 +33,9 @@ from .gateway_capabilities import (
     resolve_capability,
 )
 from .gateway_streaming import DeltaStreamError, TextDeltaStream
+from .gateway_trace import TraceStage, TurnTrace, shape_of
+from .gateway_usage import estimate_tokens
+from .browser_errors import BrowserTurnError, classify_exception
 from .gateway_state import (
     ConversationLocks,
     GatewayStateStore,
@@ -183,6 +186,12 @@ class ContextLedger(BaseModel):
     tool_call_ids: list[str] = Field(default_factory=list)
     message_digests: list[str] = Field(default_factory=list)
     output_digest: str = ""
+    #: Digests of messages long enough to be distinctive. A short message
+    #: like "ok" collides across unrelated clients, so only high-entropy
+    #: ones may anchor a correlation.
+    anchor_digests: list[str] = Field(default_factory=list)
+    #: Which caller owns this session. Correlation never crosses it.
+    client_key: str = ""
 
 
 class GatewayStore:
@@ -213,16 +222,35 @@ class GatewayStore:
                 matches.append(ledger)
         return max(matches, key=lambda item: item.created_at, default=None)
 
-    def matching_predecessor(self, turn: NormalizedTurn, site: str) -> ContextLedger | None:
+    def matching_predecessor(
+        self, turn: NormalizedTurn, site: str, *, client_key: str = ""
+    ) -> ContextLedger | None:
         """Recover the predecessor of a stateless client's transcript.
 
-        Correlation is scoped: when the caller declared a session, only that
-        session's turns are considered. When it did not, a transcript that
-        matches turns from more than one session is treated as ambiguous and
-        rejected, because adopting either one would let a client continue
-        another client's provider conversation.
+        Claude Code and the Gemini CLI resend their whole transcript each turn,
+        and they compact it themselves. Requiring the stored transcript to be an
+        exact prefix therefore breaks precisely when a session gets long: the
+        client edits its own history, nothing matches, and every later turn opens
+        a fresh browser chat.
+
+        So correlation anchors on things that survive a client-side compaction:
+
+        * a tool-call id the gateway issued, which the client must echo back;
+        * the digest of the gateway's own last reply, if it is still present;
+        * the digest of any *distinctive* earlier message.
+
+        "Distinctive" is load bearing. A short message like "ok" or "continue"
+        is identical across unrelated clients, so matching on it would attach one
+        caller's transcript to another caller's browser conversation. Only
+        high-entropy digests may anchor, and correlation never crosses a declared
+        session or client.
         """
-        incoming = [_message_digest(message) for message in turn.messages]
+        incoming = {_message_digest(message) for message in turn.messages}
+        anchors = {
+            _message_digest(message)
+            for message in turn.messages
+            if _is_distinctive(message.text)
+        }
         joined = "\n".join(message.text for message in turn.messages)
         matches: list[ContextLedger] = []
         for path in self.turns.glob("resp_*.json"):
@@ -231,10 +259,14 @@ class GatewayStore:
                 continue
             if turn.session_id and ledger.session_id != turn.session_id:
                 continue
-            prefix_matches = bool(ledger.message_digests) and incoming[:len(ledger.message_digests)] == ledger.message_digests
-            output_matches = bool(ledger.output_digest) and ledger.output_digest in incoming
-            tool_matches = any(call_id in joined for call_id in ledger.tool_call_ids)
-            if prefix_matches and (output_matches or tool_matches):
+            # A stored client key partitions the space even when the caller
+            # supplied no session id.
+            if client_key and ledger.client_key and ledger.client_key != client_key:
+                continue
+            reply_matches = bool(ledger.output_digest) and ledger.output_digest in incoming
+            tool_matches = any(call_id and call_id in joined for call_id in ledger.tool_call_ids)
+            anchor_matches = bool(anchors and set(ledger.anchor_digests) & anchors)
+            if reply_matches or tool_matches or anchor_matches:
                 matches.append(ledger)
         if not matches:
             return None
@@ -247,6 +279,20 @@ class GatewayStore:
 def _digest(value: Any) -> str:
     raw = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+#: Below this length a message is too common to identify a conversation.
+#: "ok", "continue", "yes" recur across unrelated clients.
+MIN_ANCHOR_CHARS = 64
+
+
+def _is_distinctive(text: str) -> bool:
+    """Whether a message is specific enough to anchor a correlation."""
+    stripped = " ".join((text or "").split())
+    if len(stripped) < MIN_ANCHOR_CHARS:
+        return False
+    # Repetition of one character carries little identifying information.
+    return len(set(stripped)) >= 12
 
 
 def _message_digest(message: GatewayContent) -> str:
@@ -566,6 +612,7 @@ class GatewayService:
         self._cancel_guard = threading.Lock()
         self._cancel_tokens: dict[str, CancelToken] = {}
         self._delta_streams: dict[str, TextDeltaStream] = {}
+        self._traces: dict[str, TurnTrace] = {}
 
     # -- routing -------------------------------------------------------------
 
@@ -656,7 +703,9 @@ class GatewayService:
 
     # -- predecessor correlation --------------------------------------------
 
-    def _resolve_predecessor(self, turn: NormalizedTurn, site: str) -> ContextLedger | None:
+    def _resolve_predecessor(
+        self, turn: NormalizedTurn, site: str, *, client_key: str = ""
+    ) -> ContextLedger | None:
         """Find the turn this one continues, proving ownership before trusting it."""
         if turn.previous_response_id:
             ledger = self.store.load(turn.previous_response_id)
@@ -669,7 +718,7 @@ class GatewayService:
             latest = self.store.latest(turn.session_id)
             if latest is not None:
                 return latest
-        return self.store.matching_predecessor(turn, site)
+        return self.store.matching_predecessor(turn, site, client_key=client_key)
 
     # -- main entry ----------------------------------------------------------
 
@@ -687,20 +736,40 @@ class GatewayService:
         site = self.resolve_site(turn.model)
         self._validate(turn)
         key = idempotency_key or turn.idempotency_key
+        trace = TurnTrace("pending")
 
-        previous = self._resolve_predecessor(turn, site)
+        previous = self._resolve_predecessor(turn, site, client_key=client_key)
         if previous and previous.site != site:
             raise ValueError("previous response belongs to a different model site")
         session_id = turn.session_id or (previous.session_id if previous else f"gw_{uuid.uuid4().hex[:16]}")
 
         payload_digest = _digest(turn.model_dump(mode="json", exclude={"idempotency_key"}))
         response_id = f"resp_{uuid.uuid4().hex}"
+        trace = TurnTrace(response_id, self.requests.request_dir(response_id) / "trace.jsonl")
+        self._traces[response_id] = trace
+        trace.event(
+            TraceStage.ROUTE, "resolved", f"{turn.protocol} -> {site}",
+            protocol=turn.protocol, model=turn.model, site=site,
+            tools=len(turn.tools), messages=len(turn.messages),
+            stream=turn.stream, client=client_key,
+        )
+        trace.event(
+            TraceStage.CORRELATION,
+            "predecessor-found" if previous else "no-predecessor",
+            previous.response_id if previous else "starting a new provider chat",
+            session=session_id,
+            declared_session=bool(turn.session_id),
+            via="previous_response_id" if turn.previous_response_id else "transcript",
+            conversation=previous.conversation_id if previous else None,
+        )
 
         if key:
             disposition, claim = self.state.claim_idempotency(key, payload_digest, response_id)
+            trace.event(TraceStage.IDEMPOTENCY, disposition, claim.response_id)
             if disposition == "replay":
                 replayed = self._stored_result(claim.response_id)
                 if replayed is not None:
+                    trace.event(TraceStage.TERMINAL, "replayed", "returned the stored result")
                     return replayed
                 record = self.state.load_turn(claim.response_id)
                 if record is not None and record.resumable:
@@ -713,10 +782,18 @@ class GatewayService:
         # duplicated by a fresh submit on the same session.
         for pending in self.state.unresolved_turns(session_id):
             if pending.response_id != response_id:
+                trace.event(
+                    TraceStage.TERMINAL, "blocked-by-uncertain-turn", pending.response_id,
+                    state=pending.state.value,
+                )
                 raise UncertainSubmitError(pending.response_id, pending.state)
 
         binding = self.state.bind(session_id=session_id, site=site, model=turn.model, protocol=turn.protocol)
         conversation_id = binding.conversation_id or (previous.conversation_id if previous else None)
+        trace.event(
+            TraceStage.CORRELATION, "bound", conversation_id or "no provider conversation yet",
+            generation=binding.generation, rebind=binding.rebind_reason.value if binding.rebind_reason else None,
+        )
         token = cancel_token or CancelToken()
 
         record = self.state.save_turn(
@@ -761,9 +838,11 @@ class GatewayService:
                     token=token,
                     tunnel_id=tunnel_id,
                     key=key,
+                    client_key=client_key,
                     on_delta=on_delta,
                 )
         except GatewayCancelled as exc:
+            trace.event(TraceStage.TERMINAL, "cancelled", exc.reason)
             self.metrics.record("cancelled")
             self.state.transition(record, TurnState.CANCELLED, exc.reason)
             if key:
@@ -772,7 +851,8 @@ class GatewayService:
             raise
         except UncertainSubmitError:
             raise
-        except GatewayOverloaded:
+        except GatewayOverloaded as exc:
+            trace.event(TraceStage.ADMISSION, "rejected", str(exc))
             if key:
                 self.state.release_idempotency(key)
             self.requests.fail(response_id, "rejected: gateway at capacity")
@@ -790,16 +870,29 @@ class GatewayService:
         token: CancelToken,
         tunnel_id: str | None,
         key: str | None,
+        client_key: str = "",
         on_delta: Callable[[str], None] | None = None,
     ) -> GatewayResult:
+        trace = self._traces.get(response_id) or TurnTrace(response_id)
         token.raise_if_cancelled()
         try:
             turn, compaction = self._compact(turn)
         except CompactionImpossible as exc:
+            trace.event(TraceStage.COMPACTION, "impossible", str(exc))
             self._fail(record, response_id, key, str(exc))
             raise
+        if compaction.applied:
+            trace.event(
+                TraceStage.COMPACTION, "applied",
+                f"dropped {len(compaction.dropped)} of {compaction.source_message_count} messages",
+                generation=compaction.generation,
+                units_before=compaction.units_before, units_after=compaction.units_after,
+                source_digest=compaction.source_digest[:16],
+            )
         prompt = _gateway_prompt(turn, include_history=previous is None)
-        input_units = max(1, len(prompt) // 4)
+        # Clients act on these numbers - Claude Code uses them to decide when
+        # to compact - so the estimate deliberately over-counts.
+        input_units = estimate_tokens(prompt)
         try:
             if input_units > self.max_input_units:
                 raise ValueError(
@@ -808,8 +901,14 @@ class GatewayService:
             selection = self.manager.select(tunnel_id=tunnel_id, policy="auto", require_automatic=True)
             provider = self.manager.provider(selection)
         except Exception as exc:
+            trace.event(TraceStage.ROUTE, "unavailable", str(exc))
             self._fail(record, response_id, key, str(exc))
             raise
+        trace.event(
+            TraceStage.ROUTE, "tunnel-selected", selection.tunnel_id,
+            provider=provider.name, input_units=input_units,
+            prompt=shape_of(prompt),
+        )
 
         self.requests.update_status(
             response_id,
@@ -832,12 +931,14 @@ class GatewayService:
                 return
             try:
                 delta = deltas.push(snapshot)
-            except DeltaStreamError:
+            except DeltaStreamError as exc:
                 # Already-sent text cannot be retracted, so the stream stops
                 # rather than contradicting the client. The turn itself carries
                 # on; the caller still receives the authoritative final result.
+                trace.event(TraceStage.STREAM, "desynchronized", str(exc), emitted=len(exc.emitted))
                 return
             if delta:
+                trace.event(TraceStage.STREAM, "delta", "", chars=len(delta))
                 on_delta(delta)
 
         request = ModelRequest(
@@ -868,6 +969,7 @@ class GatewayService:
                 if bound is not None and bound.conversation_id and not conversation_id:
                     conversation_id = bound.conversation_id
                     request.metadata["conversation_id"] = conversation_id
+                trace.event(TraceStage.LOCK, "acquired", lock_key)
                 self.state.transition(record, TurnState.SUBMITTING, f"submitting on {lock_key}")
                 provider.start()
                 try:
@@ -883,6 +985,10 @@ class GatewayService:
                             raw = provider.execute(request, on_progress=progress_sink)
                         else:
                             raw = provider.execute(request)
+                    trace.event(
+                        TraceStage.BROWSER, "answered", "provider returned a reply",
+                        reply=shape_of(raw.raw_text), conversation=raw.conversation_id,
+                    )
                     self.state.transition(record, TurnState.OBSERVING, "awaiting provider completion")
                     # Bind the provider conversation while the lock is still
                     # held. If this waited until after release, a queued turn on
@@ -896,22 +1002,33 @@ class GatewayService:
                     # cancellation, not an uncertain submit: we know exactly
                     # how far it got.
                     raise GatewayCancelled(token.reason or exc.reason) from exc
-                except RuntimeError as exc:
-                    if "bound to provider conversation" in str(exc):
+                except Exception as exc:
+                    if isinstance(exc, RuntimeError) and "bound to provider conversation" in str(exc):
                         # The provider answered on a chat this session is not
-                        # bound to: the binding is no longer trustworthy.
+                        # bound to: the binding is no longer trustworthy. This
+                        # is a correlation fault, not a browser fault.
                         self.state.rebind(session_id, RebindReason.UNTRUSTED)
+                        trace.event(TraceStage.CORRELATION, "conversation-drift", _scrub(str(exc)))
                         self._fail(record, response_id, key, str(exc))
                         raise
-                    self.state.transition(record, TurnState.UNCERTAIN, _scrub(str(exc)))
-                    self.requests.fail(response_id, _scrub(str(exc)))
-                    raise
-                except Exception as exc:
-                    # The prompt may or may not have landed in the chat, so the
-                    # turn is parked as uncertain rather than retried blindly.
-                    self.state.transition(record, TurnState.UNCERTAIN, _scrub(str(exc)))
-                    self.requests.fail(response_id, _scrub(str(exc)))
-                    raise
+                    # Everything else is the browser or the page failing, and is
+                    # classified so the caller learns whether retrying can help
+                    # and whether a human has to act. The prompt may or may not
+                    # have landed, so the turn is parked as uncertain rather
+                    # than retried blindly.
+                    failure = classify_exception(exc)
+                    trace.event(
+                        TraceStage.BROWSER, "failed", _scrub(str(exc)),
+                        failure=failure.failure.value, retryable=failure.retryable,
+                        needs_user_action=failure.needs_user_action,
+                        guidance=failure.guidance,
+                    )
+                    self.state.transition(
+                        record, TurnState.UNCERTAIN,
+                        f"{failure.failure.value}: {_scrub(str(exc))}",
+                    )
+                    self.requests.fail(response_id, f"{failure.failure.value}: {_scrub(str(exc))}")
+                    raise BrowserTurnError(_scrub(str(exc)), failure) from exc
                 finally:
                     provider.stop()
             value = parse_json_object(raw.raw_text)
@@ -932,6 +1049,11 @@ class GatewayService:
         try:
             text, calls = self._parse_envelope(value, turn)
         except Exception as exc:
+            failure = classify_exception(exc)
+            trace.event(
+                TraceStage.BROWSER, "envelope-rejected", _scrub(str(exc)),
+                failure=failure.failure.value, retryable=failure.retryable,
+            )
             self._fail(record, response_id, key, str(exc))
             raise
 
@@ -955,7 +1077,7 @@ class GatewayService:
             conversation_id=raw.conversation_id,
             created_at=_now(),
             input_units=input_units,
-            output_units=max(1, len(raw.raw_text) // 4),
+            output_units=estimate_tokens(raw.raw_text),
         )
         response_path = self.requests.write_text(
             response_id, "gateway-response.json", result.model_dump_json(indent=2)
@@ -982,6 +1104,12 @@ class GatewayService:
                 output_units=result.output_units,
                 tool_call_ids=[call.id for call in calls],
                 message_digests=[_message_digest(message) for message in turn.messages],
+                anchor_digests=[
+                    _message_digest(message)
+                    for message in turn.messages
+                    if _is_distinctive(message.text)
+                ],
+                client_key=client_key,
                 output_digest=_message_digest(GatewayContent(role="assistant", text=text)) if text else "",
                 compaction_generation=compaction.generation if compaction.applied else 0,
             )
@@ -992,6 +1120,12 @@ class GatewayService:
             self.requests.write_text(
                 response_id, "gateway-compaction.json", compaction.model_dump_json(indent=2)
             )
+        trace.event(
+            TraceStage.TERMINAL, "completed", f"{len(text)} chars, {len(calls)} tool call(s)",
+            input_units=result.input_units, output_units=result.output_units,
+            stream_failed=deltas.failed, realignments=deltas.realignments,
+            conversation=raw.conversation_id,
+        )
         self.state.transition(record, TurnState.COMPLETED, "provider answered")
         if key:
             self.state.update_idempotency(key, TurnState.COMPLETED)
@@ -1511,6 +1645,20 @@ def classify_error(exc: Exception, protocol: str) -> tuple[int, dict[str, Any], 
         # 499 is the Gemini-documented client-cancelled code; the other two
         # clients simply see the request aborted with a matching envelope.
         return 499, _protocol_error(protocol, 499, exc.reason, "request_cancelled"), None
+    if isinstance(exc, BrowserTurnError):
+        # The browser failure taxonomy already decided what this honestly is,
+        # including whether a retry can help.
+        policy = exc.policy
+        status = policy.http_status
+        kind = {
+            401: "authentication_error", 429: "rate_limit_error", 409: "invalid_request_error",
+            422: "invalid_request_error", 503: "overloaded_error", 504: "timeout_error",
+        }.get(status, "api_error")
+        if protocol == "anthropic" and status == 429:
+            status, kind = 529, "overloaded_error"
+        message = f"{policy.failure.value}: {exc}. {policy.guidance}"
+        retry = 30 if policy.failure.value == "rate-limited" else (5 if policy.retryable else None)
+        return status, _protocol_error(protocol, status, message, kind), retry
     if isinstance(exc, CrossSessionError):
         return 403, _protocol_error(protocol, 403, str(exc), "permission_error"), None
     if isinstance(exc, AmbiguousCorrelationError):

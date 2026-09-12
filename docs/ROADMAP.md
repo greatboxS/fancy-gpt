@@ -115,6 +115,16 @@ Status: **largely delivered**
 
 Delivered:
 
+- Browser failure taxonomy: 17 distinct causes, each carrying whether a retry
+  helps, whether a human must act, and its honest protocol status.
+- Per-turn trace (`requests trace`, MCP `get_request_trace`) recording every
+  stage with timings, and holding no prompt, reply or page URL by construction.
+- Usage estimation that over-counts rather than under-counts, shared with
+  compaction so the two cannot disagree.
+- Transcript correlation anchored on content that survives the client's own
+  compaction, partitioned by client so a low-entropy message cannot attach one
+  caller's transcript to another's browser conversation.
+
 - Incremental text streaming to all three protocols, converting cumulative
   page snapshots into append-only deltas under a monotonic prefix lock, with
   whitespace re-render realignment and path-resolved (not substring-matched)

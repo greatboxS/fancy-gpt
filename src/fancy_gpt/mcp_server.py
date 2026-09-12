@@ -165,6 +165,17 @@ def list_requests(
 
 
 @mcp.tool()
+@tracked("get_request_trace")
+def get_request_trace(request_id: str, summary_only: bool = False) -> dict:
+    """Every recorded step of one request, for diagnosing a failure after the fact.
+
+    Carries no prompt or reply content and no page URL by construction, so it is
+    safe to read and to share in a bug report.
+    """
+    return _engine().request_trace(request_id, summary_only=summary_only)
+
+
+@mcp.tool()
 @tracked("get_request_raw_response")
 def get_request_raw_response(request_id: str) -> str | None:
     return _engine().request_raw_response(request_id)

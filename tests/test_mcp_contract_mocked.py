@@ -14,7 +14,7 @@ def test_mcp_tool_surface_can_be_registered_without_real_transport(monkeypatch):
     monkeypatch.setitem(sys.modules,"mcp",pkg); monkeypatch.setitem(sys.modules,"mcp.server",mod); sys.modules.pop("fancy_gpt.mcp_server",None)
     module=importlib.import_module("fancy_gpt.mcp_server"); assert module.mcp is not None
     assert set(registered)=={
-      "prepare_request","run_request_automatic","submit_planner_result","submit_final_result","get_request_status","inspect_request","list_requests","get_request_raw_response",
+      "prepare_request","run_request_automatic","submit_planner_result","submit_final_result","get_request_status","inspect_request","list_requests","get_request_raw_response","get_request_trace",
       "inspect_routing","inspect_context","list_sites","list_tunnel_runtimes","list_tunnel_transports","inspect_tunnel_layers",
       "list_tunnels","probe_tunnels","inspect_tunnel","select_tunnel",
       "list_skills","list_workflows","list_domains","server_stats",

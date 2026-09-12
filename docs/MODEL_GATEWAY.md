@@ -219,7 +219,7 @@ A response id is a bearer reference, so continuation proves ownership:
 |---|---|
 | `previous_response_id` | Must belong to the declaring session, else `403 permission_error` |
 | `x-fancy-session-id` | Authoritative when supplied |
-| Full transcript (Claude/Gemini) | Matched only within the declared session |
+| Full transcript (Claude/Gemini) | Anchored on content that survives the client's own compaction |
 | Ambiguous transcript | `409` rather than guessing which session to continue |
 
 ### Idempotency
@@ -370,6 +370,58 @@ Nothing queues without a bound. Request size is checked from `Content-Length`
 
 All error bodies pass through credential scrubbing, so a bearer token or cookie
 quoted in an exception never reaches the client, the ledger, or the logs.
+
+### Browser failure taxonomy
+
+A browser-backed turn fails in ways an HTTP client never does. Reporting all of
+them as one generic failure hides the distinction that matters: some are
+retryable on their own, some will never succeed until a human acts.
+
+Each failure carries whether a retry can help, whether a human must intervene,
+and the honest protocol status:
+
+| Failure | Retryable | Needs a human | Status |
+|---|---|---|---|
+| `auth-required`, `session-expired` | no | yes | 401 |
+| `rate-limited` | yes | no | 429 (Anthropic: 529) |
+| `blocked-by-dialog` | yes | yes | 409 |
+| `model-refused` | no | no | 422 |
+| `selector-missing`, `adapter-drift` | no | yes | 502 |
+| `composer-rejected`, `response-truncated`, `response-ambiguous`, `malformed-envelope`, `page-navigated`, `tab-discarded`, `worker-evicted` | yes | no | 502 |
+| `offline` | yes | no | 503 |
+| `timeout` | yes | no | 504 |
+
+Classification prefers a code the extension reported, then the message (so a
+usage limit surfacing through a generic wrapper is still a usage limit), then
+the exception type (so a `TimeoutError` is a timeout however it is worded).
+
+### Turn trace
+
+Every turn keeps an explicit record, because most browser failures are not
+reproducible on demand. `fancy-gpt requests trace <id>` and the MCP
+`get_request_trace` tool show each step with its elapsed time, plus a per-stage
+timing summary.
+
+The trace holds **no content**. The prompt, the reply and the page URL all carry
+user data, and the URL can carry a conversation identifier, so recording them
+would turn a debugging aid into a leak. The trace stores their *shape* instead -
+length and digest - which is still enough to prove two turns saw the same text.
+A fixed key deny-list is applied at every nesting depth, and the trace is capped
+so a runaway turn cannot grow it without bound.
+
+### Usage accounting
+
+`usage` is an estimate: the answering model is a web chat, so there is no
+tokenizer to count with. The estimate deliberately **over-counts**, because
+Claude Code reads these numbers to decide when to compact its own context, and
+an estimate that reads low makes a client compact too late and overrun.
+
+`chars / 4` is the naive version and errs in the dangerous direction. The
+estimator counts wide characters individually and picks a characters-per-token
+figure from how symbol-dense the text is: roughly 1.1x the naive figure for
+prose, 1.5x for code and JSON, and 3.8x for CJK. The same estimator sizes
+compaction, so compaction can never believe it fitted a transcript the budget
+then rejects. `/v1/capabilities` reports `usage_is_estimated: true`.
 
 ### Observability
 

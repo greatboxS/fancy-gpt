@@ -31,6 +31,7 @@ from fancy_gpt.gateway import (
     openai_response,
     openai_stream_events,
 )
+from fancy_gpt.browser_errors import BrowserFailure, BrowserTurnError
 from fancy_gpt.gateway_compaction import CompactionImpossible
 from fancy_gpt.gateway_capabilities import (
     Modality,
@@ -151,8 +152,11 @@ def test_provider_failure_parks_turn_as_uncertain_and_blocks_blind_resubmit(tmp_
 
     turn = normalize_openai({"model": "gemini-web", "input": "hello", "session_id": None})
     turn.session_id = "gw_uncertain"
-    with pytest.raises(TimeoutError):
+    # The failure is reported with its classification, not as a bare TimeoutError.
+    with pytest.raises(BrowserTurnError) as excinfo:
         service.execute(turn)
+    assert excinfo.value.failure is BrowserFailure.TIMEOUT
+    assert excinfo.value.retryable is True
 
     pending = service.state.unresolved_turns("gw_uncertain")
     assert [item.state for item in pending] == [TurnState.UNCERTAIN]
@@ -170,7 +174,7 @@ def test_state_survives_process_restart(tmp_path: Path) -> None:
     provider.fail_with = TimeoutError("dropped")
     turn = normalize_openai({"model": "gemini-web", "input": "hello"})
     turn.session_id = "gw_restart"
-    with pytest.raises(TimeoutError):
+    with pytest.raises(BrowserTurnError):
         service.execute(turn)
 
     # A brand new service object over the same root is the restart case.

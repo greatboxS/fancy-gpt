@@ -2,6 +2,7 @@ LICENSE
 README.md
 pyproject.toml
 src/fancy_gpt/__init__.py
+src/fancy_gpt/browser_errors.py
 src/fancy_gpt/capabilities.py
 src/fancy_gpt/catalog.py
 src/fancy_gpt/cli.py
@@ -21,6 +22,8 @@ src/fancy_gpt/gateway_compaction.py
 src/fancy_gpt/gateway_execution.py
 src/fancy_gpt/gateway_state.py
 src/fancy_gpt/gateway_streaming.py
+src/fancy_gpt/gateway_trace.py
+src/fancy_gpt/gateway_usage.py
 src/fancy_gpt/inspection.py
 src/fancy_gpt/io.py
 src/fancy_gpt/mcp_clients.py
@@ -134,9 +137,11 @@ tests/test_execution.py
 tests/test_extension_assets.py
 tests/test_gateway.py
 tests/test_gateway_cancel_path.py
+tests/test_gateway_correlation.py
 tests/test_gateway_execution.py
 tests/test_gateway_hardening.py
 tests/test_gateway_streaming.py
+tests/test_gateway_trace.py
 tests/test_gateway_transport.py
 tests/test_install_once.py
 tests/test_mcp_clients.py

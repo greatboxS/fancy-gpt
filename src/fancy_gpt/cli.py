@@ -530,6 +530,24 @@ def requests_inspect(
     typer.echo(_engine(workdir).inspect_request(request_id).model_dump_json(indent=2))
 
 
+@requests_app.command("trace")
+def requests_trace(
+    request_id: str = typer.Argument(..., help="Request id to trace"),
+    workdir: Path = typer.Option(None, "--workdir"),
+    summary: bool = typer.Option(False, "--summary", help="Only the per-stage timing summary"),
+) -> None:
+    """Show every recorded step of one request, for diagnosing a failure."""
+    try:
+        trace = _engine(workdir).request_trace(request_id, summary_only=summary)
+    except (ValueError, FileNotFoundError) as exc:
+        typer.echo(f"request not found or unreadable: {exc}", err=True)
+        raise typer.Exit(1) from None
+    if not trace["events"] and not trace["summary"]["events"]:
+        typer.echo(f"no trace recorded for {request_id}")
+        raise typer.Exit(0)
+    typer.echo(json.dumps(trace, indent=2, ensure_ascii=False))
+
+
 @requests_app.command("raw")
 def requests_raw(
     request_id: str,

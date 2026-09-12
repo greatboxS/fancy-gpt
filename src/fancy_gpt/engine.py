@@ -405,6 +405,38 @@ class ReviewEngine:
             statuses = [item for item in statuses if item.kind == kind]
         return [SessionInspectionService.inspect_request(item) for item in statuses[:max(0, min(limit, 1000))]]
 
+    def request_trace(self, request_id: str, *, summary_only: bool = False):
+        """The recorded step-by-step history of one turn.
+
+        Returns the events with a compact summary. The trace holds no prompt or
+        reply content and no page URL by construction, so it is safe to read and
+        to paste into a bug report.
+        """
+        from .gateway_trace import read_trace
+
+        # Reuses the store's own id validation, so a crafted id cannot escape
+        # the request directory.
+        directory = self.store.request_dir(request_id)
+        events = read_trace(directory / "trace.jsonl")
+        stages: dict[str, int] = {}
+        for event in events:
+            stage = str(event.get("stage", ""))
+            stages[stage] = max(stages.get(stage, 0), int(event.get("elapsed_ms", 0)))
+        terminal = next(
+            (item for item in reversed(events) if item.get("stage") == "terminal"), None
+        )
+        summary = {
+            "request_id": request_id,
+            "events": len(events),
+            "total_ms": events[-1].get("elapsed_ms", 0) if events else 0,
+            "stage_reached_ms": stages,
+            "outcome": terminal.get("event") if terminal else None,
+            "outcome_detail": terminal.get("detail", "") if terminal else "",
+        }
+        if summary_only:
+            return {"summary": summary, "events": []}
+        return {"summary": summary, "events": events}
+
     def request_raw_response(self, request_id: str) -> str | None:
         status = self.store.load_status(request_id)
         path_value = status.final_response_file or status.planner_response_file

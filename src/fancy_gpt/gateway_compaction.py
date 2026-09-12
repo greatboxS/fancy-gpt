@@ -26,10 +26,17 @@ from typing import Any, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .gateway_usage import estimate_tokens
+
 
 def units(text: str) -> int:
-    """Rough unit estimate, consistent with the gateway's input accounting."""
-    return max(1, len(text) // 4) if text else 0
+    """Size in the same units the gateway budgets and reports.
+
+    Deliberately the *same* estimator the usage fields use. If compaction sized
+    content differently from the budget check, compaction could believe it had
+    fit a transcript that the budget then rejected.
+    """
+    return estimate_tokens(text)
 
 
 def _digest(value: Any) -> str:
