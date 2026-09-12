@@ -4,10 +4,14 @@ import argparse
 import json
 import struct
 import sys
+import os
 import threading
 import time
 from pathlib import Path
 from typing import BinaryIO
+
+MAX_NATIVE_INBOUND_BYTES = 8 * 1024 * 1024
+MAX_NATIVE_OUTBOUND_BYTES = 1 * 1024 * 1024
 
 from websockets.sync.client import connect
 
@@ -22,7 +26,7 @@ def _read_native(stream: BinaryIO) -> dict | None:
     if len(header) != 4:
         raise EOFError("truncated native messaging header")
     size = struct.unpack("=I", header)[0]
-    if size > 8 * 1024 * 1024:
+    if size > MAX_NATIVE_INBOUND_BYTES:
         raise ValueError("native message exceeds FancyGPT safety limit")
     payload = stream.read(size)
     if len(payload) != size:
@@ -35,18 +39,30 @@ def _read_native(stream: BinaryIO) -> dict | None:
 
 def _write_native(stream: BinaryIO, message: dict) -> None:
     payload = json.dumps(message, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(payload) > MAX_NATIVE_OUTBOUND_BYTES:
+        raise ValueError("native host response exceeds browser 1 MiB Native Messaging limit")
     stream.write(struct.pack("=I", len(payload)))
     stream.write(payload)
     stream.flush()
 
 
+
+def _configure_binary_stdio() -> None:
+    if os.name != "nt":
+        return
+    import msvcrt
+    msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+    msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+
+
 def run_native_host(config_path: Path) -> None:
+    _configure_binary_stdio()
     config = json.loads(config_path.expanduser().read_text(encoding="utf-8"))
     endpoint = str(config["endpoint"])
     token = str(config["token"])
     tunnel_ids = [str(item) for item in config.get("tunnel_ids", [])]
-    if not tunnel_ids:
-        raise ValueError("native host config must declare at least one exact tunnel id")
+    if not tunnel_ids or "*" in tunnel_ids:
+        raise ValueError("native host requires one or more exact tunnel_ids; wildcard registration is forbidden")
     browser = str(config.get("browser", "native-extension"))
     connection = connect(endpoint, open_timeout=10, max_size=8 * 1024 * 1024)
     send_lock = threading.Lock()
@@ -72,9 +88,6 @@ def run_native_host(config_path: Path) -> None:
         except Exception:
             stopped.set()
 
-    thread = threading.Thread(target=bridge_to_extension, name="fancy-native-bridge-rx", daemon=True)
-    thread.start()
-
     def heartbeat() -> None:
         while not stopped.wait(20.0):
             try:
@@ -83,6 +96,8 @@ def run_native_host(config_path: Path) -> None:
                 stopped.set()
                 return
 
+    thread = threading.Thread(target=bridge_to_extension, name="fancy-native-bridge-rx", daemon=True)
+    thread.start()
     heartbeat_thread = threading.Thread(target=heartbeat, name="fancy-native-heartbeat", daemon=True)
     heartbeat_thread.start()
     try:

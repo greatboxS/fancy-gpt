@@ -10,8 +10,16 @@ import typer
 from .browser import FakeBrowserDriver, PlaywrightChatGPTDriver
 from .catalog import load_domains, load_skills, load_workflows
 from .engine import ReviewEngine
+from .execution import ExecutionCoordinator, ExecutionStore
+from .mcp_clients import MCPClientKind, MCPClientRegistry
 from .io import load_mapping
 from .models import ChatPolicy, FinalReport, InspectedChat, RawRequest, ResearchManifest, SessionInspection
+from .focused import FocusedAnswerEngine, FocusedQuestion
+from .orchestrator import TeamOrchestrator
+from .project_models import AcceptanceCriterion, AgentOutcome, AgentRole, ConversationStrategy, CriterionStatus
+from .project_service import ProjectService
+from .project_runner import ProjectRunner
+from .relevance import ResponseIntent
 from .providers import ChatGPTWebAutomationProvider
 from .skills import export_packaged_skills, packaged_skills_root, validate_skill_bundle
 from .runtime_paths import default_browser_profile, user_data_dir, default_bridge_token_file, default_bridge_native_config
@@ -131,6 +139,9 @@ bridge_app = typer.Typer(help="Run/pair the browser bridge used by extension tun
 extension_app = typer.Typer(help="Export/configure Chrome, Edge, and Firefox tunnel extensions")
 sessions_app = typer.Typer(help="Manage persistent FancyGPT work sessions")
 chats_app = typer.Typer(help="Manage chats inside a FancyGPT session")
+project_app = typer.Typer(help="Persistent engineering projects, sessions, work items, and evidence")
+execution_app = typer.Typer(help="Inspect tracked execution lifecycle and structured failures")
+clients_app = typer.Typer(help="Inspect/register FancyGPT with MCP clients such as Codex and Claude Code")
 app.add_typer(catalogs_app, name="catalogs")
 app.add_typer(validate_app, name="validate")
 app.add_typer(browser_app, name="browser")
@@ -140,11 +151,20 @@ app.add_typer(bridge_app, name="bridge")
 app.add_typer(extension_app, name="extension")
 app.add_typer(sessions_app, name="sessions")
 app.add_typer(chats_app, name="chats")
+app.add_typer(project_app, name="project")
+app.add_typer(execution_app, name="execution")
+app.add_typer(clients_app, name="clients")
 
 
 def _engine(workdir: Path | None, allowed_root: list[Path] | None = None) -> ReviewEngine:
     root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
     return ReviewEngine(root, allowed_roots=allowed_root)
+
+
+
+def _project_service(workdir: Path | None) -> ProjectService:
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    return ProjectService(root)
 
 
 def _route_args(skill: str | None, workflow: str | None) -> tuple[str | None, str | None]:
@@ -265,10 +285,88 @@ def run_cmd(
     })
     skill, workflow = _auto_route(request, skill, workflow)
     manager = TunnelManager(timeout_s=timeout_s, headless=headless)
-    selection = manager.select(tunnel_id=tunnel or request.tunnel, policy=(tunnel_policy or request.tunnel_policy))
-    provider = manager.provider(selection)
-    result = _engine(workdir, allowed_root).run_automatic(request, provider, skill_name=skill, workflow_name=workflow)
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    coordinator = ExecutionCoordinator(root, engine=_engine(workdir, allowed_root), manager=manager)
+    result = coordinator.run_review(
+        request,
+        skill_name=skill,
+        workflow_name=workflow,
+        tunnel_id=tunnel or request.tunnel,
+        tunnel_policy=tunnel_policy or request.tunnel_policy,
+    )
     typer.echo(result.model_dump_json(indent=2))
+
+
+@app.command("ask")
+def ask_cmd(
+    question: Annotated[str, typer.Argument()],
+    domain: Annotated[list[str] | None, typer.Option("--domain")] = None,
+    intent: Annotated[ResponseIntent, typer.Option("--intent")] = ResponseIntent.FOCUSED,
+    project_id: Annotated[str | None, typer.Option("--project")] = None,
+    work_item_id: Annotated[str | None, typer.Option("--work-item")] = None,
+    session_id: Annotated[str | None, typer.Option("--session")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+    tunnel: Annotated[str | None, typer.Option("--tunnel")] = None,
+    tunnel_policy: Annotated[str, typer.Option("--tunnel-policy")] = "auto",
+    timeout_s: Annotated[float, typer.Option("--timeout")] = 300.0,
+) -> None:
+    """Ask one focused technical question without forcing a full review report."""
+    service = _project_service(workdir)
+    session = service.session(project_id, session_id) if project_id and session_id else None
+    if session and work_item_id and session.work_item_id != work_item_id:
+        raise typer.BadParameter("--session belongs to a different work item")
+    effective_work_item = session.work_item_id if session else work_item_id
+    context = service.relevant_context(project_id, effective_work_item) if project_id else None
+    manager = TunnelManager(timeout_s=timeout_s)
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    coordinator = ExecutionCoordinator(root, manager=manager)
+    answer = coordinator.run_focused(
+        FocusedQuestion(
+            question=question,
+            domains=domain or [],
+            response_intent=intent,
+            principles=context.principles if context else FocusedQuestion(question=question).principles,
+            project_context=context,
+            conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
+            conversation_binding=session.conversation_binding if session else None,
+        ),
+        tunnel_id=tunnel,
+        tunnel_policy=tunnel_policy,
+    )
+    if session and answer.conversation_binding:
+        service.bind_session_conversation(project_id, session.session_id, answer.conversation_binding)
+    typer.echo(answer.model_dump_json(indent=2))
+
+
+@clients_app.command("list")
+def clients_list() -> None:
+    registry = MCPClientRegistry()
+    typer.echo(json.dumps([item.__dict__ | {"client": item.client.value} for item in registry.all_status()], indent=2))
+
+
+@clients_app.command("register")
+def clients_register(
+    client: Annotated[MCPClientKind, typer.Argument()],
+    server_executable: Annotated[Path | None, typer.Option("--server")] = None,
+) -> None:
+    import shutil
+    server = server_executable or Path(shutil.which("fancy-gpt-mcp") or "fancy-gpt-mcp")
+    result = MCPClientRegistry().register(client, server)
+    typer.echo(json.dumps(result.__dict__ | {"client": result.client.value}, indent=2))
+    if result.installed and not result.linked:
+        raise typer.Exit(code=1)
+
+
+@clients_app.command("register-detected")
+def clients_register_detected(
+    server_executable: Annotated[Path | None, typer.Option("--server")] = None,
+) -> None:
+    import shutil
+    server = server_executable or Path(shutil.which("fancy-gpt-mcp") or "fancy-gpt-mcp")
+    results = MCPClientRegistry().register_detected(server)
+    typer.echo(json.dumps([item.__dict__ | {"client": item.client.value} for item in results], indent=2))
+    if any(item.installed and not item.linked for item in results):
+        raise typer.Exit(code=1)
 
 
 @app.command("mcp")
@@ -622,7 +720,7 @@ def tunnels_explain(
     manager = TunnelManager()
     spec = manager.registry.get(tunnel_id)
     layers = TunnelLayerInspector().inspect(spec)
-    health = manager.probe(spec)
+    health = manager.inspect(spec)
     if json_output:
         typer.echo(json.dumps({
             "spec": spec.model_dump(mode="json"),
@@ -757,6 +855,272 @@ def extension_native_manifest(
     else:
         target = install_manifest(browser, extension_id, executable)
     typer.echo(str(target))
+
+
+@execution_app.command("status")
+def execution_status(
+    execution_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    typer.echo(ExecutionStore(root).load(execution_id).model_dump_json(indent=2))
+
+
+@execution_app.command("recent")
+def execution_recent(
+    limit: Annotated[int, typer.Option("--limit")] = 20,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    typer.echo(json.dumps([item.model_dump(mode="json") for item in ExecutionStore(root).list_recent(limit)], indent=2))
+
+
+@project_app.command("init")
+def project_init(
+    name: Annotated[str, typer.Argument()],
+    target: Annotated[str, typer.Option("--target")],
+    repo_root: Annotated[str, typer.Option("--repo-root")] = ".",
+    acceptance: Annotated[list[str] | None, typer.Option("--acceptance")] = None,
+    project_id: Annotated[str | None, typer.Option("--id")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    criteria = [
+        AcceptanceCriterion(id=f"ac-{index + 1}", statement=statement)
+        for index, statement in enumerate(acceptance or [])
+    ]
+    project = _project_service(workdir).create_project(
+        project_id=project_id, name=name, target=target, repo_root=repo_root, acceptance=criteria
+    )
+    typer.echo(project.model_dump_json(indent=2))
+
+
+@project_app.command("bootstrap")
+def project_bootstrap(
+    project_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    service = _project_service(workdir)
+    ids = TeamOrchestrator(service).bootstrap_developer_cycle(project_id)
+    typer.echo(json.dumps({"project_id": project_id, "work_item_ids": ids}, indent=2))
+
+
+@project_app.command("status")
+def project_status(
+    project_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_project_service(workdir).snapshot(project_id).model_dump_json(indent=2))
+
+
+@project_app.command("continue")
+def project_continue(
+    project_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    service = _project_service(workdir)
+    typer.echo(TeamOrchestrator(service).continue_project(project_id).model_dump_json(indent=2))
+
+
+@project_app.command("run-next")
+def project_run_next(
+    project_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+    tunnel: Annotated[str | None, typer.Option("--tunnel")] = None,
+    tunnel_policy: Annotated[str, typer.Option("--tunnel-policy")] = "auto",
+    timeout_s: Annotated[float, typer.Option("--timeout")] = 300.0,
+) -> None:
+    """Execute one ready team work item or return an external-agent assignment."""
+    service = _project_service(workdir)
+    manager = TunnelManager(timeout_s=timeout_s)
+    result = ProjectRunner(service, manager=manager).run_next(
+        project_id, tunnel_id=tunnel, tunnel_policy=tunnel_policy
+    )
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@project_app.command("run")
+def project_run(
+    project_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+    tunnel: Annotated[str | None, typer.Option("--tunnel")] = None,
+    tunnel_policy: Annotated[str, typer.Option("--tunnel-policy")] = "auto",
+    max_steps: Annotated[int, typer.Option("--max-steps")] = 8,
+    timeout_s: Annotated[float, typer.Option("--timeout")] = 300.0,
+) -> None:
+    """Run model-backed teammates until completion, blockage, or an external-agent handoff."""
+    service = _project_service(workdir)
+    manager = TunnelManager(timeout_s=timeout_s)
+    results = ProjectRunner(service, manager=manager).run_until_pause(
+        project_id, tunnel_id=tunnel, tunnel_policy=tunnel_policy, max_steps=max_steps
+    )
+    typer.echo(json.dumps([item.model_dump(mode="json") for item in results], indent=2))
+
+
+@project_app.command("finding")
+def project_finding(
+    project_id: Annotated[str, typer.Argument()],
+    claim: Annotated[str, typer.Option("--claim")],
+    impact: Annotated[str, typer.Option("--impact")],
+    severity: Annotated[str, typer.Option("--severity")] = "medium",
+    action: Annotated[str | None, typer.Option("--action")] = None,
+    session_id: Annotated[str | None, typer.Option("--session")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    result = _project_service(workdir).record_finding(
+        project_id, claim=claim, impact=impact, severity=severity,
+        required_action=action, source_session_id=session_id
+    )
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@project_app.command("resolve-finding")
+def project_resolve_finding(
+    project_id: Annotated[str, typer.Argument()],
+    finding_id: Annotated[str, typer.Argument()],
+    resolution: Annotated[str, typer.Option("--resolution")],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    result = _project_service(workdir).resolve_finding(project_id, finding_id, resolution=resolution)
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@project_app.command("artifact")
+def project_artifact(
+    project_id: Annotated[str, typer.Argument()],
+    path: Annotated[str, typer.Option("--path")],
+    kind: Annotated[str, typer.Option("--kind")] = "file",
+    sha256: Annotated[str | None, typer.Option("--sha256")] = None,
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    session_id: Annotated[str | None, typer.Option("--session")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    result = _project_service(workdir).record_artifact(
+        project_id, path=path, kind=kind, sha256=sha256, description=description,
+        source_session_id=session_id
+    )
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@project_app.command("sessions")
+def project_sessions(
+    project_id: Annotated[str, typer.Argument()],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    snapshot = _project_service(workdir).snapshot(project_id)
+    typer.echo(json.dumps([item.model_dump(mode="json") for item in snapshot.sessions], indent=2))
+
+
+@project_app.command("history")
+def project_history(
+    project_id: Annotated[str, typer.Argument()],
+    limit: Annotated[int, typer.Option("--limit")] = 100,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    events = _project_service(workdir).history(project_id, limit=limit)
+    typer.echo(json.dumps([item.model_dump(mode="json") for item in events], indent=2))
+
+
+@project_app.command("context")
+def project_context(
+    project_id: Annotated[str, typer.Argument()],
+    work_item_id: Annotated[str | None, typer.Option("--work-item")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    typer.echo(_project_service(workdir).relevant_context(project_id, work_item_id).model_dump_json(indent=2))
+
+
+@project_app.command("assign")
+def project_assign(
+    project_id: Annotated[str, typer.Argument()],
+    work_item_id: Annotated[str, typer.Argument()],
+    strategy: Annotated[ConversationStrategy | None, typer.Option("--strategy")] = None,
+    binding: Annotated[str | None, typer.Option("--binding")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    assignment = _project_service(workdir).start_assignment(
+        project_id, work_item_id, conversation_strategy=strategy, conversation_binding=binding
+    )
+    typer.echo(assignment.model_dump_json(indent=2))
+
+
+@project_app.command("start-session")
+def project_start_session(
+    project_id: Annotated[str, typer.Argument()],
+    work_item_id: Annotated[str, typer.Argument()],
+    strategy: Annotated[ConversationStrategy | None, typer.Option("--strategy")] = None,
+    binding: Annotated[str | None, typer.Option("--binding")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    session = _project_service(workdir).start_session(
+        project_id, work_item_id, conversation_strategy=strategy, conversation_binding=binding
+    )
+    typer.echo(session.model_dump_json(indent=2))
+
+
+@project_app.command("submit-outcome")
+def project_submit_outcome(
+    project_id: Annotated[str, typer.Argument()],
+    outcome_file: Annotated[Path, typer.Argument(exists=True, dir_okay=False)],
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    """Persist a structured teammate outcome (for example from Codex/Claude) and close its session."""
+    outcome = AgentOutcome.model_validate(load_mapping(outcome_file))
+    result = _project_service(workdir).apply_agent_outcome(project_id, outcome)
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@project_app.command("finish-session")
+def project_finish_session(
+    project_id: Annotated[str, typer.Argument()],
+    session_id: Annotated[str, typer.Argument()],
+    summary: Annotated[str, typer.Option("--summary")],
+    failed: Annotated[bool, typer.Option("--failed")] = False,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    result = _project_service(workdir).finish_session(project_id, session_id, summary=summary, failed=failed)
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@project_app.command("evidence")
+def project_evidence(
+    project_id: Annotated[str, typer.Argument()],
+    claim: Annotated[str, typer.Option("--claim")],
+    source: Annotated[str, typer.Option("--source")],
+    locator: Annotated[str | None, typer.Option("--locator")] = None,
+    session_id: Annotated[str | None, typer.Option("--session")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    result = _project_service(workdir).record_evidence(
+        project_id, claim=claim, source=source, locator=locator, source_session_id=session_id
+    )
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@project_app.command("criterion")
+def project_criterion(
+    project_id: Annotated[str, typer.Argument()],
+    criterion_id: Annotated[str, typer.Argument()],
+    status: Annotated[CriterionStatus, typer.Option("--status")],
+    evidence_id: Annotated[list[str] | None, typer.Option("--evidence")] = None,
+    workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
+) -> None:
+    result = _project_service(workdir).update_criterion(
+        project_id, criterion_id, status=status, evidence_ids=evidence_id
+    )
+    typer.echo(result.model_dump_json(indent=2))
+
+
+@tunnels_app.command("inspect")
+def tunnels_inspect(
+    tunnel_id: Annotated[str, typer.Argument()],
+    human: Annotated[bool, typer.Option("--human")] = False,
+) -> None:
+    """Alias with the natural diagnostic name used by MCP and operators.
+
+    Defaults to JSON because its callers are machines; `tunnels explain` stays
+    the human-readable view.
+    """
+    tunnels_explain(tunnel_id, json_output=not human)
 
 
 if __name__ == "__main__":

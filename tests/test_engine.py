@@ -58,3 +58,29 @@ def test_allowed_root_is_checked_before_online_prompt(tmp_path: Path):
     req=RawRequest(mode="review",objective="review",repo_root=str(outside))
     with pytest.raises(Exception,match="outside configured allowed roots"):
         engine.prepare(req,skill_name="technical-review")
+
+
+def test_final_report_requires_validation_plan_when_manifest_contract_requires_it(tmp_path: Path):
+    from fancy_gpt.models import RawRequest, ResearchManifest
+    from tests.helpers import planner_payload, final_payload
+    engine = ReviewEngine(tmp_path / "work", allowed_roots=[tmp_path])
+    request = RawRequest(mode="review", objective="review", repo_root=str(tmp_path), domains=["architecture"])
+    route = engine.route(request, skill_name="technical-review")
+    manifest = ResearchManifest.model_validate(planner_payload(required_sections=route.required_sections))
+    payload = final_payload("rid", sections=route.required_sections)
+    payload["validation_plan"] = []
+    with pytest.raises(ValueError, match="validation plan"):
+        engine._validate_report("rid", request, route, manifest, payload)
+
+
+def test_final_report_rejects_unjustified_scope_expansion(tmp_path: Path):
+    from fancy_gpt.models import RawRequest, ResearchManifest
+    from tests.helpers import planner_payload, final_payload
+    engine = ReviewEngine(tmp_path / "work", allowed_roots=[tmp_path])
+    request = RawRequest(mode="review", objective="review", repo_root=str(tmp_path), domains=["architecture"])
+    route = engine.route(request, skill_name="technical-review")
+    manifest = ResearchManifest.model_validate(planner_payload(required_sections=route.required_sections))
+    payload = final_payload("rid", sections=route.required_sections)
+    payload["relevance_assessment"] = {"within_requested_scope": False, "necessary_expansions": [], "omitted_non_material_topics": []}
+    with pytest.raises(ValueError, match="justify material scope expansion"):
+        engine._validate_report("rid", request, route, manifest, payload)

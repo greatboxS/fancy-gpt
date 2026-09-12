@@ -6,6 +6,8 @@ from .capabilities import CAPABILITIES
 from .catalog import load_domains, load_skills
 from .models import RawRequest, ResearchManifest, RequestMode, RoutingDecision
 from .request_sanitizer import request_metadata_for_online
+from .relevance import semantic_policy_text
+from .scope import ScopeInterpreter
 
 FORBIDDEN_PLANNER_BEHAVIOR = [
     "Do not solve the engineering problem.",
@@ -30,6 +32,7 @@ class PreRequestPlanner:
             "skill_policies": skill_policy,
             "domain_policies": domain_policy,
             "available_capabilities": capabilities,
+            "scope_contract": ScopeInterpreter().build(request).model_dump(mode="json"),
         }
         rules = "\n".join(f"- {item}" for item in FORBIDDEN_PLANNER_BEHAVIOR)
         return f"""# ROLE: ONLINE PRE-REQUEST RESEARCH PLANNER
@@ -51,6 +54,10 @@ You are the planning pass of a two-pass technical reasoning system. You MAY use 
 - For current/version-specific tasks, plan online research unless the request explicitly contains sufficient authoritative evidence.
 - The total number of strings across every `online_research[*].queries` array MUST be less than or equal to `research_budget.max_search_queries`; count them before returning.
 - Every required `local_context_requirements` item MUST contain at least one machine-actionable `patterns`, `exact_paths`, or `search_terms` entry. To require the requested git diff, use `exact_paths: ["<git-diff>"]`; prose in `description` is not a selector.
+
+## RELEVANCE & SUFFICIENCY POLICY
+The scope contract is normative. Do not broaden the planned problem simply because adjacent research is interesting.
+{semantic_policy_text(request.relevance_policy, request.response_intent)}
 
 ## INPUT
 ```json

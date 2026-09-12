@@ -4,6 +4,7 @@ import os
 import uuid
 from contextlib import nullcontext
 from pathlib import Path
+from typing import Callable
 
 from .context_builder import ContextBuilder
 from .conversations import ConversationManager
@@ -75,8 +76,10 @@ class ReviewEngine:
         self.context_builder.validate_allowed_root(request.repo_root, self.allowed_roots)
         return self.router.classify(request, skill_name=skill_name, workflow_name=workflow_name)
 
-    def _new_request(self, request: RawRequest, route: RoutingDecision, resolution: ChatResolution) -> str:
-        request_id = uuid.uuid4().hex[:16]
+    def _new_request(
+        self, request: RawRequest, route: RoutingDecision, resolution: ChatResolution, request_id: str | None = None
+    ) -> str:
+        request_id = request_id or uuid.uuid4().hex[:16]
         self.store.create_status(
             request_id,
             route_kind=route.route_kind,
@@ -144,8 +147,21 @@ class ReviewEngine:
             missing_urls = sorted(traced_urls - declared_urls)
             raise ValueError(f"research trace references URLs absent from sources: {missing_urls}")
 
+        if manifest.report_contract.require_validation_plan and not report.validation_plan:
+            raise ValueError("final report requires a validation plan")
+        if request.mode.value == "consult" and not report.recommendation:
+            raise ValueError("consult mode requires an explicit recommendation")
+        if request.mode.value == "design" and "alternatives" in route.required_sections and not report.options:
+            raise ValueError("design route requiring alternatives must include option analysis")
         if route.route_name == "deep-design-review" and not report.options:
             raise ValueError("deep-design-review requires alternatives/options")
+
+        allowed_triggers = set(request.relevance_policy.expansion_triggers)
+        for expansion in report.relevance_assessment.necessary_expansions:
+            if expansion.trigger not in allowed_triggers:
+                raise ValueError(f"relevance expansion uses disallowed trigger: {expansion.trigger.value}")
+        if not report.relevance_assessment.within_requested_scope and not report.relevance_assessment.necessary_expansions:
+            raise ValueError("out-of-scope final report must justify material scope expansion")
         return report
 
     # ------------------------- interactive workflow -------------------------
@@ -230,12 +246,16 @@ class ReviewEngine:
         *,
         skill_name: str | None = None,
         workflow_name: str | None = None,
+        request_id: str | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> FinalReport:
+        emit = progress or (lambda _phase: None)
         route = self.route(request, skill_name=skill_name, workflow_name=workflow_name)
         resolution = self.conversations.resolve(request)
-        request_id = self._new_request(request, route, resolution)
+        request_id = self._new_request(request, route, resolution, request_id=request_id)
         provider_started = False
         try:
+            emit("planner-dispatch")
             planner_request = self.planner_request_builder.build(request_id, request, route)
             planner_prompt_path = self.store.write_text(request_id, "planner-prompt.md", planner_request.prompt)
             self.store.transition(
@@ -247,17 +267,22 @@ class ReviewEngine:
                 planner_prompt_file=str(planner_prompt_path),
             )
 
+            emit("provider-start")
             provider.start()
             provider_started = True
+            emit("planner-wait")
             planner_response = provider.execute(
                 planner_request, on_progress=lambda text: self.store.update_progress(request_id, text)
             )
             planner_response_path = self.store.write_model(request_id, "planner-response.json", planner_response)
+            emit("manifest-validate")
             manifest = self._validate_manifest(parse_json_object(planner_response.raw_text), route)
             self.store.write_model(request_id, "research-manifest.json", manifest)
 
+            emit("context-build")
             context = self.context_builder.build(request, manifest)
             self.store.write_model(request_id, "context-pack.json", context)
+            emit("final-dispatch")
             final_request = self.final_request_builder.build(
                 request_id, request, route, manifest, context, resolution
             )
@@ -282,6 +307,7 @@ class ReviewEngine:
                     chat = self.session_store.get_chat(resolution.session_id, resolution.chat_id)
                     if chat.conversation_id:
                         final_request.metadata["conversation_id"] = chat.conversation_id
+                emit("final-wait")
                 final_response = provider.execute(
                     final_request, on_progress=lambda text: self.store.update_progress(request_id, text)
                 )
@@ -294,6 +320,7 @@ class ReviewEngine:
                 )
                 self.store.update_status(request_id, conversation_id=final_response.conversation_id)
                 final_response_path = self.store.write_model(request_id, "final-response.json", final_response)
+                emit("report-validate")
                 report = self._validate_report(
                     request_id,
                     request,
@@ -310,6 +337,7 @@ class ReviewEngine:
                     result_file=str(result_path),
                     conversation_id=final_response.conversation_id,
                 )
+                emit("complete")
                 return report
         except Exception as exc:
             self.store.fail(request_id, f"{type(exc).__name__}: {exc}")

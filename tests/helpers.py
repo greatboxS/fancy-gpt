@@ -61,7 +61,7 @@ def final_payload(request_id: str, mode: str = "review", sections: list[str] | N
     if mode == "write":
         payload["deliverables"]=[{"name":"artifact.md","kind":"document","content":"# Finished artifact\n\nThis is reusable written content.\n"}]
     if mode == "verify" or evidence_requirement:
+        payload["evidence_coverage"]=[{"requirement_id":"EV1","status":"partial","evidence":[{"source":"runtime","locator":"counter","claim_supported":"some proof"}],"note":"more needed"}]
         if mode == "verify":
             payload["verdict"]="insufficient"
-        payload["evidence_coverage"]=[{"requirement_id":"EV1","status":"partial","evidence":[{"source":"runtime","locator":"counter","claim_supported":"some proof"}],"note":"more needed"}]
     return payload

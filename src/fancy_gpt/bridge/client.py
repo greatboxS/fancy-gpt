@@ -68,6 +68,35 @@ class BridgeBrowserDriver:
             raise RuntimeError(f"browser bridge unavailable for {self.tunnel_id}")
         _ = time.monotonic() - started
 
+    def site_health(self, *, timeout_s: float = 20.0) -> dict:
+        """Probe the actual site adapter through the registered browser worker."""
+        job_id = f"health-{uuid.uuid4().hex}"
+        self._conn().send(dumps({
+            "type": "job",
+            "job_id": job_id,
+            "tunnel_id": self.tunnel_id,
+            "site": "chatgpt",
+            "operation": "site.health",
+            "request_id": job_id,
+            "stage": "health",
+            "conversation": {"mode": "fresh"},
+            "timeout_s": min(timeout_s, self.job_timeout_s),
+        }))
+        result = loads(self._conn().recv(timeout=timeout_s))
+        if result.get("job_id") != job_id:
+            raise RuntimeError("bridge site-health response identity mismatch")
+        if result.get("type") == "job_error":
+            raise RuntimeError(str(result.get("error", "site health failed")))
+        if result.get("type") != "job_result":
+            raise RuntimeError(f"unexpected site-health response: {result.get('type')}")
+        import json
+        payload = json.loads(str(result.get("text") or "{}"))
+        if not isinstance(payload, dict):
+            raise RuntimeError("site health response is malformed")
+        if not payload.get("ok"):
+            raise RuntimeError(f"site not ready: {payload.get('reason', 'unknown')}")
+        return payload
+
     def begin_turn(
         self,
         *,

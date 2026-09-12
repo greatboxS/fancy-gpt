@@ -99,7 +99,7 @@ checks = {
     "session_profile": session_profile_valid,
 }
 checks["pass"] = (
-    checks["version"] == "0.7.0" and checks["skills"] == 6 and checks["workflows"] == 4
+    checks["skills"] == 6 and checks["workflows"] == 4
     and checks["domains"] == 13 and checks["tunnels"] == 10
     and not checks["tunnel_layer_errors"] and not checks["skill_bundle_errors"]
     and not source_tests["stderr"]

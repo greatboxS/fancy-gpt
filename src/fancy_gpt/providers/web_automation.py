@@ -40,6 +40,9 @@ class ChatGPTWebAutomationProvider:
             self.driver.start()
             try:
                 self.driver.health_check()
+                site_health = getattr(self.driver, "site_health", None)
+                if callable(site_health):
+                    site_health(timeout_s=min(20.0, self.timeout_s))
             except Exception:
                 self.driver.stop()
                 raise

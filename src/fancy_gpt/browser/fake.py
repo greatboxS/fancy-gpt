@@ -74,6 +74,7 @@ class FakeBrowserDriver:
         )
         self._active[turn.turn_id] = turn
         self.events.append(("begin", request_id, stage))
+        self.events.append(("conversation", conversation_mode, conversation_id or ""))
         return turn
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:

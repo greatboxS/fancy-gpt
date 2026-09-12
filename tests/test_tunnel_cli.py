@@ -46,3 +46,10 @@ def test_tunnel_list_and_health_default_output_is_a_readable_table() -> None:
     assert health_result.exit_code == 0, health_result.stdout
     assert "STATE" in health_result.stdout
     assert "interactive-manual" in health_result.stdout
+
+
+def test_tunnel_inspect_alias_exists() -> None:
+    result = runner.invoke(app, ["tunnels", "inspect", "interactive-manual"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["spec"]["id"] == "interactive-manual"

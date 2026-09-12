@@ -1,4 +1,4 @@
-# Independent tunnel architecture review — fancy-gpt v0.7.0
+# Independent tunnel architecture review — fancy-gpt v0.8.0
 
 **Result: PASS.**
 
@@ -19,9 +19,6 @@ Static review result:
 - Invalid built-in compositions: 0
 - Extension source/build/package drift: 0
 - Bridge default bind: loopback
-- Worker routing: exact tunnel IDs only; wildcard registration rejected
-- Worker lifecycle: connected/stale/disconnected state with WebSocket and Native Messaging heartbeats
-- Timeout policy: request timeout propagated but capped by bridge server policy
 - Remote extension mode: WebSocket designed to be carried through SSH forwarding
 - Per-tunnel endpoint/token overrides: supported
 - Timeout propagation controller → bridge → extension: supported

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fancy-gpt"
-version = "0.7.0"
-description = "Tunnel-composable independent technical reasoning toolkit with MCP and multi-browser ChatGPT Web integration."
+version = "0.8.0"
+description = "Persistent engineering-team runtime with semantic relevance, MCP, and tunnel-composable ChatGPT Web integration."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

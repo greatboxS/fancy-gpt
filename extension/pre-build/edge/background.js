@@ -65,10 +65,19 @@ function taskUrlFor(conversation) {
 async function executeJob(job) {
   let tab = null;
   try {
-    if (job.operation !== "model.turn") throw new Error(`unsupported operation: ${job.operation}`);
+    if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
     if (job.site !== "chatgpt") throw new Error(`unsupported site: ${job.site}`);
     tab = await ext.tabs.create({url: taskUrlFor(job.conversation), active: false});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
+    if (job.operation === "site.health") {
+      const health = await sendToContentOrTabClose(tab.id, {type: "fancy_site_health", site: job.site});
+      const payload = health ?? {ok: false, reason: "site-health-no-response"};
+      globalThis.FancyGPTTransport.send({
+        type: "job_result", job_id: job.job_id, text: JSON.stringify(payload),
+        response_identity: "site-health"
+      });
+      return;
+    }
     const result = await sendToContentOrTabClose(tab.id, {
       type: "fancy_execute_turn",
       site: job.site,

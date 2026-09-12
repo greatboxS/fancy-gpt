@@ -1,4 +1,4 @@
-# Tunnel architecture — v0.7.0
+# Tunnel architecture — v0.8.0
 
 A **Tunnel** is a runtime-selectable composition, not a browser-specific code path:
 

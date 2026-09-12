@@ -1,78 +1,83 @@
-# Test report — fancy-gpt v0.7.0
+# Test report — fancy-gpt v0.8.0
 
-## Release result
+## Result
 
-**PASS for source, layered tunnel architecture, extension packaging, wheel artifact, installer contract, and offline end-to-end execution.**
-
-Environment-dependent live checks intentionally remain outside this offline release build: real ChatGPT Web UI/session compatibility using a Plus account. The real MCP SDK import test and mocked MCP registration/contract tests both pass.
+PASS for the offline/source release boundary. Live ChatGPT Web UI/account compatibility remains an explicit operator-controlled smoke because the UI and account session are external. The current build container also lacks the `mcp` Python package, so the direct MCP import test is skipped here; mocked MCP contracts remain covered.
 
 ## Source suite
 
-- Python compileall: PASS
-- Tests passed: **75**
-- Tests skipped: **0**
+- Tests collected: **111**
+- Tests passed: **110**
+- Tests skipped: **1** (`tests/test_mcp_import.py`, `mcp` unavailable in this container)
 - Tests failed: **0**
+- Python compileall: PASS
 - Functional reasoning review: PASS
 - Tunnel architecture review: PASS
-- Release gate: PASS
-- Deterministic extension build check: PASS
-- Shell syntax (`install.sh`, `uninstall.sh`): PASS
+- Deterministic extension build consistency: PASS
+- Hardened release gate: PASS
 
-## Catalog and layered architecture
+## v0.8 runtime coverage
 
-- Agent Skills: **6**
+Covered by tests and offline self-test:
+
+- semantic Relevance/Sufficiency policy in planner/final/focused/team paths;
+- persistent Project/Target/AcceptanceCriterion/WorkItem/Session state;
+- append-only project journal and restart/reload behavior;
+- reduced relevant project context instead of raw chat replay;
+- agent roles and structured assignments/outcomes;
+- evidence-gated project completion;
+- verifier-created evidence bound to acceptance criteria in the same outcome;
+- review findings and structured finding resolution by implementer outcomes;
+- conditional skip of unnecessary fix work when review is clean;
+- `fresh` / `resume` / `fork` ChatGPT conversation strategies;
+- ExecutionCoordinator coverage for review, focused answer, and team-agent turns;
+- outbound secret/DLP redaction/deny behavior;
+- bounded context acquisition and bounded Git execution;
+- exact tunnel IDs with wildcard worker rejection;
+- browser worker heartbeat/stale behavior and bridge timeout bounds;
+- extension site-readiness round trip;
+- Windows Native Messaging framing constraints;
+- Chrome/Edge/Firefox extension package consistency;
+- Codex/Claude Code MCP client registration contracts.
+
+## Catalog / tunnel invariants
+
+- Skills: **6**
 - Workflow profiles: **4**
 - Domains: **13**
-- Built-in Tunnels: **10**
-- Sites: **1** (`chatgpt`)
-- Browser runtimes: **5** (`extension`, `playwright`, `cdp`, `interactive`, `fake`)
-- Transports: **6** (`native-messaging`, `websocket`, `local-process`, `cdp`, `human`, `in-memory`)
-- Extension tunnels: **6** (Chrome/Edge/Firefox × local native / remote WebSocket)
-- Static composition failures: **0**
+- Built-in tunnels: **10**
+- Site adapters: **1** (`chatgpt`)
+- Browser runtimes: **5**
+- Transport contracts: **6**
 
-Layer contract coverage includes Site, Runtime, Transport, Tunnel composition, resolver/health, bridge routing, browser response binding, extension packaging, CLI tunnel selection, and MCP tunnel introspection contracts.
+## Release gate
 
-## Install-once / usability checks
+`scripts/release_gate.py` now verifies more than file counts. It runs:
 
-- Bundled-wheel installer path: PASS
-- `uv tool install` isolated user-tool contract: PASS
-- Playwright browser download remains explicit opt-in: PASS
-- Installer runs standalone offline self-test: PASS
-- Installer runs runtime verify: PASS
-- Installer prints bridge pair-token information after initialization: PASS
-- `extension native-config --browser edge/firefox` derives the matching browser-specific native tunnel by default: PASS
-- `fancy-gpt version`: PASS (`0.7.0`)
-- `fancy-gpt test`: PASS without browser/network/account
-- `fancy-gpt init`: PASS
-- `fancy-gpt tunnels list/components/explain/select`: covered
+1. source pytest suite;
+2. functional review;
+3. tunnel architecture review;
+4. deterministic extension source/build consistency;
+5. wheel build without dependency resolution;
+6. source ↔ wheel package parity;
+7. installed-wheel offline self-test;
+8. catalog, schema, skill bundle, and documentation invariants.
 
-## Wheel checks
+The generated `release-gate.json` is the machine-readable result for the final tree.
 
-Artifact: `dist/fancy_gpt-0.7.0-py3-none-any.whl`
+## Environment-dependent checks
 
-SHA-256: `b6ecabdec0507a874c4bf5a3d8e7c780944d7cf0aea5b933a293a4b81383d405`
+Not claimed by this offline gate:
 
-- Packaged Agent Skills: **6**
-- Packaged catalog YAMLs: **4** (`skills`, `workflows`, `domains`, `tunnels`)
-- Packaged Chromium extension assets: **7**
-- Packaged Firefox extension assets: **7**
-- Console entrypoints: `fancy-gpt`, `fancy-gpt-mcp`, `fancy-gpt-native-host`
-- Wheel-extracted `fancy-gpt test`: PASS
-- Wheel-extracted tunnel component inspection: PASS
-- Offline two-pass self-test from wheel: COMPLETE
+- live ChatGPT Web selector/account compatibility;
+- a real Edge/Chrome/Firefox Plus-account turn;
+- real MCP import/startup in this build container when `mcp` is absent;
+- GitHub push/network reachability from this container.
 
-## Browser / tunnel scope
+## Final wheel artifact
 
-Implemented and offline-tested tunnel families:
-
-- Chrome / Edge / Firefox extension + Native Messaging (local)
-- Chrome / Edge / Firefox extension + WebSocket, designed for SSH forwarding (remote)
-- Chrome CDP local attach (advanced)
-- Playwright Chromium / Firefox local fallback
-- Interactive/manual fallback
-
-The release does **not** claim live ChatGPT Web selector/session verification in this container. ChatGPT can change its UI independently; the Site layer is isolated specifically so UI drift can be diagnosed and updated without changing Runtime/Transport/Reasoning layers.
-
-## MCP scope
-
-The stdio MCP server, tunnel selection arguments, and tunnel introspection tools are implemented and covered by mocked MCP contract tests. The declared real `mcp` package also imports successfully in the isolated release environment.
+- Path: `dist/fancy_gpt-0.8.0-py3-none-any.whl`
+- SHA-256: `535043bea3a8ee44b59e5c0c1d8fdb56b21a01dc69a9045199da390c3c943e67`
+- Source ↔ wheel package parity: PASS
+- Installed-wheel offline self-test: PASS
+- Playwright remains optional (`automation` extra), not a default dependency.

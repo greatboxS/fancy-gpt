@@ -14,7 +14,9 @@
     "stage": {
       "enum": [
         "planner",
-        "final"
+        "final",
+        "focused",
+        "agent"
       ],
       "title": "Stage",
       "type": "string"

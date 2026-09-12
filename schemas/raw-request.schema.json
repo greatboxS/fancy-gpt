@@ -76,6 +76,18 @@
       "title": "ChatPolicy",
       "type": "string"
     },
+    "ExpansionTrigger": {
+      "enum": [
+        "changes-correctness",
+        "material-risk",
+        "decision-quality",
+        "confidence",
+        "next-required-action",
+        "blocking-unknown"
+      ],
+      "title": "ExpansionTrigger",
+      "type": "string"
+    },
     "Freshness": {
       "enum": [
         "static",
@@ -96,6 +108,42 @@
       "title": "Priority",
       "type": "string"
     },
+    "RelevanceSufficiencyPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "preserve_scope": {
+          "default": true,
+          "title": "Preserve Scope",
+          "type": "boolean"
+        },
+        "answer_actual_question": {
+          "default": true,
+          "title": "Answer Actual Question",
+          "type": "boolean"
+        },
+        "stop_when_sufficient": {
+          "default": true,
+          "title": "Stop When Sufficient",
+          "type": "boolean"
+        },
+        "expansion_triggers": {
+          "items": {
+            "$ref": "#/$defs/ExpansionTrigger"
+          },
+          "title": "Expansion Triggers",
+          "type": "array"
+        },
+        "avoid_by_default": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Avoid By Default",
+          "type": "array"
+        }
+      },
+      "title": "RelevanceSufficiencyPolicy",
+      "type": "object"
+    },
     "RequestMode": {
       "enum": [
         "review",
@@ -106,6 +154,16 @@
         "write"
       ],
       "title": "RequestMode",
+      "type": "string"
+    },
+    "ResponseIntent": {
+      "enum": [
+        "auto",
+        "reference",
+        "focused",
+        "deep"
+      ],
+      "title": "ResponseIntent",
       "type": "string"
     },
     "RiskLevel": {
@@ -280,6 +338,13 @@
     "chat_policy": {
       "$ref": "#/$defs/ChatPolicy",
       "default": "continue"
+    },
+    "response_intent": {
+      "$ref": "#/$defs/ResponseIntent",
+      "default": "auto"
+    },
+    "relevance_policy": {
+      "$ref": "#/$defs/RelevanceSufficiencyPolicy"
     }
   },
   "required": [

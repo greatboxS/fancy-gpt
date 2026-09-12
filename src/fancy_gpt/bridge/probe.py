@@ -72,9 +72,13 @@ def fetch_job_progress(endpoint: str, token: str, job_id: str, *, open_timeout_s
 def available_tunnels(workers: list[dict]) -> set[str]:
     result: set[str] = set()
     for worker in workers:
+        # A snapshot still lists workers that went stale so operators can see
+        # them; those must never count as an available tunnel.
         if not worker.get("alive", True):
             continue
         for item in worker.get("tunnel_ids", []):
-            if isinstance(item, str) and item != "*":
+            if item == "*":
+                raise ValueError("bridge worker snapshot contains forbidden wildcard tunnel id")
+            if isinstance(item, str) and item:
                 result.add(item)
     return result

@@ -1,4 +1,4 @@
-# Independent functional review — fancy-gpt v0.7.0
+# Independent functional review — fancy-gpt v0.8.0
 
 Scope: reasoning pipeline plus tunnel composition/selection. Live ChatGPT DOM compatibility is excluded.
 
@@ -16,9 +16,6 @@ Scope: reasoning pipeline plus tunnel composition/selection. Live ChatGPT DOM co
 - PASS: independent-design candidate isolation is code-enforced.
 - PASS: final report accounts for research tasks and evidence requirements.
 - PASS: consult/design/investigate/verify/write mode contracts are structurally enforced.
-- PASS: independent-design removes candidate artifacts plus acquisition paths and free-form notes from both online prompts.
-- PASS: offline two-pass execution reaches semantic validation without browser or network access.
-- PASS: consult requires distinct options with trade-offs; verify verdicts are bounded; reusable deliverables reject placeholder content.
 
 ## Tunnel model
 
@@ -30,8 +27,6 @@ Scope: reasoning pipeline plus tunnel composition/selection. Live ChatGPT DOM co
 - PASS: MCP exposes tunnel components, static layer health, dynamic health and resolver selection.
 - PASS: per-tunnel endpoint/token overrides support multiple simultaneous bridges.
 - PASS: bridge worker registers exact tunnel IDs; controller jobs route only to a matching worker.
-- PASS: wildcard worker registration is rejected and stale workers are excluded from routing.
-- PASS: controller job timeouts are bounded by bridge policy; Native Messaging workers maintain heartbeat state.
 - PASS: bridge worker probing is snapshot/cached so auto-selection does not accumulate N× connection timeouts.
 - PASS: configured timeout propagates controller → bridge → extension site adapter.
 - PASS: bridge binds loopback by default.
@@ -44,3 +39,15 @@ Scope: reasoning pipeline plus tunnel composition/selection. Live ChatGPT DOM co
 - PASS: browser-specific export patches default tunnel/browser identity.
 - PASS: Native Messaging manifest shape differs correctly for Chromium vs Firefox.
 - PASS: deterministic extension build/check prevents packaged assets from drifting from source.
+
+## Persistent engineering-team runtime
+
+- PASS: project target, acceptance criteria, work items, sessions, decisions, evidence, findings and artifacts persist in an append-only journal.
+- PASS: raw browser history is not replayed into teammates; each assignment receives `RelevantProjectContext`.
+- PASS: semantic Relevance/Sufficiency policy is shared by planner, final report, focused answers and team-agent handoffs.
+- PASS: scope expansion must be justified by correctness, material risk, decision quality, confidence, a blocking unknown or the next required action.
+- PASS: project completion requires evidence-backed acceptance criteria, completion/skipping of required work and zero open findings.
+- PASS: verifier outcomes can create fresh evidence and bind that evidence to acceptance criteria in the same durable handoff.
+- PASS: implementer outcomes can resolve review findings through the structured team protocol.
+- PASS: a clean independent review skips unnecessary fix work and advances directly to acceptance verification.
+- PASS: review/focused/team model execution all produce structured `ExecutionStatus` records before tunnel selection can fail.

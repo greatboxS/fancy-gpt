@@ -7,12 +7,13 @@ WITH_BROWSER_DEPS=0
 SKIP_VERIFY=0
 PRESET=""
 PRESET_BROWSER="edge"
+REGISTER_MCP=1
 
 usage() {
   cat <<'EOF'
 Usage: ./install.sh [options]
 
-Install FancyGPT once as an isolated user CLI. v0.7 defaults to the lightweight
+Install FancyGPT once as an isolated user CLI. v0.8 defaults to the lightweight
 extension/bridge tunnel path and doesn't download a private Chromium runtime.
 
 Options:
@@ -25,6 +26,7 @@ Options:
                         Install a same-machine Native Messaging bundle and config.
   --preset remote-edge Backward-compatible alias for --preset remote-extension --browser edge.
   --browser NAME        Browser for remote-extension: chrome, edge, or firefox (default: edge).
+  --no-mcp-register     Do not auto-register detected Codex/Claude Code MCP clients.
   -h, --help            Show this help.
 EOF
 }
@@ -47,6 +49,7 @@ while (($#)); do
       PRESET_BROWSER="${1:-}"
       [[ "$PRESET_BROWSER" =~ ^(chrome|edge|firefox)$ ]] || { echo "--browser must be chrome, edge, or firefox" >&2; exit 2; }
       ;;
+    --no-mcp-register) REGISTER_MCP=0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -68,13 +71,13 @@ fi
 
 WHEEL="${FANCY_GPT_INSTALL_SOURCE:-}"
 if [[ -z "$WHEEL" ]]; then
-  WHEEL="$(find "$ROOT/dist" -maxdepth 1 -type f -name 'fancy_gpt-0.7.0-*.whl' | sort | tail -n 1 || true)"
+  WHEEL="$(find "$ROOT/dist" -maxdepth 1 -type f -name 'fancy_gpt-0.8.0-*.whl' | sort | tail -n 1 || true)"
 fi
-[[ -n "$WHEEL" && -f "$WHEEL" ]] || { echo "Bundled fancy-gpt 0.7.0 wheel not found under $ROOT/dist" >&2; exit 1; }
+[[ -n "$WHEEL" && -f "$WHEEL" ]] || { echo "Bundled fancy-gpt 0.8.0 wheel not found under $ROOT/dist" >&2; exit 1; }
 
 echo "[fancy-gpt] Installing isolated user CLI from: $WHEEL"
 if (( WITH_PLAYWRIGHT )); then
-  "$UV" tool install --force --with 'playwright>=1.55,<2' "$WHEEL"
+  "$UV" tool install --force --with "playwright>=1.55,<2" "$WHEEL"
 else
   "$UV" tool install --force "$WHEEL"
 fi
@@ -94,6 +97,17 @@ if (( ! SKIP_VERIFY )); then
   echo "[fancy-gpt] Running standalone offline self-test..."
   "$FG" test
   "$FG" verify
+fi
+
+if (( REGISTER_MCP )); then
+  MCP_BIN="$BIN_DIR/fancy-gpt-mcp"
+  if [[ -x "$MCP_BIN" ]]; then
+    echo "[fancy-gpt] Auto-registering detected MCP clients (Codex / Claude Code)..."
+    if ! "$FG" clients register-detected --server "$MCP_BIN"; then
+      echo "[fancy-gpt] WARNING: one or more detected MCP clients could not be registered; core installation is still valid." >&2
+      echo "[fancy-gpt] Run '$FG clients list' and '$FG clients register <client>' for diagnostics." >&2
+    fi
+  fi
 fi
 
 TOKEN_INFO="$($FG bridge init)"
@@ -145,7 +159,7 @@ else
   echo "Bridge pairing token stored in the private native-host configuration."
 fi
 echo
-echo "FancyGPT 0.7.0 installed successfully."
+echo "FancyGPT 0.8.0 installed successfully."
 echo "Command: $FG"
 echo "Default architecture: browser extension tunnel; Playwright is only a fallback."
 echo "Next: $FG extension export chrome ~/.local/share/fancy-gpt/extension-chrome"

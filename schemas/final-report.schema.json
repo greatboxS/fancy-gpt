@@ -96,6 +96,18 @@
       "title": "EvidenceRef",
       "type": "object"
     },
+    "ExpansionTrigger": {
+      "enum": [
+        "changes-correctness",
+        "material-risk",
+        "decision-quality",
+        "confidence",
+        "next-required-action",
+        "blocking-unknown"
+      ],
+      "title": "ExpansionTrigger",
+      "type": "string"
+    },
     "Finding": {
       "additionalProperties": false,
       "properties": {
@@ -260,6 +272,32 @@
       "title": "OptionAnalysis",
       "type": "object"
     },
+    "RelevanceAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "within_requested_scope": {
+          "default": true,
+          "title": "Within Requested Scope",
+          "type": "boolean"
+        },
+        "necessary_expansions": {
+          "items": {
+            "$ref": "#/$defs/ScopeExpansion"
+          },
+          "title": "Necessary Expansions",
+          "type": "array"
+        },
+        "omitted_non_material_topics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Omitted Non Material Topics",
+          "type": "array"
+        }
+      },
+      "title": "RelevanceAssessment",
+      "type": "object"
+    },
     "RequestMode": {
       "enum": [
         "review",
@@ -306,6 +344,29 @@
         "note"
       ],
       "title": "ResearchTaskTrace",
+      "type": "object"
+    },
+    "ScopeExpansion": {
+      "additionalProperties": false,
+      "properties": {
+        "topic": {
+          "title": "Topic",
+          "type": "string"
+        },
+        "trigger": {
+          "$ref": "#/$defs/ExpansionTrigger"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic",
+        "trigger",
+        "rationale"
+      ],
+      "title": "ScopeExpansion",
       "type": "object"
     },
     "SourceRecord": {
@@ -506,6 +567,9 @@
       "minimum": 0.0,
       "title": "Confidence",
       "type": "number"
+    },
+    "relevance_assessment": {
+      "$ref": "#/$defs/RelevanceAssessment"
     }
   },
   "required": [

@@ -255,8 +255,10 @@ def test_bridge_rejects_wildcard_worker_and_marks_stale_workers() -> None:
     assert hub.snapshot()[0]["state"] == "stale"
     assert not hub.snapshot()[0]["alive"]
 
-    wildcard = BrowserWorker(Connection(), {"*"}, "chrome")
-    hub.register(wildcard)
+    # A wildcard worker is now refused at registration rather than merely
+    # losing every routing decision, so it can never appear in a snapshot.
+    with pytest.raises(ValueError, match="wildcard"):
+        hub.register(BrowserWorker(Connection(), {"*"}, "chrome"))
     assert hub.worker_for("unregistered-tunnel") is None
 
 
@@ -335,3 +337,54 @@ def test_bridge_snapshot_probe_lists_registered_tunnels() -> None:
         stop.set()
         server.shutdown()
         thread.join(timeout=2)
+
+
+def test_bridge_site_health_round_trip() -> None:
+    token = "health-token"
+    server = BridgeServer("127.0.0.1", 0, token)
+    server.start_background()
+    endpoint = f"ws://127.0.0.1:{server.port}"
+    stop = threading.Event()
+
+    def browser_worker() -> None:
+        connection = connect(endpoint)
+        connection.send(dumps(hello(
+            role="browser", token=token,
+            tunnel_ids=["edge-extension-ws-remote"], browser="edge"
+        )))
+        assert loads(connection.recv(timeout=5))["type"] == "hello_ack"
+        try:
+            while not stop.is_set():
+                message = loads(connection.recv(timeout=5))
+                if message.get("type") == "job" and message.get("operation") == "site.health":
+                    connection.send(dumps({
+                        "type": "job_result", "job_id": message["job_id"],
+                        "text": json.dumps({"ok": True, "reason": "ready"}),
+                        "response_identity": "site-health",
+                    }))
+        except Exception:
+            pass
+        finally:
+            connection.close()
+
+    threading.Thread(target=browser_worker, daemon=True).start()
+    deadline = time.monotonic() + 2
+    while server.hub.worker_for("edge-extension-ws-remote") is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    driver = BridgeBrowserDriver(endpoint, token, "edge-extension-ws-remote")
+    try:
+        driver.start()
+        driver.health_check()
+        assert driver.site_health(timeout_s=5)["reason"] == "ready"
+    finally:
+        driver.stop()
+        stop.set()
+        server.shutdown()
+
+
+def test_available_tunnels_rejects_wildcard_snapshot() -> None:
+    from fancy_gpt.bridge.probe import available_tunnels
+    import pytest
+
+    with pytest.raises(ValueError, match="forbidden wildcard"):
+        available_tunnels([{"worker_id": "legacy", "tunnel_ids": ["*"]}])

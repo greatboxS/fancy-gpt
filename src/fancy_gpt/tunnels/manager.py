@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import time
+import urllib.request
 import importlib.metadata
 import subprocess
 import sys
-import time
-import urllib.request
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
@@ -48,9 +48,6 @@ class TunnelManager:
         self._playwright_paths: list[Path] | None = None
         self.resolver = TunnelResolver(self.registry, self.probe)
 
-    def _endpoint(self, spec: TunnelSpec) -> str | None:
-        return self.driver_factory.endpoint(spec)
-
     def _installed_playwright_paths(self) -> list[Path]:
         """Inspect installed browsers without starting Playwright's async driver."""
         if self._playwright_paths is not None:
@@ -70,6 +67,9 @@ class TunnelManager:
         self._playwright_paths = [Path(value) for value in candidates
                                   if Path(value).is_absolute() or PureWindowsPath(value).is_absolute()]
         return self._playwright_paths
+
+    def _endpoint(self, spec: TunnelSpec) -> str | None:
+        return self.driver_factory.endpoint(spec)
 
     def probe(self, spec: TunnelSpec) -> TunnelHealth:
         started = time.monotonic()
@@ -183,6 +183,34 @@ class TunnelManager:
             detail="no dynamic probe implemented",
             layers=layers,
         )
+
+    def inspect(self, spec: TunnelSpec) -> TunnelHealth:
+        """Deep diagnostic health including the live site adapter when possible."""
+        health = self.probe(spec)
+        if health.state == TunnelHealthState.UNAVAILABLE or spec.runtime.value != "extension":
+            return health
+        driver = self.driver_factory.build(spec)
+        site_health = getattr(driver, "site_health", None)
+        if not callable(site_health):
+            return health
+        try:
+            driver.start()
+            driver.health_check()
+            payload = site_health(timeout_s=min(20.0, self.timeout_s))
+            health.metadata["site_health"] = payload
+            health.detail = "browser worker connected and ChatGPT site adapter is ready"
+            health.state = TunnelHealthState.HEALTHY
+            return health
+        except Exception as exc:
+            health.state = TunnelHealthState.UNAVAILABLE
+            health.detail = f"browser worker connected but site is not ready: {type(exc).__name__}: {exc}"
+            health.metadata["site_ready"] = False
+            return health
+        finally:
+            try:
+                driver.stop()
+            except Exception:
+                pass
 
     def select(
         self,

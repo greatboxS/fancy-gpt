@@ -87,3 +87,10 @@ def test_continue_generation_is_scoped_to_the_current_response(tmp_path: Path) -
     assert bind_position < continue_position
     assert "findButtonByText(/continue generating/i, boundTurns[0])" in site
     assert 'findButtonByText(/continue generating/i);' not in site
+
+
+def test_extension_background_exposes_site_health_operation():
+    source = Path("extension/common/background.js").read_text(encoding="utf-8")
+    assert '"site.health"' in source
+    assert '"fancy_site_health"' in source
+    assert "JSON.stringify(payload)" in source

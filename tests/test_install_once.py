@@ -12,7 +12,7 @@ runner = CliRunner()
 def test_version_and_standalone_self_test() -> None:
     result = runner.invoke(app, ["version"])
     assert result.exit_code == 0
-    assert result.stdout.strip() == "0.7.0"
+    assert result.stdout.strip() == "0.8.0"
 
     result = runner.invoke(app, ["test"])
     assert result.exit_code == 0
@@ -71,7 +71,7 @@ exit 0
         encoding="utf-8",
     )
     fake_uv.chmod(0o755)
-    dummy_wheel = tmp_path / "fancy_gpt-0.7.0-py3-none-any.whl"
+    dummy_wheel = tmp_path / "fancy_gpt-0.8.0-py3-none-any.whl"
     dummy_wheel.write_bytes(b"fake")
     env = os.environ.copy()
     env.update({
@@ -118,7 +118,7 @@ exit 0
         encoding="utf-8",
     )
     fake_uv.chmod(0o755)
-    dummy_wheel = tmp_path / "fancy_gpt-0.7.0-py3-none-any.whl"
+    dummy_wheel = tmp_path / "fancy_gpt-0.8.0-py3-none-any.whl"
     dummy_wheel.write_bytes(b"fake")
     env = os.environ.copy()
     env.update({
@@ -162,7 +162,7 @@ fi
     fake_codex = fake_bin / "codex"
     fake_codex.write_text("#!/usr/bin/env bash\necho \"codex:$*\" >> \"$FAKE_LOG\"\nif [[ \"$2\" == get ]]; then exit 1; fi\nexit 0\n", encoding="utf-8")
     fake_codex.chmod(0o755)
-    wheel = tmp_path / "fancy_gpt-0.7.0-py3-none-any.whl"
+    wheel = tmp_path / "fancy_gpt-0.8.0-py3-none-any.whl"
     wheel.write_bytes(b"fake")
     bundle = tmp_path / "bundle"
     env = os.environ | {

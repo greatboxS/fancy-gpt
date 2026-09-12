@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .relevance import RelevanceAssessment, RelevanceSufficiencyPolicy, ResponseIntent
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
@@ -120,6 +122,8 @@ class RawRequest(StrictModel):
     session_id: str | None = None
     chat_id: str | None = None
     chat_policy: ChatPolicy = ChatPolicy.CONTINUE
+    response_intent: ResponseIntent = ResponseIntent.AUTO
+    relevance_policy: RelevanceSufficiencyPolicy = Field(default_factory=RelevanceSufficiencyPolicy)
 
     @field_validator("domains")
     @classmethod
@@ -342,7 +346,7 @@ class RoutingDecision(StrictModel):
 
 class ModelRequest(StrictModel):
     request_id: str
-    stage: Literal["planner", "final"]
+    stage: Literal["planner", "final", "focused", "agent"]
     title: str
     prompt: str
     response_schema: dict[str, Any]
@@ -352,7 +356,7 @@ class ModelRequest(StrictModel):
 class InteractionRequired(StrictModel):
     status: Literal["interaction_required"] = "interaction_required"
     request_id: str
-    stage: Literal["planner", "final"]
+    stage: Literal["planner", "final", "focused", "agent"]
     provider: Literal["chatgpt-web-interactive"] = "chatgpt-web-interactive"
     prompt_file: str
     instructions: list[str]
@@ -362,7 +366,7 @@ class InteractionRequired(StrictModel):
 class AutomatedModelResponse(StrictModel):
     status: Literal["completed"] = "completed"
     request_id: str
-    stage: Literal["planner", "final"]
+    stage: Literal["planner", "final", "focused", "agent"]
     provider: str
     raw_text: str
     response_identity: str
@@ -481,6 +485,7 @@ class FinalReport(StrictModel):
     evidence_coverage: list[EvidenceCoverage] = Field(default_factory=list)
     sources: list[SourceRecord] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
+    relevance_assessment: RelevanceAssessment = Field(default_factory=RelevanceAssessment)
 
     @model_validator(mode="after")
     def mode_contract(self) -> "FinalReport":

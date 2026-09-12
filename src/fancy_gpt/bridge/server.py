@@ -4,6 +4,7 @@ import ipaddress
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,6 +27,7 @@ class BrowserWorker:
     connection: ServerConnection
     tunnel_ids: set[str]
     browser: str
+    worker_id: str = field(default_factory=lambda: f"worker-{uuid.uuid4().hex[:10]}")
     connected_at: float = field(default_factory=time.monotonic)
     connected_at_wall: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.monotonic)
@@ -88,7 +90,25 @@ class BridgeHub:
         self._progress: dict[str, tuple[float, str]] = {}
         self._progress_cap = 200
 
+    def _fresh(self, worker: BrowserWorker) -> bool:
+        return worker.alive and (time.monotonic() - worker.last_seen) <= self.stale_after_s
+
+    def _expire_stale_unlocked(self) -> None:
+        """Demote workers that stopped sending anything; callers hold the lock.
+
+        A stale worker stays in the snapshot as `state: stale` so operators can
+        see it went quiet, but never wins routing again.
+        """
+        now = time.monotonic()
+        for worker in self._workers:
+            if worker.alive and now - worker.last_seen > self.stale_after_s:
+                worker.alive = False
+
     def register(self, worker: BrowserWorker) -> None:
+        if not worker.tunnel_ids:
+            raise ValueError("browser worker must register at least one exact tunnel id")
+        if "*" in worker.tunnel_ids:
+            raise ValueError("wildcard tunnel registration is forbidden")
         with self._lock:
             self._workers.append(worker)
             self._total_connections += 1
@@ -134,27 +154,26 @@ class BridgeHub:
                 self._workers.remove(worker)
 
     def worker_for(self, tunnel_id: str) -> BrowserWorker | None:
-        now = time.monotonic()
         with self._lock:
-            for worker in self._workers:
-                if worker.alive and now - worker.last_seen > self.stale_after_s:
-                    worker.alive = False
-                if worker.alive and tunnel_id in worker.tunnel_ids:
-                    return worker
+            self._expire_stale_unlocked()
+            candidates = [worker for worker in self._workers if self._fresh(worker) and tunnel_id in worker.tunnel_ids]
+            if not candidates:
+                return None
+            return max(candidates, key=lambda worker: worker.last_seen)
         return None
 
     def snapshot(self) -> list[dict[str, Any]]:
         now = time.monotonic()
         with self._lock:
-            for worker in self._workers:
-                if worker.alive and now - worker.last_seen > self.stale_after_s:
-                    worker.alive = False
+            self._expire_stale_unlocked()
             return [
                 {
+                    "worker_id": worker.worker_id,
                     "browser": worker.browser,
                     "tunnel_ids": sorted(worker.tunnel_ids),
                     "alive": worker.alive,
                     "state": "connected" if worker.alive else "stale",
+                    "fresh": self._fresh(worker),
                     "connected_at": worker.connected_at_wall,
                     "connected_seconds": round(now - worker.connected_at, 1),
                     "last_seen_seconds_ago": round(now - worker.last_seen, 1),
@@ -166,8 +185,8 @@ class BridgeHub:
             ]
 
     def stats(self) -> dict[str, Any]:
-        now = time.monotonic()
         with self._lock:
+            self._expire_stale_unlocked()
             for worker in self._workers:
                 if worker.alive and now - worker.last_seen > self.stale_after_s:
                     worker.alive = False
@@ -220,8 +239,6 @@ class BridgeServer:
             tunnel_ids=set(str(item) for item in hello.get("tunnel_ids", [])),
             browser=str(hello.get("browser") or "unknown"),
         )
-        if not worker.tunnel_ids:
-            raise ValueError("browser worker must register at least one tunnel id")
         if "*" in worker.tunnel_ids:
             raise ValueError("browser worker must register exact tunnel ids; wildcard is forbidden")
         self.hub.register(worker)
@@ -275,7 +292,8 @@ class BridgeServer:
                     requested_timeout = float(message.get("timeout_s", self.job_timeout_s))
                     if requested_timeout <= 0:
                         raise ValueError("job timeout must be positive")
-                    response = worker.request(message, timeout_s=min(requested_timeout, self.job_timeout_s))
+                    effective_timeout = max(1.0, min(requested_timeout, self.job_timeout_s))
+                    response = worker.request(message, timeout_s=effective_timeout)
                     self.hub.record_job_result(response.get("type") != "job_error")
                 except Exception as exc:
                     response = {"type": "job_error", "job_id": message.get("job_id"), "error": str(exc)}

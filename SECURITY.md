@@ -1,4 +1,4 @@
-# Security and independence model — v0.7.0
+# Security and independence model — v0.8.0
 
 ## Filesystem boundary
 
@@ -52,3 +52,17 @@ Local artifacts and web content are treated as untrusted evidence. Planner/final
 ## Live-site caveat
 
 Offline tests verify tunnel contracts, bridge protocol, extension packaging, site/runtime separation and response binding. They do **not** claim current ChatGPT DOM selectors or a real Plus session are live-compatible; that remains a local smoke test because the site UI is outside this repository's control.
+
+## v0.8 outbound context boundary
+
+- Online eligibility is separate from filesystem readability: `SecretPolicy` can deny secret-bearing files or redact high-confidence credentials before ContextPack creation.
+- Required P0 context that is denied by secret policy fails closed rather than silently marking the request complete.
+- Broad content acquisition has explicit file/byte/time budgets and prunes common Yocto/generated trees including `downloads`, `sstate-cache`, `build-*`, and `tmp*`.
+- Git revision/diff subprocesses have wall-time and output bounds; textconv is disabled for diff collection.
+
+## Persistent project/session boundary
+
+- Project history is an append-only event journal; raw browser chat is not the durable source of project truth.
+- Model sessions receive reduced project state rather than unrestricted replay of historical conversations.
+- ChatGPT conversation bindings are stored as thread URLs only; no browser credential material is copied into project state.
+- Project completion requires evidence-backed acceptance plus required work completion and must not rely solely on an agent's claim of completion.

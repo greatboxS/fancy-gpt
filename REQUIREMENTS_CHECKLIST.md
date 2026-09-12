@@ -1,4 +1,4 @@
-# Requirements checklist — v0.7.0
+# Requirements checklist — v0.8.0
 
 | Requirement | Status | Evidence |
 |---|---|---|
@@ -42,3 +42,24 @@
 | Offline package self-test | PASS | `fancy-gpt test` |
 | Real ChatGPT UI/session compatibility | LOCAL VERIFICATION REQUIRED | external site UI |
 | Real MCP SDK import in offline build container | ENVIRONMENT-DEPENDENT | dependency declared; mocked contract test PASS |
+
+## v0.8 persistent-team requirements
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| Persistent Project/Target state | PASS | `project_models.py`, `project_store.py` |
+| Append-only project history | PASS | `ProjectStore` event journal |
+| Relevant state reduction instead of raw chat replay | PASS | `ProjectService.relevant_context` |
+| Semantic scope/relevance policy, not word-count control | PASS | `relevance.py`, planner/final/focused/team prompts |
+| Focused one-pass answer path for small questions | PASS | `fancy-gpt ask`, MCP `ask_focused` |
+| Team roles separated from model/tunnel provider | PASS | `AgentRole`, `TeamAgentEngine`, `TunnelManager` |
+| Developer-cycle orchestration | PASS | `TeamOrchestrator`, `ProjectRunner` |
+| External Codex/Claude implementation handoff | PASS | `WorkExecutionMode.EXTERNAL_AGENT`, `AgentAssignment`, `submit_agent_outcome` |
+| Evidence-backed acceptance completion | PASS | acceptance normalization + verifier criterion mapping |
+| New verifier evidence usable in same outcome | PASS | `EvidenceDraft.ref` / `CriterionAssessmentDraft.evidence_refs` |
+| Structured finding resolution from implementer | PASS | `finding_resolutions` in `AgentOutcome` |
+| Clean review skips unnecessary fix stage | PASS | `WorkActivationCondition.OPEN_FINDINGS` / `SKIPPED` |
+| Stateful ChatGPT Web session strategy | PASS (offline contract) | fresh/resume/fork + persisted URL binding |
+| Execution diagnostics cover review/focused/team | PASS | `ExecutionCoordinator` |
+| Outbound secret/DLP policy | PASS | `SecretPolicy` + ContextBuilder integration |
+| Bounded large-repo acquisition | PASS | file/byte/time budgets + bounded Git |

@@ -63,8 +63,8 @@
     composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
   }
 
-  function findButtonByText(pattern) {
-    const buttons = [...document.querySelectorAll("button")];
+  function findButtonByText(pattern, root = document) {
+    const buttons = [...root.querySelectorAll("button")];
     return buttons.find(btn => {
       const rect = btn.getBoundingClientRect();
       const style = getComputedStyle(btn);
@@ -108,13 +108,6 @@
     let stableCount = 0;
     let lastReported = null;
     while (Date.now() < deadline) {
-      const continueButton = findButtonByText(/continue generating/i);
-      if (continueButton) {
-        continueButton.click();
-        stableCount = 0;
-        await new Promise(resolve => setTimeout(resolve, 500));
-        continue;
-      }
       const candidates = [];
       for (const id of turnIds()) {
         if (baseline.has(id)) continue;
@@ -126,6 +119,21 @@
         if (candidates.length === 1) boundId = candidates[0].id;
       }
       if (boundId != null) {
+        // A long conversation may retain a visible "Continue generating"
+        // button on an older response. Searching the whole document and
+        // clicking it before binding the new response traps this job in the
+        // loop forever. Only continue the assistant turn created by this job.
+        const boundTurns = [...document.querySelectorAll(SELECTORS.turns)]
+          .filter(el => el.getAttribute("data-turn-id") === boundId);
+        const continueButton = boundTurns.length === 1
+          ? findButtonByText(/continue generating/i, boundTurns[0])
+          : null;
+        if (continueButton) {
+          continueButton.click();
+          stableCount = 0;
+          await new Promise(resolve => setTimeout(resolve, 500));
+          continue;
+        }
         const text = assistantText(boundId);
         if (text && text !== lastReported) {
           lastReported = text;
