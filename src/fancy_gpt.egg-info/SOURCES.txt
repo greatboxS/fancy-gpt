@@ -20,6 +20,7 @@ src/fancy_gpt/gateway_capabilities.py
 src/fancy_gpt/gateway_compaction.py
 src/fancy_gpt/gateway_execution.py
 src/fancy_gpt/gateway_state.py
+src/fancy_gpt/gateway_streaming.py
 src/fancy_gpt/inspection.py
 src/fancy_gpt/io.py
 src/fancy_gpt/mcp_clients.py
@@ -135,6 +136,7 @@ tests/test_gateway.py
 tests/test_gateway_cancel_path.py
 tests/test_gateway_execution.py
 tests/test_gateway_hardening.py
+tests/test_gateway_streaming.py
 tests/test_gateway_transport.py
 tests/test_install_once.py
 tests/test_mcp_clients.py

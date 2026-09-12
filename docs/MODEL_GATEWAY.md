@@ -295,10 +295,33 @@ occupant of a recycled tab is discarded rather than stopping the turn currently
 using it. If the driver has no cancel path at all, `provider.cancel()` reports
 `False` rather than pretending it worked.
 
-SSE events are emitted one at a time with a disconnect checkpoint between them.
-Note what this does and does not mean: the browser backend returns a whole
-answer, so these events are protocol *framing*, not token-by-token generation.
-What is genuinely incremental is the transport.
+### Streaming
+
+Text really is incremental. The content script already pushes the assistant's
+growing reply to the bridge, which stores the latest snapshot per job; the turn
+feeds those snapshots through a delta stream and the transport emits them as the
+client's own events while the turn is still running.
+
+The source is a **cumulative snapshot scraped from a rendered page**, and vendor
+deltas are **append-only and cannot be retracted**. Three rules bridge that gap:
+
+* **Resolve by path, not by substring.** Only the string at root `["text"]` is
+  streamable. A `"text"` key nested inside tool-call arguments is skipped
+  structurally - matching it textually would be the same class of bug as
+  identifying tool calls by regex over rendered prose.
+* **Never emit a character that could still change.** Incomplete escapes,
+  unpaired surrogates (escaped *or* literal), and the newest characters are
+  withheld. JSON permits duplicate keys and `json.loads` keeps the last while a
+  linear scan emits the first, so a second root-level `"text"` key fails the
+  stream rather than contradicting the client.
+* **Monotonic prefix lock.** Every snapshot must start with exactly what was
+  already emitted. A whitespace-only difference is treated as a benign
+  re-render and the frontier is realigned, because rendered markdown collapses
+  whitespace as it settles; anything else is a real rewrite and stops the stream
+  with a protocol-native error instead of emitting contradictory text.
+
+A turn ending in a tool call opens no text block at all. Latency granularity is
+currently the progress poll interval (~1.5s), not per token.
 
 ### Concurrency through the bridge
 

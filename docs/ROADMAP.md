@@ -115,6 +115,11 @@ Status: **largely delivered**
 
 Delivered:
 
+- Incremental text streaming to all three protocols, converting cumulative
+  page snapshots into append-only deltas under a monotonic prefix lock, with
+  whitespace re-render realignment and path-resolved (not substring-matched)
+  extraction of the streamable value.
+
 - Turn lifecycle state machine with `uncertain-submit`, so a browser turn that may
   already have landed is never blind re-submitted, across process restart.
 - Idempotency store with atomic claims, replay on same key plus payload, rejection
@@ -144,10 +149,10 @@ Delivered:
 
 Remaining:
 
-- True token-by-token generation streaming. The transport is now incremental
-  and cancellable, but the browser backend still returns a whole answer, so
-  SSE events are protocol framing rather than generation progress. The
-  provider's `on_progress` callback is the route to real deltas.
+- Push-based progress transport. Streaming works, but its latency granularity
+  is the existing ~1.5s progress poll; the bridge keeps only the latest
+  snapshot per job, so a push channel would cut latency without changing the
+  delta semantics.
 
 - Enforce or remove `max_tool_loop_iterations`, which is declared but not enforced.
 - Real retry lineage (`attempt`, `retry_of`) populated and surfaced in inspection.

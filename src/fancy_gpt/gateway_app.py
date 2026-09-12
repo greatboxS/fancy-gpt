@@ -19,6 +19,7 @@ sync means the state, compaction and capability layers are unchanged.
 from __future__ import annotations
 
 import json
+import queue
 import secrets
 from functools import partial
 from typing import Any, AsyncIterator, Callable
@@ -33,6 +34,9 @@ from starlette.routing import Route
 
 from .gateway import (
     GATEWAY_MODELS,
+    AnthropicStream,
+    GeminiStream,
+    OpenAIStream,
     IDEMPOTENCY_HEADERS,
     CancelToken,
     GatewayCancelled,
@@ -42,7 +46,6 @@ from .gateway import (
     _protocol_error,
     _validate_header,
     anthropic_response,
-    anthropic_stream_events,
     capability_report,
     classify_error,
     codex_models,
@@ -51,7 +54,6 @@ from .gateway import (
     normalize_gemini,
     normalize_openai,
     openai_response,
-    openai_stream_events,
 )
 
 #: How often the transport checks whether the caller is still connected while a
@@ -221,28 +223,126 @@ async def _run_turn(
     return result[0]
 
 
+async def _stream_turn(
+    service: GatewayService,
+    resources: GatewayResources,
+    request: Request,
+    turn: NormalizedTurn,
+    protocol: str,
+    path: str,
+    *,
+    tunnel_id: str | None,
+    idempotency_key: str | None,
+    client_key: str,
+) -> AsyncIterator[ServerSentEvent]:
+    """Emit protocol events as the answer arrives, not after it is complete.
+
+    The turn runs on a worker thread and pushes text deltas onto a queue; this
+    generator drains them into the client's own event shape. A caller that
+    disconnects stops the stream and cancels the turn.
+    """
+    token = CancelToken()
+    events: queue.Queue = queue.Queue()
+    emitter: Any = None
+
+    def on_start(response_id: str) -> None:
+        events.put(("start", response_id))
+
+    def on_delta(text: str) -> None:
+        events.put(("delta", text))
+
+    async def execute() -> None:
+        try:
+            result = await anyio.to_thread.run_sync(
+                partial(
+                    service.execute, turn,
+                    tunnel_id=tunnel_id, idempotency_key=idempotency_key,
+                    cancel_token=token, client_key=client_key,
+                    on_start=on_start, on_delta=on_delta,
+                ),
+                abandon_on_cancel=True,
+                limiter=resources.limiter,
+            )
+            events.put(("done", result))
+        except BaseException as exc:  # noqa: BLE001 - surfaced as a protocol error
+            events.put(("error", exc))
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(execute)
+        while True:
+            try:
+                kind, payload = events.get_nowait()
+            except queue.Empty:
+                if await request.is_disconnected():
+                    token.cancel("client disconnected")
+                    group.cancel_scope.cancel()
+                    return
+                await anyio.sleep(0.05)
+                continue
+
+            if kind == "start":
+                if protocol == "openai":
+                    emitter = OpenAIStream(payload, turn.model)
+                elif protocol == "anthropic":
+                    emitter = AnthropicStream(payload, turn.model)
+                else:
+                    emitter = GeminiStream(turn.model)
+                for event in emitter.open():
+                    yield _sse(event)
+            elif kind == "delta":
+                if emitter is not None:
+                    for event in emitter.delta(payload):
+                        yield _sse(event)
+            elif kind == "done":
+                result = payload
+                if emitter is None:
+                    emitter = (
+                        OpenAIStream(result.response_id, turn.model) if protocol == "openai"
+                        else AnthropicStream(result.response_id, turn.model) if protocol == "anthropic"
+                        else GeminiStream(turn.model)
+                    )
+                    for event in emitter.open():
+                        yield _sse(event)
+                if result.stream_failed:
+                    # Deltas already sent contradict the authoritative text, and
+                    # they cannot be retracted, so say so rather than finish as
+                    # though the client holds the right answer.
+                    for event in emitter.fail(
+                        "streamed text was rewritten past the point already sent; "
+                        "re-request without streaming for the authoritative reply"
+                    ):
+                        yield _sse(event)
+                else:
+                    body = (
+                        openai_response(result) if protocol == "openai"
+                        else anthropic_response(result) if protocol == "anthropic"
+                        else gemini_response(result)
+                    )
+                    for event in emitter.close(body, result):
+                        yield _sse(event)
+                group.cancel_scope.cancel()
+                return
+            elif kind == "error":
+                exc = payload
+                status, body, _ = classify_error(exc, protocol)
+                if emitter is not None:
+                    for event in emitter.fail(str(body.get("error", {}).get("message", "gateway error"))):
+                        yield _sse(event)
+                else:
+                    yield _sse((None, body))
+                group.cancel_scope.cancel()
+                return
+
+
+def _sse(event: tuple[str | None, dict[str, Any]]) -> ServerSentEvent:
+    name, payload = event
+    return ServerSentEvent(data=json.dumps(payload, ensure_ascii=False), event=name)
+
+
 def _error_response(exc: Exception, protocol: str) -> JSONResponse:
     status, body, retry_after = classify_error(exc, protocol)
     headers = {"Retry-After": str(retry_after)} if retry_after else None
     return JSONResponse(body, status_code=status, headers=headers)
-
-
-async def _stream(
-    events: list[tuple[str | None, dict[str, Any]]],
-    request: Request,
-) -> AsyncIterator[ServerSentEvent]:
-    """Emit SSE events one at a time, stopping if the client goes away.
-
-    The browser backend returns a whole answer rather than a token stream, so
-    these events are the protocol's framing rather than generation progress.
-    What is genuinely incremental here is the transport: the connection is
-    checked between events, so a client that disconnects mid-stream ends the
-    response instead of being written to a dead socket.
-    """
-    for name, payload in events:
-        if await request.is_disconnected():
-            return
-        yield ServerSentEvent(data=json.dumps(payload, ensure_ascii=False), event=name)
 
 
 def create_app(service: GatewayService, *, token: str | None = None, browser_slots: int = 4) -> Starlette:
@@ -296,6 +396,16 @@ def create_app(service: GatewayService, *, token: str | None = None, browser_slo
                 model = path.split("/models/", 1)[1].split(":", 1)[0]
                 turn = normalize_gemini(payload, model, session)
 
+            if turn.stream or ":streamGenerateContent" in path:
+                # Streaming turns emit as the answer arrives, so the turn is
+                # driven from inside the response generator rather than awaited
+                # to completion first.
+                return EventSourceResponse(
+                    _stream_turn(
+                        service, resources, request, turn, protocol, path,
+                        tunnel_id=tunnel, idempotency_key=key, client_key=client,
+                    )
+                )
             result = await _run_turn(
                 service, resources, request, turn,
                 tunnel_id=tunnel, idempotency_key=key, client_key=client,
@@ -306,19 +416,10 @@ def create_app(service: GatewayService, *, token: str | None = None, browser_slo
             return _error_response(exc, protocol)
 
         if protocol == "openai":
-            body = openai_response(result)
-            if turn.stream:
-                return EventSourceResponse(_stream(openai_stream_events(body, result), request))
-            return JSONResponse(body)
+            return JSONResponse(openai_response(result))
         if protocol == "anthropic":
-            body = anthropic_response(result)
-            if turn.stream:
-                return EventSourceResponse(_stream(anthropic_stream_events(body, result), request))
-            return JSONResponse(body)
-        body = gemini_response(result)
-        if ":streamGenerateContent" in path:
-            return EventSourceResponse(_stream([(None, body)], request))
-        return JSONResponse(body)
+            return JSONResponse(anthropic_response(result))
+        return JSONResponse(gemini_response(result))
 
     return Starlette(routes=[
         Route("/health", health, methods=["GET", "HEAD"]),

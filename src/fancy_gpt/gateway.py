@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -31,6 +32,7 @@ from .gateway_capabilities import (
     enforce_modalities,
     resolve_capability,
 )
+from .gateway_streaming import DeltaStreamError, TextDeltaStream
 from .gateway_state import (
     ConversationLocks,
     GatewayStateStore,
@@ -62,6 +64,14 @@ _SECRET_PATTERNS = (
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{8,}=*"), "Bearer [redacted]"),
     (re.compile(r"(?i)\b(x-api-key|authorization|cookie|set-cookie|session[_-]?token|access[_-]?token|refresh[_-]?token)(\s*[:=]\s*)\S+"), r"\1\2[redacted]"),
 )
+
+
+def _accepts_progress(provider: Any) -> bool:
+    """Whether a provider can report partial output while a turn runs."""
+    try:
+        return "on_progress" in inspect.signature(provider.execute).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _scrub(message: str) -> str:
@@ -149,6 +159,10 @@ class GatewayResult(BaseModel):
     created_at: str
     input_units: int
     output_units: int
+    #: True when snapshot-to-delta conversion had to stop mid-turn. The
+    #: final text here is still authoritative, but a client that accumulated
+    #: deltas holds something that contradicts it.
+    stream_failed: bool = False
 
 
 class ContextLedger(BaseModel):
@@ -551,6 +565,7 @@ class GatewayService:
         self._client_active: dict[str, int] = {}
         self._cancel_guard = threading.Lock()
         self._cancel_tokens: dict[str, CancelToken] = {}
+        self._delta_streams: dict[str, TextDeltaStream] = {}
 
     # -- routing -------------------------------------------------------------
 
@@ -666,6 +681,8 @@ class GatewayService:
         idempotency_key: str | None = None,
         cancel_token: CancelToken | None = None,
         client_key: str = "default",
+        on_start: Callable[[str], None] | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> GatewayResult:
         site = self.resolve_site(turn.model)
         self._validate(turn)
@@ -732,6 +749,8 @@ class GatewayService:
 
         try:
             with self._cancellation(response_id, token), self._admit(client_key):
+                if on_start is not None:
+                    on_start(response_id)
                 return self._run_turn(
                     turn=turn,
                     site=site,
@@ -742,6 +761,7 @@ class GatewayService:
                     token=token,
                     tunnel_id=tunnel_id,
                     key=key,
+                    on_delta=on_delta,
                 )
         except GatewayCancelled as exc:
             self.metrics.record("cancelled")
@@ -770,6 +790,7 @@ class GatewayService:
         token: CancelToken,
         tunnel_id: str | None,
         key: str | None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> GatewayResult:
         token.raise_if_cancelled()
         try:
@@ -801,6 +822,24 @@ class GatewayService:
         conversation_id = (binding.conversation_id if binding else None) or (
             previous.conversation_id if previous else None
         )
+        # The browser reports its whole reply so far, repeatedly. The delta
+        # stream turns that into append-only text for the client.
+        deltas = TextDeltaStream()
+        self._delta_streams[response_id] = deltas
+
+        def progress_sink(snapshot: str) -> None:
+            if on_delta is None:
+                return
+            try:
+                delta = deltas.push(snapshot)
+            except DeltaStreamError:
+                # Already-sent text cannot be retracted, so the stream stops
+                # rather than contradicting the client. The turn itself carries
+                # on; the caller still receives the authoritative final result.
+                return
+            if delta:
+                on_delta(delta)
+
         request = ModelRequest(
             request_id=response_id,
             stage="agent",
@@ -838,7 +877,12 @@ class GatewayService:
                     # on its own connection. Stopping generation makes the
                     # content script finish, which unblocks execute() normally.
                     with self._cancel_watcher(provider, token):
-                        raw = provider.execute(request)
+                        # Progress is only requested when the caller is actually
+                        # streaming, and only from a provider that reports it.
+                        if on_delta is not None and _accepts_progress(provider):
+                            raw = provider.execute(request, on_progress=progress_sink)
+                        else:
+                            raw = provider.execute(request)
                     self.state.transition(record, TurnState.OBSERVING, "awaiting provider completion")
                     # Bind the provider conversation while the lock is still
                     # held. If this waited until after release, a queued turn on
@@ -891,12 +935,22 @@ class GatewayService:
             self._fail(record, response_id, key, str(exc))
             raise
 
+        if on_delta is not None and text and not deltas.failed:
+            try:
+                remainder = deltas.finish(text)
+            except DeltaStreamError:
+                remainder = ""
+            if remainder:
+                on_delta(remainder)
+        self._delta_streams.pop(response_id, None)
+
         result = GatewayResult(
             response_id=response_id,
             session_id=session_id,
             model=turn.model,
             site=site,
             text=text,
+            stream_failed=deltas.failed,
             tool_calls=calls,
             conversation_id=raw.conversation_id,
             created_at=_now(),
@@ -1081,6 +1135,185 @@ def gemini_response(result: GatewayResult) -> dict[str, Any]:
         parts.append({"text": result.text})
     parts.extend({"functionCall": {"id": call.id, "name": call.name, "args": call.arguments}} for call in result.tool_calls)
     return {"candidates": [{"content": {"role": "model", "parts": parts}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": result.input_units, "candidatesTokenCount": result.output_units, "totalTokenCount": result.input_units + result.output_units}, "responseId": result.response_id, "modelVersion": result.model}
+
+
+class OpenAIStream:
+    """Responses API events, emitted as the answer actually arrives.
+
+    The message output item is not opened until the first delta, because a turn
+    that ends in a tool call has no message item at all.
+    """
+
+    def __init__(self, response_id: str, model: str) -> None:
+        self.response_id = response_id
+        self.model = model
+        self.item_id = f"msg_{uuid.uuid4().hex[:16]}"
+        self.sequence = 0
+        self.text = ""
+        self.opened = False
+
+    def _event(self, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        payload["sequence_number"] = self.sequence
+        self.sequence += 1
+        return payload["type"], payload
+
+    def _skeleton(self, status: str) -> dict[str, Any]:
+        return {
+            "id": self.response_id, "object": "response",
+            "created_at": int(datetime.now().timestamp()), "status": status,
+            "model": self.model, "output": [],
+        }
+
+    def open(self) -> list[tuple[str, dict[str, Any]]]:
+        return [
+            self._event({"type": "response.created", "response": self._skeleton("in_progress")}),
+            self._event({"type": "response.in_progress", "response": self._skeleton("in_progress")}),
+        ]
+
+    def delta(self, text: str) -> list[tuple[str, dict[str, Any]]]:
+        events: list[tuple[str, dict[str, Any]]] = []
+        if not self.opened:
+            self.opened = True
+            item = {"id": self.item_id, "type": "message", "role": "assistant",
+                    "status": "in_progress", "content": []}
+            events.append(self._event({"type": "response.output_item.added", "output_index": 0, "item": item}))
+            events.append(self._event({
+                "type": "response.content_part.added", "item_id": self.item_id,
+                "output_index": 0, "content_index": 0,
+                "part": {"type": "output_text", "text": "", "annotations": []},
+            }))
+        self.text += text
+        events.append(self._event({
+            "type": "response.output_text.delta", "item_id": self.item_id,
+            "output_index": 0, "content_index": 0, "delta": text,
+        }))
+        return events
+
+    def close(self, body: dict[str, Any], result: GatewayResult) -> list[tuple[str, dict[str, Any]]]:
+        events: list[tuple[str, dict[str, Any]]] = []
+        if self.opened:
+            part = {"type": "output_text", "text": self.text, "annotations": []}
+            events.append(self._event({
+                "type": "response.output_text.done", "item_id": self.item_id,
+                "output_index": 0, "content_index": 0, "text": self.text,
+            }))
+            events.append(self._event({
+                "type": "response.content_part.done", "item_id": self.item_id,
+                "output_index": 0, "content_index": 0, "part": part,
+            }))
+            events.append(self._event({
+                "type": "response.output_item.done", "output_index": 0,
+                "item": {"id": self.item_id, "type": "message", "role": "assistant",
+                         "status": "completed", "content": [part]},
+            }))
+        for index, item in enumerate(body["output"]):
+            if item["type"] != "function_call":
+                continue
+            output_index = index + (1 if self.opened else 0)
+            events.append(self._event({
+                "type": "response.output_item.added", "output_index": output_index,
+                "item": item | {"status": "in_progress", "arguments": ""},
+            }))
+            events.append(self._event({
+                "type": "response.function_call_arguments.delta", "item_id": item["id"],
+                "output_index": output_index, "delta": item["arguments"],
+            }))
+            events.append(self._event({
+                "type": "response.function_call_arguments.done", "item_id": item["id"],
+                "output_index": output_index, "arguments": item["arguments"],
+            }))
+            events.append(self._event({"type": "response.output_item.done", "output_index": output_index, "item": item}))
+        events.append(self._event({"type": "response.completed", "response": body}))
+        return events
+
+    def fail(self, message: str) -> list[tuple[str, dict[str, Any]]]:
+        """Tell the client the stream desynchronized, rather than contradicting it."""
+        return [
+            self._event({"type": "error", "code": "stream_desynchronized", "message": _scrub(message), "param": None}),
+            self._event({"type": "response.failed", "response": self._skeleton("failed")}),
+        ]
+
+
+class AnthropicStream:
+    """Messages API events with ordered content blocks."""
+
+    def __init__(self, response_id: str, model: str) -> None:
+        self.response_id = response_id
+        self.model = model
+        self.opened = False
+        self.index = 0
+
+    def open(self, result_id: str | None = None) -> list[tuple[str, dict[str, Any]]]:
+        message = {
+            "id": (result_id or self.response_id).replace("resp_", "msg_"), "type": "message",
+            "role": "assistant", "model": self.model, "content": [],
+            "stop_reason": None, "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }
+        return [("message_start", {"type": "message_start", "message": message})]
+
+    def delta(self, text: str) -> list[tuple[str, dict[str, Any]]]:
+        events: list[tuple[str, dict[str, Any]]] = []
+        if not self.opened:
+            self.opened = True
+            events.append(("content_block_start", {
+                "type": "content_block_start", "index": self.index,
+                "content_block": {"type": "text", "text": ""},
+            }))
+        events.append(("content_block_delta", {
+            "type": "content_block_delta", "index": self.index,
+            "delta": {"type": "text_delta", "text": text},
+        }))
+        return events
+
+    def close(self, body: dict[str, Any], result: GatewayResult) -> list[tuple[str, dict[str, Any]]]:
+        events: list[tuple[str, dict[str, Any]]] = []
+        if self.opened:
+            events.append(("content_block_stop", {"type": "content_block_stop", "index": self.index}))
+            self.index += 1
+        for block in body["content"]:
+            if block["type"] != "tool_use":
+                continue
+            events.append(("content_block_start", {
+                "type": "content_block_start", "index": self.index,
+                "content_block": {"type": "tool_use", "id": block["id"], "name": block["name"], "input": {}},
+            }))
+            events.append(("content_block_delta", {
+                "type": "content_block_delta", "index": self.index,
+                "delta": {"type": "input_json_delta", "partial_json": json.dumps(block["input"], separators=(",", ":"))},
+            }))
+            events.append(("content_block_stop", {"type": "content_block_stop", "index": self.index}))
+            self.index += 1
+        events.append(("message_delta", {
+            "type": "message_delta",
+            "delta": {"stop_reason": body["stop_reason"], "stop_sequence": None},
+            "usage": {"input_tokens": result.input_units, "output_tokens": result.output_units},
+        }))
+        events.append(("message_stop", {"type": "message_stop"}))
+        return events
+
+    def fail(self, message: str) -> list[tuple[str, dict[str, Any]]]:
+        return [("error", {"type": "error", "error": {"type": "api_error", "message": _scrub(message)}})]
+
+
+class GeminiStream:
+    """streamGenerateContent chunks."""
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    def open(self) -> list[tuple[str | None, dict[str, Any]]]:
+        return []
+
+    def delta(self, text: str) -> list[tuple[str | None, dict[str, Any]]]:
+        return [(None, {"candidates": [{"content": {"role": "model", "parts": [{"text": text}]}, "index": 0}],
+                        "modelVersion": self.model})]
+
+    def close(self, body: dict[str, Any], result: GatewayResult) -> list[tuple[str | None, dict[str, Any]]]:
+        return [(None, body)]
+
+    def fail(self, message: str) -> list[tuple[str | None, dict[str, Any]]]:
+        return [(None, {"error": {"code": 500, "message": _scrub(message), "status": "INTERNAL"}})]
 
 
 GATEWAY_MODELS = ("chatgpt-web", "gemini-web", "claude-web")
