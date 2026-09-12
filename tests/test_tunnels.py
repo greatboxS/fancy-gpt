@@ -20,7 +20,12 @@ from fancy_gpt.tunnels import (
 def test_tunnel_catalog_has_expected_compositions() -> None:
     registry = TunnelRegistry()
     ids = {item.id for item in registry.all()}
-    assert len(ids) == 10
+    assert len(ids) == 13
+    # Every site the runtime knows must be reachable through a real tunnel,
+    # otherwise a site contract exists that nothing can actually select.
+    sites = {spec.site for spec in registry.all()}
+    assert sites == {"chatgpt", "gemini"}
+    assert {"chrome-gemini-ws-remote", "edge-gemini-ws-remote", "firefox-gemini-ws-remote"} <= ids
     assert {
         "chrome-extension-native-local",
         "edge-extension-native-local",
@@ -32,6 +37,9 @@ def test_tunnel_catalog_has_expected_compositions() -> None:
         "playwright-chromium-local",
         "playwright-firefox-local",
         "interactive-manual",
+        "chrome-gemini-ws-remote",
+        "edge-gemini-ws-remote",
+        "firefox-gemini-ws-remote",
     } == ids
 
 

@@ -22,8 +22,14 @@ def test_extension_exports_chromium_and_firefox_manifests(tmp_path: Path) -> Non
     assert edge_manifest == chrome_manifest
     assert firefox_manifest["background"]["scripts"] == ["bridge_transport.js", "background.js"]
     assert firefox_manifest["browser_specific_settings"]["gecko"]["id"] == "fancy-gpt@local"
-    assert chrome_manifest["content_scripts"][0]["js"] == ["site_chatgpt.js", "content.js"]
-    assert firefox_manifest["content_scripts"][0]["js"] == ["site_chatgpt.js", "content.js"]
+    scripts = {entry["matches"][0]: entry["js"] for entry in chrome_manifest["content_scripts"]}
+    assert scripts["https://chatgpt.com/*"] == ["site_kit.js", "site_chatgpt.js", "content.js"]
+    assert scripts["https://gemini.google.com/*"] == ["site_kit.js", "site_gemini.js", "content.js"]
+    # The kit must load before an adapter that calls into it.
+    for js in scripts.values():
+        assert js.index("site_kit.js") < min(js.index(name) for name in js if name.startswith("site_") and name != "site_kit.js")
+    firefox_scripts = {entry["matches"][0]: entry["js"] for entry in firefox_manifest["content_scripts"]}
+    assert firefox_scripts == scripts
     for directory in (chrome, edge, firefox):
         assert (directory / "background.js").is_file()
         assert (directory / "bridge_transport.js").is_file()
@@ -141,13 +147,13 @@ def test_adapter_drift_can_be_overridden_deliberately(monkeypatch) -> None:
 
 
 def test_composer_writes_through_the_editor_input_path(tmp_path: Path) -> None:
-    # ChatGPT's composer is a rich-text editor that owns its document model.
+    # A chat composer is a rich-text editor that owns its document model.
     # Assigning textContent mutates the DOM behind its back, so the editor never
-    # learns the field is non-empty and the send control never appears. The
-    # adapter must go through insertText, which is the path a keystroke uses.
-    site = (export_extension("edge", tmp_path / "edge-composer") / "site_chatgpt.js").read_text(encoding="utf-8")
+    # learns the field is non-empty and the send control never appears. This
+    # lives in the shared kit so no new adapter has to rediscover it.
+    kit = (export_extension("edge", tmp_path / "edge-composer") / "site_kit.js").read_text(encoding="utf-8")
 
-    insert = site.index('execCommand("insertText"')
-    fallback = site.index("composer.textContent = prompt")
+    insert = kit.index('execCommand("insertText"')
+    fallback = kit.index("composer.textContent = prompt")
     assert insert < fallback, "the direct write must only be a fallback"
-    assert "selectAll(composer)" in site, "a retry must replace the text, not append to it"
+    assert "selectAll(composer)" in kit, "a retry must replace the text, not append to it"

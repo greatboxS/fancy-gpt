@@ -14,7 +14,7 @@ def test_tunnel_components_command_reports_independent_layers() -> None:
     result = runner.invoke(app, ["tunnels", "components", "--json"])
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
-    assert {item["id"] for item in payload["sites"]} == {"chatgpt"}
+    assert {item["id"] for item in payload["sites"]} == {"chatgpt", "gemini"}
     assert {item["id"] for item in payload["runtimes"]} >= {"extension", "playwright", "cdp", "interactive"}
     assert {item["id"] for item in payload["transports"]} >= {"native-messaging", "websocket", "local-process", "cdp"}
 

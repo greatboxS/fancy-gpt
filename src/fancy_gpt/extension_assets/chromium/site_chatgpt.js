@@ -1,5 +1,10 @@
 /* ChatGPT site adapter. Owns every ChatGPT DOM assumption. */
 (() => {
+  // Everything that is not a ChatGPT DOM assumption comes from the shared kit,
+  // so a second adapter starts from what already works rather than repeating it.
+  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson} =
+    globalThis.FancyGPTSiteKit;
+
   const SELECTORS = {
     composer: ["#prompt-textarea", "textarea", '[contenteditable="true"]'],
     send: ['button[data-testid="send-button"]', 'button[aria-label*="Send"]'],
@@ -8,22 +13,6 @@
     assistant: ['[data-message-author-role="assistant"]', '[data-testid="conversation-turn-assistant"]']
   };
 
-  function firstVisible(selectors, root = document) {
-    for (const selector of selectors) {
-      const values = [...root.querySelectorAll(selector)].filter(el => {
-        const rect = el.getBoundingClientRect();
-        const style = getComputedStyle(el);
-        return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-      });
-      if (values.length === 1) return values[0];
-    }
-    return null;
-  }
-
-  // The send control must be the composer's own. Searching the whole document
-  // also finds unrelated buttons whose label merely contains "Send", and the
-  // uniqueness rule then rejects every candidate -- reporting "not found" for
-  // what is really "found too many".
   function composerRoot(composer) {
     return composer?.closest("form") ?? composer?.parentElement ?? document;
   }
@@ -46,16 +35,6 @@
     });
   }
 
-  async function waitFor(getter, timeoutMs, message) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const value = getter();
-      if (value) return value;
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-    throw new Error(message);
-  }
-
   function turnIds() {
     return [...document.querySelectorAll(SELECTORS.turns)]
       .map(el => el.getAttribute("data-turn-id"))
@@ -76,84 +55,9 @@
     return null;
   }
 
-  function selectAll(element) {
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  }
-
-  function setComposer(composer, prompt) {
-    composer.focus();
-    if (composer.tagName.toLowerCase() === "textarea") {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
-      descriptor?.set?.call(composer, prompt);
-      composer.dispatchEvent(new Event("input", {bubbles: true}));
-      composer.dispatchEvent(new Event("change", {bubbles: true}));
-      return;
-    }
-    // The composer is a rich-text editor that owns its own document model.
-    // Assigning textContent mutates the DOM behind its back, so the editor
-    // either reverts the change or never learns the field is non-empty -- and
-    // the send control, which only appears for a non-empty composer, never
-    // shows. insertText goes through the same input path a real keystroke uses,
-    // so the editor updates its model itself. Selecting first replaces any
-    // existing text rather than appending to it on a retry.
-    selectAll(composer);
-    const inserted = document.execCommand("insertText", false, prompt);
-    if (inserted && (composer.textContent ?? "").includes(prompt.slice(0, 32))) return;
-
-    // Older or differently-built editors may ignore execCommand; fall back to
-    // the direct write, which is still better than sending nothing.
-    composer.textContent = prompt;
-    composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
-  }
-
-  function findButtonByText(pattern, root = document) {
-    const buttons = [...root.querySelectorAll("button")];
-    return buttons.find(btn => {
-      const rect = btn.getBoundingClientRect();
-      const style = getComputedStyle(btn);
-      if (!(rect.width > 0 && rect.height > 0) || style.visibility === "hidden" || style.display === "none") return false;
-      return pattern.test((btn.innerText || "").trim());
-    }) ?? null;
-  }
-
   function currentConversationId() {
     const match = location.pathname.match(/^\/c\/([a-zA-Z0-9-]+)/);
     return match ? match[1] : null;
-  }
-
-  const BLOCK_LABEL = /^[ \t]*fancygpt[:\s]+([A-Za-z0-9._-]+)[ \t]*$/i;
-
-  // The JSON document ends where the first verbatim code block begins. Braces
-  // inside those blocks belong to source code and must not be counted.
-  function jsonSegment(text) {
-    const lines = text.split("\n");
-    let stop = lines.length;
-    for (let i = 0; i < lines.length; ++i) {
-      if (BLOCK_LABEL.test(lines[i])) { stop = i; break; }
-    }
-    const head = lines.slice(0, stop).join("\n");
-    const start = head.search(/[{[]/);
-    return start === -1 ? null : head.slice(start);
-  }
-
-  function looksLikeCompleteJson(text) {
-    const segment = jsonSegment(text);
-    // Every stage answers with JSON, so text without any is a partial capture,
-    // not a finished non-JSON reply.
-    if (segment == null) return false;
-    const opens = (segment.match(/[{[]/g) || []).length;
-    const closes = (segment.match(/[}\]]/g) || []).length;
-    if (opens !== closes) return false;
-    // A reply that names verbatim blocks is only complete once they have arrived.
-    const refs = segment.match(/"(?:old_ref|new_ref|content_ref)"\s*:\s*"([^"]+)"/g) || [];
-    return refs.every(ref => {
-      const id = ref.match(/:\s*"([^"]+)"/)[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      return new RegExp("^[ \\t]*fancygpt[:\\s]+" + id + "[ \\t]*$", "im").test(text);
-    });
   }
 
   // Stamped at export time. Reporting it back is the only way to tell a reloaded

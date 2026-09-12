@@ -39,7 +39,8 @@ async function taskWindowFor(url) {
 
 async function getConfig() {
   const value = await ext.storage.local.get(DEFAULTS);
-  return {...DEFAULTS, ...value};
+  const config = {...DEFAULTS, ...value};
+  return {...config, tunnelIds: tunnelIdsFor(config)};
 }
 
 async function sendToContent(tabId, message, retries = 50) {
@@ -76,30 +77,67 @@ async function sendToContentOrTabClose(tabId, message) {
 
 const CONVERSATION_ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
 
-function taskUrlFor(conversation) {
+// Where each site is opened for each conversation mode. The runtime layer needs
+// its own table because the site adapters live in the content script and are not
+// reachable from here. Adding a site means adding an entry, its adapter, and a
+// manifest match -- no change to the job or tab machinery below.
+const SITES = {
+  chatgpt: {
+    hosts: ["chatgpt.com"],
+    conversation: id => `https://chatgpt.com/c/${id}`,
+    // Both modes are stated explicitly rather than letting the bare origin
+    // inherit whichever mode the UI was last left in.
+    persistent: "https://chatgpt.com/?temporary-chat=false",
+    fresh: "https://chatgpt.com/?temporary-chat=true",
+    tunnelSuffix: "extension-ws-remote",
+  },
+  gemini: {
+    hosts: ["gemini.google.com"],
+    conversation: id => `https://gemini.google.com/app/${id}`,
+    // Gemini has no not-saved chat that still yields a URL, so a new
+    // conversation is the same page in both modes.
+    persistent: "https://gemini.google.com/app",
+    fresh: "https://gemini.google.com/app",
+    tunnelSuffix: "gemini-ws-remote",
+  },
+};
+
+// One browser can serve every site it has an adapter for, so the worker
+// registers a tunnel id per site rather than forcing a second browser profile.
+function tunnelIdsFor(config) {
+  const ids = new Set([config.tunnelId]);
+  for (const policy of Object.values(SITES)) {
+    if (policy.tunnelSuffix) ids.add(`${config.browserName}-${policy.tunnelSuffix}`);
+  }
+  return [...ids].filter(Boolean);
+}
+
+function taskUrlFor(site, conversation) {
+  const policy = SITES[site];
+  if (!policy) throw new Error(`unsupported site: ${site}`);
   const mode = conversation?.mode;
   if (mode === "continue" && CONVERSATION_ID_PATTERN.test(String(conversation.conversation_id ?? ""))) {
-    return `https://chatgpt.com/c/${conversation.conversation_id}`;
+    return policy.conversation(conversation.conversation_id);
   }
-  // Both modes are stated explicitly rather than letting the bare origin inherit
-  // whichever mode the UI was last left in.
-  if (mode === "persistent") return "https://chatgpt.com/?temporary-chat=false";
-  return "https://chatgpt.com/?temporary-chat=true";
+  return mode === "persistent" ? policy.persistent : policy.fresh;
 }
 
 async function executeJob(job) {
   let tab = null;
   try {
     if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
-    if (job.site !== "chatgpt") throw new Error(`unsupported site: ${job.site}`);
-    const taskUrl = taskUrlFor(job.conversation);
+    // Which sites this build can drive is decided by which adapters registered
+    // themselves, not by a name hardcoded in the runtime layer.
+    const site = String(job.site ?? "chatgpt");
+    if (!SITES[site]) throw new Error(`unsupported site: ${site}`);
+    const taskUrl = taskUrlFor(site, job.conversation);
     const config = await getConfig();
     tab = config.separateTaskWindow
       ? await taskWindowFor(taskUrl)
       : await ext.tabs.create({url: taskUrl, active: false});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
     if (job.operation === "site.health") {
-      const health = await sendToContentOrTabClose(tab.id, {type: "fancy_site_health", site: job.site});
+      const health = await sendToContentOrTabClose(tab.id, {type: "fancy_site_health", site});
       const payload = health ?? {ok: false, reason: "site-health-no-response"};
       globalThis.FancyGPTTransport.send({
         type: "job_result", job_id: job.job_id, text: JSON.stringify(payload),
@@ -109,7 +147,7 @@ async function executeJob(job) {
     }
     const result = await sendToContentOrTabClose(tab.id, {
       type: "fancy_execute_turn",
-      site: job.site,
+      site,
       prompt: job.prompt,
       jobId: job.job_id,
       timeoutMs: Math.max(1000, Math.floor((job.timeout_s ?? 300) * 1000))

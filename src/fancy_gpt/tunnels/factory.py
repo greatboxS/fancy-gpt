@@ -73,7 +73,7 @@ class TunnelDriverFactory:
         if endpoint is None:
             raise RuntimeError(f"extension tunnel {spec.id} requires a bridge endpoint")
         token = load_or_create_token(self.token_file(spec))
-        return BridgeBrowserDriver(endpoint, token, spec.id, job_timeout_s=self.timeout_s)
+        return BridgeBrowserDriver(endpoint, token, spec.id, site=spec.site, job_timeout_s=self.timeout_s)
 
     def _playwright(self, spec: TunnelSpec) -> BrowserDriver:
         browser_type = "firefox" if spec.browser == "firefox" else "chromium"

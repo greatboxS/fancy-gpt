@@ -24,7 +24,10 @@ expected_extension = {
 assert expected_extension <= ids
 assert {item.id for item in RuntimeRegistry().all()} >= {"extension", "playwright", "cdp", "interactive"}
 assert {item.id for item in TransportRegistry().all()} >= {"native-messaging", "websocket", "local-process", "cdp", "human"}
-assert {item.id for item in SiteRegistry().all()} == {"chatgpt"}
+sites = {item.id for item in SiteRegistry().all()}
+assert sites == {"chatgpt", "gemini"}
+# Every site must be selectable through a tunnel, or its contract can rot unnoticed.
+assert {spec.site for spec in specs} == sites
 
 layer_failures = {}
 for spec in specs:
@@ -46,12 +49,23 @@ except ValueError:
 else:
     raise AssertionError("invalid Playwright + Native Messaging composition was accepted")
 
-site_js = (root / "extension/common/site_chatgpt.js").read_text(encoding="utf-8")
 runtime_js = (root / "extension/common/background.js").read_text(encoding="utf-8")
 transport_js = (root / "extension/common/bridge_transport.js").read_text(encoding="utf-8")
-assert "prompt-textarea" in site_js and "data-turn-id" in site_js
+kit_js = (root / "extension/common/site_kit.js").read_text(encoding="utf-8")
+
+# Each site owns its own DOM assumptions; the layers below must stay ignorant of them.
+site_sources = {
+    site: (root / f"extension/common/site_{site}.js").read_text(encoding="utf-8") for site in sorted(sites)
+}
+assert "prompt-textarea" in site_sources["chatgpt"] and "data-turn-id" in site_sources["chatgpt"]
+assert "gemini.google.com" in site_sources["gemini"]
 assert "prompt-textarea" not in runtime_js
-assert "chatgpt.com" not in transport_js
+assert "prompt-textarea" not in kit_js and "gemini.google.com" not in kit_js
+for site, source in site_sources.items():
+    other = {name for name in sites if name != site}
+    assert not any(f"FancyGPTSites.{name}" in source for name in other), f"{site} adapter references another site"
+    assert "FancyGPTSiteKit" in source, f"{site} adapter must reuse the shared kit"
+assert "chatgpt.com" not in transport_js and "gemini.google.com" not in transport_js
 assert "WebSocket" in transport_js and "connectNative" in transport_js
 
 fake_executable = root / "fancy-gpt-native-host"

@@ -56,7 +56,7 @@
           protocol: "fancy-browser/1",
           role: "browser",
           token: config.token,
-          tunnel_ids: [config.tunnelId],
+          tunnel_ids: config.tunnelIds ?? [config.tunnelId],
           browser: config.browserName
         }));
       };

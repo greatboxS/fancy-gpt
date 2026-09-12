@@ -164,6 +164,63 @@ tunnels:
       requires_browser_install: true
       browser_families: [firefox]
 
+  - id: chrome-gemini-ws-remote
+    description: Chrome on a workstation driving Gemini web, connected to a remote FancyGPT host over WebSocket.
+    site: gemini
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: chrome
+    priority: 40
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, websocket, remote, gemini, existing-session]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [chrome]
+  - id: edge-gemini-ws-remote
+    description: Edge on a workstation driving Gemini web, connected to a remote FancyGPT host over WebSocket.
+    site: gemini
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: edge
+    priority: 41
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, websocket, remote, gemini, existing-session]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [edge]
+  - id: firefox-gemini-ws-remote
+    description: Firefox on a workstation driving Gemini web, connected to a remote FancyGPT host over WebSocket.
+    site: gemini
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: firefox
+    priority: 42
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, websocket, remote, gemini, existing-session]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [firefox]
   - id: interactive-manual
     description: Human-in-the-loop prompt handoff through any browser. Last-resort compatibility tunnel.
     site: chatgpt

@@ -38,10 +38,20 @@ class BridgeBrowserDriver:
 
     name = "extension-bridge"
 
-    def __init__(self, endpoint: str, token: str, tunnel_id: str, *, job_timeout_s: float = 300.0) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        token: str,
+        tunnel_id: str,
+        *,
+        site: str = "chatgpt",
+        job_timeout_s: float = 300.0,
+    ) -> None:
         self.endpoint = endpoint
         self.token = token
         self.tunnel_id = tunnel_id
+        # Which site adapter in the extension should handle this tunnel's jobs.
+        self.site = site
         self.job_timeout_s = job_timeout_s
         self._connection: ClientConnection | None = None
         self._turns: dict[str, _PendingTurn] = {}
@@ -84,7 +94,7 @@ class BridgeBrowserDriver:
             "type": "job",
             "job_id": job_id,
             "tunnel_id": self.tunnel_id,
-            "site": "chatgpt",
+            "site": self.site,
             "operation": "site.health",
             "request_id": job_id,
             "stage": "health",
@@ -147,7 +157,7 @@ class BridgeBrowserDriver:
             "type": "job",
             "job_id": turn.turn_id,
             "tunnel_id": self.tunnel_id,
-            "site": "chatgpt",
+            "site": self.site,
             "operation": "model.turn",
             "request_id": turn.request_id,
             "stage": turn.stage,

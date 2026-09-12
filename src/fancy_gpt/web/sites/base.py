@@ -21,7 +21,8 @@ class SiteRegistry:
     def __init__(self, contracts: list[SiteContract] | None = None) -> None:
         if contracts is None:
             from .chatgpt import CHATGPT_SITE
-            contracts = [CHATGPT_SITE]
+            from .gemini import GEMINI_SITE
+            contracts = [CHATGPT_SITE, GEMINI_SITE]
         self._items = {item.id: item for item in contracts}
 
     def get(self, site_id: str) -> SiteContract:
