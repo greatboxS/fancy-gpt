@@ -37,10 +37,20 @@ def patch_defaults(text: str, browser: str) -> str:
     )
 
 
-def adapter_build_id(source: str) -> str:
+def adapter_source_names() -> list[str]:
+    sites = sorted(n for n in FILES if n.startswith("site_") and n != "site_kit.js")
+    return ["site_kit.js", "content.js", *sites]
+
+
+def adapter_build_id() -> str:
+    """Every script that shapes how a page is driven defines the build."""
     import hashlib
 
-    return hashlib.sha256(source.replace(PLACEHOLDER, "").encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha256()
+    for name in adapter_source_names():
+        digest.update(name.encode("utf-8"))
+        digest.update((COMMON / name).read_text(encoding="utf-8").replace(PLACEHOLDER, "").encode("utf-8"))
+    return digest.hexdigest()[:12]
 
 
 PLACEHOLDER = "__FANCYGPT_ADAPTER_BUILD__"
@@ -52,11 +62,11 @@ def expected_files(family: str, browser: str, stamp_build: bool) -> dict[str, by
         text = (COMMON / name).read_text(encoding="utf-8")
         if browser != "chrome" and name in {"background.js", "popup.html"}:
             text = patch_defaults(text, browser)
-        if name == "site_chatgpt.js" and stamp_build:
+        if name == "site_kit.js" and stamp_build:
             # A pre-built bundle is loaded straight into a browser, so it has to
             # carry a real build id; the packaged assets keep the placeholder
             # because `extension export` stamps them on the way out.
-            text = text.replace(PLACEHOLDER, adapter_build_id(text))
+            text = text.replace(PLACEHOLDER, adapter_build_id())
         result[name] = text.encode("utf-8")
     return result
 

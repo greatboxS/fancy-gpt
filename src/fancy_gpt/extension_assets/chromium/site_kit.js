@@ -123,7 +123,11 @@
     };
   }
 
+  // Stamped at export time; every adapter reports this one value.
+  const BUILD = "__FANCYGPT_ADAPTER_BUILD__";
+
   globalThis.FancyGPTSiteKit = {
+    build: BUILD,
     visible,
     firstVisible,
     waitFor,

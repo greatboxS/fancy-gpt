@@ -108,16 +108,24 @@ def test_export_stamps_a_build_id_the_adapter_can_report(tmp_path: Path) -> None
     from fancy_gpt.extension_utils import adapter_build_id
 
     exported = export_extension("edge", tmp_path / "edge")
-    adapter = (exported / "site_chatgpt.js").read_text(encoding="utf-8")
-    assert "__FANCYGPT_ADAPTER_BUILD__" not in adapter
-    assert f'ADAPTER_BUILD = "{adapter_build_id()}"' in adapter
+    kit = (exported / "site_kit.js").read_text(encoding="utf-8")
+    assert "__FANCYGPT_ADAPTER_BUILD__" not in kit
+    assert f'BUILD = "{adapter_build_id()}"' in kit
+    # One value, reported by every adapter, rather than a copy per site.
+    for name in ("site_chatgpt.js", "site_gemini.js"):
+        source = (exported / name).read_text(encoding="utf-8")
+        assert "__FANCYGPT_ADAPTER_BUILD__" not in source
+        assert "kit.build" in source
 
 
-def test_build_id_changes_when_the_adapter_changes() -> None:
-    from fancy_gpt.extension_utils import adapter_build_id
+def test_build_id_covers_every_adapter_source() -> None:
+    # Adding or changing any site adapter must produce a new id, or a browser
+    # left on the previous build would still claim to be current.
+    from fancy_gpt.extension_utils import _adapter_source_names
 
-    source = files("fancy_gpt").joinpath("extension_assets/chromium/site_chatgpt.js").read_text(encoding="utf-8")
-    assert adapter_build_id(source) != adapter_build_id(source + "\n// drift\n")
+    names = _adapter_source_names()
+    assert "site_kit.js" in names
+    assert {"site_chatgpt.js", "site_gemini.js"} <= set(names)
 
 
 def test_provider_refuses_a_browser_running_a_different_adapter_build() -> None:

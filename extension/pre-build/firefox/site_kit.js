@@ -123,7 +123,11 @@
     };
   }
 
+  // Stamped at export time; every adapter reports this one value.
+  const BUILD = "97f6a171679c";
+
   globalThis.FancyGPTSiteKit = {
+    build: BUILD,
     visible,
     firstVisible,
     waitFor,

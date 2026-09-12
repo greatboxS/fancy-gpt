@@ -52,13 +52,13 @@
 
   async function healthCheck() {
     if (location.hostname !== "gemini.google.com") {
-      return {ok: false, reason: "unexpected-host", build: globalThis.FANCYGPT_ADAPTER_BUILD ?? null};
+      return {ok: false, reason: "unexpected-host", build: kit.build};
     }
     const composer = firstVisible(SELECTORS.composer);
     return {
       ok: Boolean(composer),
       reason: composer ? "ready" : "composer-unavailable",
-      build: globalThis.FANCYGPT_ADAPTER_BUILD ?? null,
+      build: kit.build,
     };
   }
 

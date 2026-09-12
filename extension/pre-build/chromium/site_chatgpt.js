@@ -2,8 +2,8 @@
 (() => {
   // Everything that is not a ChatGPT DOM assumption comes from the shared kit,
   // so a second adapter starts from what already works rather than repeating it.
-  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson} =
-    globalThis.FancyGPTSiteKit;
+  const kit = globalThis.FancyGPTSiteKit;
+  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson} = kit;
 
   const SELECTORS = {
     composer: ["#prompt-textarea", "textarea", '[contenteditable="true"]'],
@@ -60,18 +60,13 @@
     return match ? match[1] : null;
   }
 
-  // Stamped at export time. Reporting it back is the only way to tell a reloaded
-  // extension from one that merely looks reloaded, which matters most when the
-  // browser lives on a different machine than the runtime.
-  const ADAPTER_BUILD = "8211fc3a2f90";
-
   async function healthCheck() {
-    if (location.hostname !== "chatgpt.com") return {ok: false, reason: "unexpected-host", build: ADAPTER_BUILD};
+    if (location.hostname !== "chatgpt.com") return {ok: false, reason: "unexpected-host", build: kit.build};
     const composer = firstVisible(SELECTORS.composer);
     return {
       ok: Boolean(composer),
       reason: composer ? "ready" : "composer-unavailable",
-      build: ADAPTER_BUILD,
+      build: kit.build,
     };
   }
 
