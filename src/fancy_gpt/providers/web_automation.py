@@ -35,6 +35,9 @@ class ChatGPTWebAutomationProvider:
             self.driver.start()
             try:
                 self.driver.health_check()
+                site_health = getattr(self.driver, "site_health", None)
+                if callable(site_health):
+                    site_health(timeout_s=min(20.0, self.timeout_s))
             except Exception:
                 self.driver.stop()
                 raise
@@ -53,7 +56,21 @@ class ChatGPTWebAutomationProvider:
                 f"compiled prompt has {len(request.prompt)} characters; "
                 f"configured browser limit is {self.max_prompt_chars}"
             )
-        turn = self.driver.begin_turn(request_id=request.request_id, stage=request.stage)
+        conversation = {
+            "mode": request.metadata.get("conversation_strategy", "fresh"),
+            "binding": request.metadata.get("conversation_binding"),
+        }
+        begin_managed = getattr(self.driver, "begin_managed_turn", None)
+        if callable(begin_managed):
+            turn = begin_managed(
+                request_id=request.request_id,
+                stage=request.stage,
+                conversation=conversation,
+            )
+        else:
+            if conversation["mode"] != "fresh":
+                raise RuntimeError(f"browser driver {self.driver.name} does not support conversation strategy {conversation['mode']}")
+            turn = self.driver.begin_turn(request_id=request.request_id, stage=request.stage)
         try:
             self.driver.submit(turn, request.prompt)
             response = self.driver.wait_for_response(turn, timeout_s=self.timeout_s)
@@ -65,6 +82,7 @@ class ChatGPTWebAutomationProvider:
                 provider=self.name,
                 raw_text=response.text,
                 response_identity=response.response_identity,
+                conversation_binding=response.conversation_binding,
             )
         finally:
             self.driver.close_turn(turn)

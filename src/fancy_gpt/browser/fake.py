@@ -54,6 +54,11 @@ class FakeBrowserDriver:
         self.events.append(("health", "", ""))
 
     def begin_turn(self, *, request_id: str, stage: str) -> BrowserTurn:
+        return self.begin_managed_turn(
+            request_id=request_id, stage=stage, conversation={"mode": "fresh", "binding": None}
+        )
+
+    def begin_managed_turn(self, *, request_id: str, stage: str, conversation: dict[str, str | None]) -> BrowserTurn:
         self.health_check()
         if len(self._active) >= self.max_concurrent_turns:
             raise BrowserCapacityError("browser turn capacity exhausted")
@@ -65,6 +70,9 @@ class FakeBrowserDriver:
         )
         self._active[turn.turn_id] = turn
         self.events.append(("begin", request_id, stage))
+        mode = str(conversation.get("mode") or "fresh")
+        binding = str(conversation.get("binding") or "")
+        self.events.append(("conversation", mode, binding))
         return turn
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:
@@ -92,6 +100,7 @@ class FakeBrowserDriver:
             turn_id=turn.turn_id,
             text=text,
             response_identity=f"fake-response-{self._turn_counter}",
+            conversation_binding=f"fake://conversation/{turn.request_id}",
         )
 
     def close_turn(self, turn: BrowserTurn) -> None:

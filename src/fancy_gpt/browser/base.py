@@ -22,6 +22,7 @@ class BrowserResponse:
     turn_id: str
     text: str
     response_identity: str
+    conversation_binding: str | None = None
 
 
 class BrowserDriver(Protocol):
