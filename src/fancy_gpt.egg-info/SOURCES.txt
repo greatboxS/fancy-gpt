@@ -128,6 +128,7 @@ tests/test_install_once.py
 tests/test_mcp_clients.py
 tests/test_mcp_contract_mocked.py
 tests/test_mcp_import.py
+tests/test_mcp_multi_site.py
 tests/test_models_contracts.py
 tests/test_multi_site.py
 tests/test_planner.py
