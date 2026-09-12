@@ -17,6 +17,7 @@ from fancy_gpt.bridge import (
     probe_bridge_workers,
 )
 from fancy_gpt.bridge.client import SiteHealthUnsupported
+from fancy_gpt.extension_utils import adapter_build_id
 from fancy_gpt.providers import ChatGPTWebAutomationProvider
 from fancy_gpt.runtime_paths import user_data_dir
 
@@ -199,6 +200,17 @@ class TunnelManager:
             driver.health_check()
             payload = site_health(timeout_s=min(20.0, self.timeout_s))
             health.metadata["site_health"] = payload
+            expected = adapter_build_id()
+            live = str(payload.get("build") or "")
+            health.metadata["adapter_build"] = {"live": live or None, "expected": expected}
+            if live and live != expected:
+                # The browser is often on another machine, so a reload that never
+                # happened looks exactly like one that did.
+                health.detail = (
+                    f"browser worker connected, but it is running adapter build {live} "
+                    f"while this install ships {expected}; re-export the extension and reload it"
+                )
+                return health
             health.detail = "browser worker connected and ChatGPT site adapter is ready"
             health.state = TunnelHealthState.HEALTHY
             return health

@@ -135,10 +135,19 @@
     });
   }
 
+  // Stamped at export time. Reporting it back is the only way to tell a reloaded
+  // extension from one that merely looks reloaded, which matters most when the
+  // browser lives on a different machine than the runtime.
+  const ADAPTER_BUILD = "__FANCYGPT_ADAPTER_BUILD__";
+
   async function healthCheck() {
-    if (location.hostname !== "chatgpt.com") return {ok: false, reason: "unexpected-host"};
+    if (location.hostname !== "chatgpt.com") return {ok: false, reason: "unexpected-host", build: ADAPTER_BUILD};
     const composer = firstVisible(SELECTORS.composer);
-    return {ok: Boolean(composer), reason: composer ? "ready" : "composer-unavailable"};
+    return {
+      ok: Boolean(composer),
+      reason: composer ? "ready" : "composer-unavailable",
+      build: ADAPTER_BUILD,
+    };
   }
 
   async function executeTurn(prompt, timeoutMs, onProgress) {

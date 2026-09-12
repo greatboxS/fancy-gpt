@@ -26,7 +26,7 @@ from .skills import export_packaged_skills, packaged_skills_root, validate_skill
 from .runtime_paths import default_browser_profile, user_data_dir, default_bridge_token_file, default_bridge_native_config
 from .bridge import BridgeServer, load_or_create_token
 from .bridge.native_manifest import install_manifest, native_host_manifest
-from .extension_utils import export_extension
+from .extension_utils import adapter_build_id, export_extension
 from .tunnels import TunnelManager, TunnelRegistry, TunnelLayerInspector
 from .web.runtime import RuntimeRegistry
 from .web.sites import SiteRegistry
@@ -821,6 +821,26 @@ def extension_export(
 ) -> None:
     target = export_extension(browser, destination)
     typer.echo(json.dumps({"ok": True, "browser": browser, "path": str(target)}, indent=2))
+
+
+@extension_app.command("export-all")
+def extension_export_all(
+    destination: Annotated[Path, typer.Argument()],
+) -> None:
+    """Export every browser bundle at once, each into its own subdirectory.
+
+    Exporting one browser at a time is how a stale bundle survives: the browser
+    you did not re-export keeps running yesterday's adapter.
+    """
+    exported = []
+    for browser in ("chrome", "edge", "firefox"):
+        target = export_extension(browser, destination / browser)
+        exported.append({"browser": browser, "path": str(target)})
+    typer.echo(json.dumps({
+        "ok": True,
+        "adapter_build": adapter_build_id(),
+        "exported": exported,
+    }, indent=2))
 
 
 @extension_app.command("native-config")

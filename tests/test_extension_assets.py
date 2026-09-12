@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from importlib.resources import files
+
 from fancy_gpt.extension_utils import export_extension
 
 
@@ -94,3 +96,19 @@ def test_extension_background_exposes_site_health_operation():
     assert '"site.health"' in source
     assert '"fancy_site_health"' in source
     assert "JSON.stringify(payload)" in source
+
+
+def test_export_stamps_a_build_id_the_adapter_can_report(tmp_path: Path) -> None:
+    from fancy_gpt.extension_utils import adapter_build_id
+
+    exported = export_extension("edge", tmp_path / "edge")
+    adapter = (exported / "site_chatgpt.js").read_text(encoding="utf-8")
+    assert "__FANCYGPT_ADAPTER_BUILD__" not in adapter
+    assert f'ADAPTER_BUILD = "{adapter_build_id()}"' in adapter
+
+
+def test_build_id_changes_when_the_adapter_changes() -> None:
+    from fancy_gpt.extension_utils import adapter_build_id
+
+    source = files("fancy_gpt").joinpath("extension_assets/chromium/site_chatgpt.js").read_text(encoding="utf-8")
+    assert adapter_build_id(source) != adapter_build_id(source + "\n// drift\n")
