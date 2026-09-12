@@ -111,7 +111,37 @@ Exit gate:
 
 ## Phase 6: Hardening and release
 
-Status: **planned**
+Status: **largely delivered**
+
+Delivered:
+
+- Turn lifecycle state machine with `uncertain-submit`, so a browser turn that may
+  already have landed is never blind re-submitted, across process restart.
+- Idempotency store with atomic claims, replay on same key plus payload, rejection
+  on payload mismatch.
+- Per-provider-conversation locking replacing the global gateway lock.
+- Ownership-scoped correlation: `previous_response_id` cross-session use is refused
+  and an ambiguous transcript is rejected rather than guessed.
+- Real compaction over protocol-semantic units with atomic tool pairs, reserved
+  budget, persisted provenance, and refusal when unsafe.
+- Capability negotiation as the protocol/model/site/adapter intersection, with
+  attachments rejected before submit instead of silently dropped.
+- Bounded backpressure with protocol-native 429/529/RESOURCE_EXHAUSTED errors,
+  credential scrubbing, constant-time token comparison, and `/health` + `/metrics`.
+- Compatibility matrix published in `docs/MODEL_GATEWAY.md`.
+
+Remaining:
+
+- Incremental SSE streaming with per-event cancellation checkpoints (mid-stream
+  disconnect is currently unproven).
+- Enforce or remove `max_tool_loop_iterations`, which is declared but not enforced.
+- Real retry lineage (`attempt`, `retry_of`) populated and surfaced in inspection.
+- Legal turn-state transitions enforced as a compare-and-set.
+- Browser tab-lease ownership and composer-edit detection.
+- End-to-end conformance runs driven by the real Codex, Claude Code and Gemini CLI
+  binaries rather than protocol-level tests.
+
+Status was: **planned**
 
 Deliverables:
 

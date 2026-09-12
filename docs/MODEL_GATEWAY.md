@@ -178,7 +178,144 @@ the next request.
 - Emit protocol conformance, context-decision, and provider-binding diagnostics.
 - Keep recorded fixtures scrubbed and deterministic.
 
+
+## Production hardening
+
+### Turn lifecycle
+
+Every turn is a durable `TurnRecord` under `gateway/state-turns/` moving through
+an explicit state machine:
+
+```
+queued -> submitting -> submitted -> observing -> completed
+                    \-> uncertain-submit        \-> failed / cancelled
+```
+
+`uncertain-submit` is the load-bearing state. If the provider call raises after
+the prompt was handed to the browser, the turn may or may not have landed in the
+chat, so it is parked rather than retried. A later turn on that session is
+refused with `UncertainSubmitError` instead of blind-submitting a duplicate, and
+that refusal survives a process restart. Failure handling never downgrades an
+uncertain turn to `failed`.
+
+### Session binding
+
+A logical gateway session binds to exactly one provider conversation, recorded as
+a `SessionBinding` under `gateway/bindings/`. The binding is attached *inside*
+the conversation lock, immediately after the provider answers, so a turn waiting
+on the same session cannot observe an unbound session and open a second chat.
+Rebinding happens only for a recorded reason: no binding, binding untrusted,
+site changed, or context cannot continue safely.
+
+If the provider answers on a conversation the session is not bound to, that is
+treated as a correlation failure: the session is rebound as untrusted rather than
+silently adopting the new chat.
+
+### Correlation is ownership-scoped
+
+A response id is a bearer reference, so continuation proves ownership:
+
+| Input | Rule |
+|---|---|
+| `previous_response_id` | Must belong to the declaring session, else `403 permission_error` |
+| `x-fancy-session-id` | Authoritative when supplied |
+| Full transcript (Claude/Gemini) | Matched only within the declared session |
+| Ambiguous transcript | `409` rather than guessing which session to continue |
+
+### Idempotency
+
+Keys are accepted from `Idempotency-Key`, `X-Idempotency-Key`, `X-Request-Id`, or
+`X-Fancy-Idempotency-Key`; the store is keyed by value, never by which header
+carried it. Same key plus same payload digest replays the stored result without
+re-submitting. Same key plus a different payload is rejected. A claim is
+published by hard-linking a fully written temporary file, so exactly one
+concurrent caller wins and a loser never reads a half-written claim.
+
+### Concurrency
+
+The global gateway lock is gone. `ConversationLocks` holds a reference-counted
+mutex per `site:conversation_id` (falling back to `session:<id>` while unbound).
+Same conversation serializes absolutely; different conversations run in parallel.
+
+### Compaction
+
+Compaction operates on protocol-semantic units, not characters. The budget
+reserves output space, tool-loop space, instructions and tool schemas. Pinned
+content is system/developer instructions, the current user intent, and any
+unresolved tool call. A tool call and its result share a group id and are kept or
+dropped together, never split. The replacement summary is injected with a
+`context` role and is never promoted into the system instruction position.
+Provenance (generation, source range, source digest, kept indexes, dropped
+manifest, summary provenance) is written to `gateway-compaction.json`. When the
+pinned content alone does not fit, the turn is rejected with
+`CompactionImpossible` rather than silently losing the caller's intent.
+
+### Capability negotiation
+
+Advertised capability is the intersection of protocol, model alias, site and
+browser adapter. Both supported sites automate a text composer and have no
+attachment-upload path, so image, audio, file and video content is **rejected
+before submit**, never dropped and never turned into a text placeholder reported
+as success. `/v1/models`, `/health` and `/v1/capabilities` report the resolved
+intersection, so the Gemini protocol's video support is not advertised.
+
+### Backpressure and limits
+
+| Limit | Default | Env override |
+|---|---|---|
+| Global active turns | 8 | `FANCY_GPT_GATEWAY_MAX_ACTIVE` |
+| Active turns per client | 4 | `FANCY_GPT_GATEWAY_MAX_ACTIVE_PER_CLIENT` |
+| Queue depth | 32 | `FANCY_GPT_GATEWAY_MAX_QUEUE` |
+| Request body bytes | 10 MiB | `FANCY_GPT_GATEWAY_MAX_BODY_BYTES` |
+| Tool count | 128 | `FANCY_GPT_GATEWAY_MAX_TOOLS` |
+| Tool schema bytes | 64 KiB | `FANCY_GPT_GATEWAY_MAX_TOOL_SCHEMA_BYTES` |
+| Tool argument bytes | 256 KiB | `FANCY_GPT_GATEWAY_MAX_TOOL_ARG_BYTES` |
+| Output bytes | 4 MiB | `FANCY_GPT_GATEWAY_MAX_OUTPUT_BYTES` |
+
+Nothing queues without a bound. Request size is checked from `Content-Length`
+*before* the body is read or parsed.
+
+### Error mapping
+
+| Condition | OpenAI | Anthropic | Gemini |
+|---|---|---|---|
+| Overloaded | `429 rate_limit_error` | `529 overloaded_error` | `429 RESOURCE_EXHAUSTED` |
+| Cancelled | `499 request_cancelled` | `499 request_cancelled` | `499 CANCELLED` |
+| Cross-session | `403 permission_error` | `403` | `403` |
+| Ambiguous / idempotency conflict | `409` | `409` | `409 ABORTED` |
+| Unsupported modality | `400 invalid_request_error` | `400` | `400 INVALID_ARGUMENT` |
+
+All error bodies pass through credential scrubbing, so a bearer token or cookie
+quoted in an exception never reaches the client, the ledger, or the logs.
+
+### Observability
+
+`/health` reports metrics, active conversation count, resolved capabilities and
+effective limits. `/metrics` reports queued, running, completed, rejected,
+cancelled and failed counters plus the active conversation keys.
+
+## Compatibility matrix
+
+| Client | Protocol | Endpoint | Sites | Text | Tools | Streaming | Attachments |
+|---|---|---|---|---|---|---|---|
+| Codex | OpenAI Responses | `POST /v1/responses` | chatgpt, gemini | yes | yes | SSE, sequenced | rejected |
+| Claude Code | Anthropic Messages | `POST /v1/messages` | chatgpt, gemini | yes | yes | SSE, ordered blocks | rejected |
+| Gemini CLI | Gemini generateContent | `POST /v1beta/models/{model}:generateContent` | chatgpt, gemini | yes | yes | `:streamGenerateContent` | rejected |
+
+Model alias to site (the alias selects the **website**, never the browser route):
+
+| Alias | Site | Notes |
+|---|---|---|
+| `chatgpt-web` | chatgpt | |
+| `claude-web` | chatgpt | Served by the ChatGPT site adapter |
+| `gemini-web` | gemini | |
+
+The browser route is chosen independently by `x-fancy-tunnel-id` (for example
+`edge-remote`). Site and tunnel are never coupled: a single `edge-remote` route
+serves both sites.
+
 ## Non-goals
+
 
 - MCP sampling is not used to replace the MCP client's model.
 - Browser tunnel selection is not encoded into model names.
