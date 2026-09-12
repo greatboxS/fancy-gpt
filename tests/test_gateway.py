@@ -67,6 +67,15 @@ def test_protocol_normalization_and_output_mapping() -> None:
     assert openai.instructions == anthropic.instructions == gemini.instructions == "system"
 
 
+def test_gateway_prompt_keeps_exact_output_requests_inside_json_envelope(tmp_path: Path) -> None:
+    manager = Manager()
+    service = GatewayService(tmp_path, manager=manager)
+    service.execute(normalize_gemini({"contents": [{"role": "user", "parts": [{"text": "Return exactly HELLO"}]}]}, "gemini-web"))
+    prompt = manager.model.requests[0].prompt
+    assert "OUTPUT TRANSPORT CONTRACT (HIGHEST PRIORITY)" in prompt
+    assert "apply to the `text` field" in prompt
+
+
 def test_gateway_context_ledger_and_tool_calls(tmp_path: Path) -> None:
     manager = Manager()
     service = GatewayService(tmp_path, manager=manager)

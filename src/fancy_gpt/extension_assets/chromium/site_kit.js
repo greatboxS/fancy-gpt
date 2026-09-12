@@ -114,11 +114,14 @@
     let stable = 0;
     return {
       observe(text, {streaming}) {
-        const complete = text != null && looksLikeCompleteJson(text);
-        if (text && text === lastText && !streaming && complete) stable += 1;
+        const structured = text != null && looksLikeCompleteJson(text);
+        if (text && text === lastText && !streaming) stable += 1;
         else stable = 0;
         lastText = text;
-        return Boolean(text) && stable >= requiredStablePolls;
+        // Return stable non-JSON output too, so the protocol parser can reject it
+        // promptly instead of turning a model contract violation into a timeout.
+        const threshold = structured ? requiredStablePolls : Math.max(4, requiredStablePolls + 2);
+        return Boolean(text) && stable >= threshold;
       },
     };
   }
