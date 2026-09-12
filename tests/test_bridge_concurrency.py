@@ -182,3 +182,38 @@ def test_cancel_reaches_the_worker_without_touching_the_pending_reply() -> None:
     worker.dispatch({"type": "job_result", "job_id": "j1", "text": "partial"})
     thread.join(timeout=5)
     assert waiting and waiting[0]["text"] == "partial"
+
+
+def test_job_cancelled_is_a_terminal_reply_not_a_dropped_message() -> None:
+    """The live bug: a stopped turn produced no reply, so the caller hung.
+
+    Cancellation reached the browser and generation really stopped, but the
+    bridge only forwarded job_result and job_error, so job_cancelled was
+    dropped and the controller waited out its entire timeout for a turn that
+    had already ended.
+    """
+    from fancy_gpt.bridge.server import BridgeServer
+
+    import inspect
+
+    source = inspect.getsource(BridgeServer)
+    assert '"job_cancelled"' in source, "job_cancelled must be forwarded to the waiting caller"
+
+    worker = make_worker()
+    answered: list[dict] = []
+
+    def wait() -> None:
+        answered.append(worker.request({"type": "job", "job_id": "j-cancel"}, timeout_s=5))
+
+    thread = threading.Thread(target=wait)
+    thread.start()
+    deadline = time.monotonic() + 2
+    while "j-cancel" not in worker.pending and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    worker.dispatch({"type": "job_cancelled", "job_id": "j-cancel", "text": "half an answer"})
+    thread.join(timeout=5)
+
+    assert answered, "a cancelled turn must still resolve the waiting request"
+    assert answered[0]["type"] == "job_cancelled"
+    assert answered[0]["text"] == "half an answer"

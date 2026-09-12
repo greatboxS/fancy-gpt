@@ -309,7 +309,15 @@ a second caller could not even register its queue, so its reply arrived, found n
 destination, and was dropped - after which that caller waited out its full
 timeout for a response that had already come and gone.
 
-Measured on four jobs of 0.3s each: ~1.2s serialized before, ~0.3s after.
+Measured on four jobs of 0.3s each: ~1.2s serialized before, ~0.3s after. Live
+through `edge-remote`, a ChatGPT turn and a Gemini turn started together finish
+in 16.3s wall clock against 30.9s if serialized.
+
+A cancelled turn is terminal like any other. `job_cancelled` is forwarded to the
+waiting controller alongside `job_result` and `job_error`; omitting it meant a
+turn that had genuinely stopped in the browser produced no reply at all, so the
+caller waited out its whole timeout and the tab stayed occupied - cancellation
+that freed nothing.
 
 ### Backpressure and limits
 

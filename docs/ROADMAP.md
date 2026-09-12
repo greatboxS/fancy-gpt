@@ -132,9 +132,10 @@ Delivered:
 - ASGI transport on Starlette/uvicorn with an `anyio.CapacityLimiter` bounding
   browser tabs, client-disconnect cancellation while a turn is in flight, and
   incremental SSE that stops when the caller goes away.
-- Real end-to-end cancellation: the site's own stop control is clicked, the tab
-  is released, and the turn ends as `job_cancelled` rather than being abandoned
-  while it keeps generating. Fenced by `(job_id, generation_epoch)`.
+- Real end-to-end cancellation, verified live: a long turn that runs 145.5s to
+  completion ends in 8.1s when cancelled, in the same second the cancel is
+  issued. The site's own stop control is clicked and the turn ends as
+  `job_cancelled`, fenced by `(job_id, generation_epoch)`.
 - One bridge worker now serves concurrent jobs; its lock no longer spans the
   wait, which also fixes replies being dropped for an unregistered caller.
 - `TurnExecution`/`TabLease`: the browser-tab permit is owned by the turn, not

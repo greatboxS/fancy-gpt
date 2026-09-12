@@ -23,6 +23,7 @@ from .gateway_compaction import (
     plan_compaction,
     units as _units,
 )
+from .bridge import BrowserTurnCancelled
 from .gateway_capabilities import (
     Modality,
     UnsupportedModalityError,
@@ -846,6 +847,11 @@ class GatewayService:
                     self.state.attach_conversation(session_id, raw.conversation_id)
                 except GatewayCancelled:
                     raise
+                except BrowserTurnCancelled as exc:
+                    # The browser confirmed it stopped. That is a clean
+                    # cancellation, not an uncertain submit: we know exactly
+                    # how far it got.
+                    raise GatewayCancelled(token.reason or exc.reason) from exc
                 except RuntimeError as exc:
                     if "bound to provider conversation" in str(exc):
                         # The provider answered on a chat this session is not

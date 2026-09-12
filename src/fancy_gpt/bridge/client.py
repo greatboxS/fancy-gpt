@@ -29,6 +29,29 @@ class _PendingTurn:
     site: str | None = None
 
 
+class BrowserTurnCancelled(RuntimeError):
+    """Generation was stopped in the browser before it finished.
+
+    Carries whatever partial text existed, and whether the stop control was
+    actually clicked, so the caller can tell a genuinely stopped turn from one
+    that had already finished when the cancel arrived.
+    """
+
+    def __init__(
+        self,
+        *,
+        reason: str,
+        partial_text: str = "",
+        stopped_generation: bool = False,
+        conversation_id: str | None = None,
+    ) -> None:
+        super().__init__(f"browser turn cancelled: {reason}")
+        self.reason = reason
+        self.partial_text = partial_text
+        self.stopped_generation = stopped_generation
+        self.conversation_id = conversation_id
+
+
 class BridgeBrowserDriver:
     """BrowserDriver implemented through a FancyGPT bridge server.
 
@@ -174,6 +197,13 @@ class BridgeBrowserDriver:
         result = loads(self._conn().recv(timeout=timeout_s))
         if result.get("job_id") != turn.turn_id:
             raise RuntimeError("bridge response job identity mismatch")
+        if result.get("type") == "job_cancelled":
+            raise BrowserTurnCancelled(
+                reason=str(result.get("reason") or "cancelled"),
+                partial_text=str(result.get("text") or ""),
+                stopped_generation=bool(result.get("stopped_generation")),
+                conversation_id=(str(result["conversation_id"]) if result.get("conversation_id") else None),
+            )
         if result.get("type") == "job_error":
             raise RuntimeError(str(result.get("error", "browser bridge job failed")))
         if result.get("type") != "job_result":

@@ -279,7 +279,11 @@ class BridgeServer:
                 if message.get("type") == "heartbeat":
                     worker.send({"type": "heartbeat_ack", "ts": message.get("ts")})
                     continue
-                if message.get("type") in {"job_result", "job_error"}:
+                # job_cancelled is terminal too. Leaving it out meant a
+                # stopped turn produced no reply at all, so the controller
+                # waited out its whole timeout for a turn that had already
+                # ended in the browser.
+                if message.get("type") in {"job_result", "job_error", "job_cancelled"}:
                     worker.dispatch(message)
                 elif message.get("type") == "job_progress":
                     job_id = str(message.get("job_id", ""))

@@ -154,3 +154,58 @@ def test_a_driver_that_raises_does_not_propagate() -> None:
 
     provider = ChatGPTWebAutomationProvider(Exploding())  # type: ignore[arg-type]
     assert provider.cancel("bridge-1") is False
+
+
+# -- a stopped browser turn is a clean cancellation --------------------------
+
+
+class StoppingDriver:
+    """Behaves like the browser after its stop control was clicked."""
+
+    def __init__(self) -> None:
+        self.cancelled: list[str] = []
+
+    def cancel_turn(self, turn_id: str, *, generation_epoch: int = 0, reason: str = "cancelled") -> bool:
+        self.cancelled.append(turn_id)
+        return True
+
+
+def test_browser_reported_cancellation_carries_what_it_managed_to_produce() -> None:
+    from fancy_gpt.bridge import BrowserTurnCancelled
+
+    error = BrowserTurnCancelled(
+        reason="client disconnected",
+        partial_text="half an answer",
+        stopped_generation=True,
+        conversation_id="conversation-1",
+    )
+    assert error.partial_text == "half an answer"
+    assert error.stopped_generation is True
+    assert error.conversation_id == "conversation-1"
+    assert "client disconnected" in str(error)
+
+
+def test_a_stopped_turn_is_cancelled_not_uncertain(tmp_path: Path) -> None:
+    """We know exactly how far a confirmed stop got, so it is not uncertain."""
+    from fancy_gpt.bridge import BrowserTurnCancelled
+    from fancy_gpt.gateway_state import TurnState
+
+    class StoppedProvider(CancellableProvider):
+        def execute(self, request):
+            self.requests.append(request)
+            self.active_turn_id = f"bridge-{request.request_id}"
+            raise BrowserTurnCancelled(reason="stopped", partial_text="partial", stopped_generation=True)
+
+    provider = StoppedProvider()
+    service = GatewayService(tmp_path, manager=Manager(provider))
+    token = CancelToken()
+    token.cancel("client disconnected")
+    turn = normalize_openai({"model": "gemini-web", "input": "hi"}).model_copy(update={"session_id": "gw_stopped"})
+
+    with pytest.raises(GatewayCancelled):
+        service.execute(turn, cancel_token=token)
+
+    states = [item.state for item in service.state.session_turns("gw_stopped")]
+    assert TurnState.CANCELLED in states
+    # A confirmed stop must not be parked as uncertain-submit.
+    assert TurnState.UNCERTAIN not in states
