@@ -77,3 +77,51 @@ def test_adapter_uses_the_shared_input_path(tmp_path: Path, site_id: str) -> Non
     assert 'execCommand("insertText"' in kit
     assert "setComposer" in source
     assert "composer.textContent = prompt" not in source, "the adapter must use the kit, not its own write"
+
+
+def test_a_binding_is_never_reused_across_sites(tmp_path: Path) -> None:
+    # A conversation id only means something on the site that issued it; opening
+    # a ChatGPT thread id on Gemini navigates to a URL that does not exist.
+    from fancy_gpt.project_models import AgentRole, ConversationStrategy
+    from fancy_gpt.project_service import ProjectService
+
+    service = ProjectService(tmp_path)
+    project = service.create_project(name="p", target="ship it", repo_root=str(tmp_path))
+
+    on_chatgpt = service.add_work_item(
+        project.project_id, title="Ask", objective="ask", role=AgentRole.RESEARCHER, site="chatgpt"
+    )
+    first = service.start_assignment(project.project_id, on_chatgpt.work_item_id)
+    service.bind_session_conversation(project.project_id, first.session.session_id, "6aa52775-9f48-83ec-a24e-c8e42")
+    service.finish_session(project.project_id, first.session.session_id, summary="done")
+
+    on_gemini = service.add_work_item(
+        project.project_id, title="Ask again", objective="ask", role=AgentRole.RESEARCHER,
+        site="gemini", conversation_strategy=ConversationStrategy.RESUME,
+    )
+    second = service.start_assignment(project.project_id, on_gemini.work_item_id)
+    assert second.session.site == "gemini"
+    # Gemini must not inherit the ChatGPT thread; it opens one of its own.
+    assert second.session.conversation_binding != "6aa52775-9f48-83ec-a24e-c8e42"
+
+    # The same site does resume its own thread.
+    again = service.add_work_item(
+        project.project_id, title="Ask once more", objective="ask", role=AgentRole.RESEARCHER,
+        site="chatgpt", conversation_strategy=ConversationStrategy.RESUME,
+    )
+    third = service.start_assignment(project.project_id, again.work_item_id)
+    assert third.session.conversation_binding == "6aa52775-9f48-83ec-a24e-c8e42"
+
+
+def test_a_pinned_work_item_refuses_another_sites_tunnel(tmp_path: Path) -> None:
+    from fancy_gpt.project_models import AgentRole
+    from fancy_gpt.project_runner import ProjectRunner
+    from fancy_gpt.project_service import ProjectService
+
+    service = ProjectService(tmp_path)
+    project = service.create_project(name="p", target="ship it", repo_root=str(tmp_path))
+    service.add_work_item(
+        project.project_id, title="Gemini only", objective="ask", role=AgentRole.RESEARCHER, site="gemini"
+    )
+    with pytest.raises(ValueError, match="targets site gemini"):
+        ProjectRunner(service).run_next(project.project_id, tunnel_id="edge-extension-ws-remote")

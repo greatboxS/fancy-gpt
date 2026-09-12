@@ -136,6 +136,9 @@ class WorkItem(StrictModel):
     # their role. Without it, resume only ever rejoins a thread of the same role.
     conversation_key: str | None = None
     conversation_strategy: ConversationStrategy | None = None
+    # Which site this work item must run on. A conversation belongs to the site
+    # that issued it, so a binding is never reused across sites.
+    site: str | None = None
 
 
 class SessionRecord(StrictModel):
@@ -147,6 +150,7 @@ class SessionRecord(StrictModel):
     conversation_strategy: ConversationStrategy = ConversationStrategy.FRESH
     conversation_binding: str | None = None
     conversation_key: str | None = None
+    site: str | None = None
     summary: str | None = None
     started_at: str
     ended_at: str | None = None

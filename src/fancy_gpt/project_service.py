@@ -174,6 +174,7 @@ class ProjectService:
         context_requirements: list[LocalContextRequirement] | None = None,
         conversation_key: str | None = None,
         conversation_strategy: ConversationStrategy | None = None,
+        site: str | None = None,
         work_item_id: str | None = None,
     ) -> WorkItem:
         snapshot = self.snapshot(project_id)
@@ -199,6 +200,7 @@ class ProjectService:
             context_requirements=context_requirements or [],
             conversation_key=conversation_key,
             conversation_strategy=conversation_strategy,
+            site=site,
         )
         self.store.append(project_id, ProjectEventType.WORK_ITEM_CREATED, item.model_dump(mode="json"))
         return item
@@ -261,6 +263,7 @@ class ProjectService:
             or self.default_conversation_strategy(item.role)
         )
         key = item.conversation_key
+        site = item.site
         if conversation_binding is None and strategy == ConversationStrategy.RESUME:
             # Resume the newest persisted ChatGPT thread for the same role when one exists.
             # If this is the first role session, use a logical binding; the browser runtime
@@ -277,6 +280,10 @@ class ProjectService:
                     session for session in snapshot.sessions
                     if session.role == item.role and session.conversation_binding
                 ]
+            # A conversation id is only meaningful on the site that issued it;
+            # resuming a ChatGPT thread on Gemini would open a URL that does not
+            # exist there.
+            candidates = [session for session in candidates if session.site == site]
             real = [session for session in candidates if is_chatgpt_conversation(str(session.conversation_binding))]
             if real:
                 real.sort(key=lambda session: session.started_at, reverse=True)
@@ -294,6 +301,7 @@ class ProjectService:
             conversation_strategy=strategy,
             conversation_binding=conversation_binding,
             conversation_key=key,
+            site=site,
             started_at=utc_now(),
         )
         self.store.append(project_id, ProjectEventType.SESSION_STARTED, session.model_dump(mode="json"))

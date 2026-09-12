@@ -959,6 +959,7 @@ def project_work_item(
     search: Annotated[list[str] | None, typer.Option("--search")] = None,
     required_context: Annotated[bool, typer.Option("--required-context")] = False,
     thread: Annotated[str | None, typer.Option("--thread")] = None,
+    site: Annotated[str | None, typer.Option("--site")] = None,
     strategy: Annotated[ConversationStrategy | None, typer.Option("--strategy")] = None,
     workdir: Annotated[Path | None, typer.Option("--workdir")] = None,
 ) -> None:
@@ -977,6 +978,7 @@ def project_work_item(
         context_requirements=_context_requirement(pattern, path, search, required_context),
         conversation_key=thread,
         conversation_strategy=ConversationStrategy.RESUME if thread and strategy is None else strategy,
+        site=site,
     )
     typer.echo(item.model_dump_json(indent=2))
 
