@@ -211,7 +211,7 @@ class TunnelManager:
                     f"while this install ships {expected}; re-export the extension and reload it"
                 )
                 return health
-            health.detail = "browser worker connected and ChatGPT site adapter is ready"
+            health.detail = f"browser worker connected and {spec.site} site adapter is ready"
             health.state = TunnelHealthState.HEALTHY
             return health
         except SiteHealthUnsupported as exc:

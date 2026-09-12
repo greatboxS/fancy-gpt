@@ -25,7 +25,7 @@
       'button[aria-label*="Dừng" i]',
       "button.stop-button",
     ],
-    responses: ["model-response", "message-content.model-response-text"],
+    responses: ["message-content.model-response-text", "model-response"],
   };
 
   function currentConversationId() {
@@ -46,7 +46,12 @@
     // Bind to the reply this turn produced, never to whatever is on screen: an
     // existing conversation is already full of earlier answers.
     if (nodes.length <= baselineCount) return null;
-    const text = (nodes[nodes.length - 1].innerText ?? "").trim();
+    const node = nodes[nodes.length - 1];
+    // The response element wraps the answer in the site's own chrome -- an
+    // attribution line such as "Gemini said" -- which is not part of what the
+    // model replied and must not reach the parser.
+    const content = node.querySelector("message-content") ?? node;
+    const text = (content.innerText ?? "").trim();
     return text || null;
   }
 
