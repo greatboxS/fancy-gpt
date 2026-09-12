@@ -116,6 +116,18 @@ def test_gemini_extracts_code_without_the_visual_language_label(tmp_path: Path) 
     assert "codeBlocks.length === 1" in source
 
 
+def test_gemini_waits_for_existing_history_before_continuing(tmp_path: Path) -> None:
+    exported = export_extension("edge", tmp_path / "edge-gemini-continuation")
+    background = (exported / "background.js").read_text(encoding="utf-8")
+    content = (exported / "content.js").read_text(encoding="utf-8")
+    gemini = (exported / "site_gemini.js").read_text(encoding="utf-8")
+
+    assert 'continuing: job.conversation?.mode === "continue"' in background
+    assert "{continuing: Boolean(message.continuing)}" in content
+    assert "await settledResponseCount(Boolean(options.continuing))" in gemini
+    assert '"Gemini conversation history did not load"' in gemini
+
+
 def test_a_binding_is_never_reused_across_sites(tmp_path: Path) -> None:
     # A conversation id only means something on the site that issued it; opening
     # a ChatGPT thread id on Gemini navigates to a URL that does not exist.

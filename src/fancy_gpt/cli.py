@@ -320,6 +320,11 @@ def ask_cmd(
     """Ask one focused technical question without forcing a full review report."""
     service = _project_service(workdir)
     session = service.session(project_id, session_id) if project_id and session_id else None
+    work_engine = _engine(workdir)
+    resolution = (
+        work_engine.conversations.resolve_focused(session_id, title=question, site=site)
+        if session_id and not project_id else None
+    )
     if session and work_item_id and session.work_item_id != work_item_id:
         raise typer.BadParameter("--session belongs to a different work item")
     if session and site and session.site != site:
@@ -336,15 +341,23 @@ def ask_cmd(
             response_intent=intent,
             principles=context.principles if context else FocusedQuestion(question=question).principles,
             project_context=context,
-            conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
-            conversation_binding=session.conversation_binding if session else None,
-            site=site or (session.site if session else None),
+            conversation_strategy=(
+                session.conversation_strategy if session else
+                ConversationStrategy.RESUME if resolution else ConversationStrategy.FRESH
+            ),
+            conversation_binding=(
+                session.conversation_binding if session else
+                resolution.conversation_id if resolution else None
+            ),
+            site=site or (session.site if session else resolution.site if resolution else None),
         ),
         tunnel_id=tunnel,
         tunnel_policy=tunnel_policy,
     )
     if session and answer.conversation_binding:
         service.bind_session_conversation(project_id, session.session_id, answer.conversation_binding)
+    if resolution:
+        work_engine.conversations.bind_conversation(resolution, answer.conversation_binding, tunnel)
     typer.echo(answer.model_dump_json(indent=2))
 
 

@@ -23,6 +23,29 @@ class ConversationManager:
             make_active=make_active and not independent,
         )
 
+    def resolve_focused(
+        self, session_id: str, *, title: str, site: str | None = None
+    ) -> ChatResolution:
+        """Resolve a one-pass focused turn into a persistent session chat."""
+        session = self.store.get_session(session_id)
+        # Reuse the repository and lifecycle validation shared with review runs.
+        self.store.ensure_session(repo_root=session.repo_root, session_id=session_id)
+        if session.active_chat_id:
+            chat = self.store.get_chat(session_id, session.active_chat_id)
+            if chat.archived_at:
+                raise ValueError(f"chat is archived: {chat.chat_id}")
+            if site and chat.site != site:
+                raise ValueError(f"chat belongs to site {chat.site}; request targets {site}")
+        else:
+            chat = self.store.get_or_create_main_chat(session_id, site=site or "chatgpt")
+        return ChatResolution(
+            policy=ChatPolicy.CONTINUE,
+            site=chat.site,
+            session_id=session_id,
+            chat_id=chat.chat_id,
+            conversation_id=chat.conversation_id,
+        )
+
     def resolve(self, request: RawRequest) -> ChatResolution:
         policy = request.chat_policy
         # Preserve the legacy temporary mode as an explicit opt-out from all

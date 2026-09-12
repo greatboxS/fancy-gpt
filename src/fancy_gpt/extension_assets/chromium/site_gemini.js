@@ -62,6 +62,32 @@
     return text || null;
   }
 
+  async function settledResponseCount(continuing) {
+    if (!continuing) return responseNodes().length;
+    // Gemini hydrates an existing thread after the composer becomes available.
+    // A baseline captured before that hydration mistakes the previous answer for
+    // the reply to the new prompt.
+    await waitFor(
+      () => responseNodes().length || null,
+      15000,
+      "Gemini conversation history did not load",
+    );
+    let lastCount = -1;
+    let stableSince = Date.now();
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const count = responseNodes().length;
+      if (count !== lastCount) {
+        lastCount = count;
+        stableSince = Date.now();
+      } else if (Date.now() - stableSince >= 1500) {
+        return count;
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    return responseNodes().length;
+  }
+
   async function healthCheck() {
     if (location.hostname !== "gemini.google.com") {
       return {ok: false, reason: "unexpected-host", build: kit.build};
@@ -74,14 +100,14 @@
     };
   }
 
-  async function executeTurn(prompt, timeoutMs, onProgress) {
+  async function executeTurn(prompt, timeoutMs, onProgress, options = {}) {
     if (location.hostname !== "gemini.google.com") {
       throw new Error("FancyGPT Gemini adapter loaded on unexpected host");
     }
     const composer = await waitFor(
       () => firstVisible(SELECTORS.composer), 20000, "Gemini composer unavailable; sign in first",
     );
-    const baselineCount = responseNodes().length;
+    const baselineCount = await settledResponseCount(Boolean(options.continuing));
 
     // An established editor drops a single write, so keep writing until the send
     // control appears -- that control is the only reliable acknowledgement that

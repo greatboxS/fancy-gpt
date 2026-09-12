@@ -193,6 +193,29 @@ def test_active_chat_must_be_changed_before_archive(tmp_path: Path) -> None:
     assert archived.archived_at is not None
 
 
+def test_focused_turn_resolves_and_reuses_a_session_conversation(tmp_path: Path) -> None:
+    engine, repo = make_engine(tmp_path)
+    session = engine.create_session(str(repo), "Focused continuity")
+
+    first = engine.conversations.resolve_focused(
+        session.session_id, title="Remember a token", site="gemini"
+    )
+    assert first.site == "gemini"
+    assert first.conversation_id is None
+    engine.conversations.bind_conversation(first, "gemini-conversation-1", "edge-remote")
+
+    second = engine.conversations.resolve_focused(
+        session.session_id, title="Recall the token", site="gemini"
+    )
+    assert second.chat_id == first.chat_id
+    assert second.conversation_id == "gemini-conversation-1"
+
+    with pytest.raises(ValueError, match="chat belongs to site gemini"):
+        engine.conversations.resolve_focused(
+            session.session_id, title="Wrong site", site="chatgpt"
+        )
+
+
 def test_concurrent_main_resolution_and_request_attachment_are_atomic(tmp_path: Path) -> None:
     engine, repo = make_engine(tmp_path)
     request = RawRequest(mode="review", objective="parallel work", repo_root=str(repo))

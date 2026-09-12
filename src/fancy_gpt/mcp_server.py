@@ -538,6 +538,11 @@ def ask_focused(
 ) -> FocusedAnswer:
     service = _project_service()
     session = service.session(project_id, session_id) if project_id and session_id else None
+    work_engine = _engine()
+    resolution = (
+        work_engine.conversations.resolve_focused(session_id, title=question, site=site)
+        if session_id and not project_id else None
+    )
     if session and work_item_id and session.work_item_id != work_item_id:
         raise ValueError("session belongs to a different work item")
     if session and site and session.site != site:
@@ -554,15 +559,23 @@ def ask_focused(
             response_intent=response_intent,
             principles=context.principles if context else FocusedQuestion(question=question).principles,
             project_context=context,
-            conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
-            conversation_binding=session.conversation_binding if session else None,
-            site=site or (session.site if session else None),
+            conversation_strategy=(
+                session.conversation_strategy if session else
+                ConversationStrategy.RESUME if resolution else ConversationStrategy.FRESH
+            ),
+            conversation_binding=(
+                session.conversation_binding if session else
+                resolution.conversation_id if resolution else None
+            ),
+            site=site or (session.site if session else resolution.site if resolution else None),
         ),
         tunnel_id=tunnel_id,
         tunnel_policy=tunnel_policy,
     )
     if session and answer.conversation_binding:
         service.bind_session_conversation(project_id, session.session_id, answer.conversation_binding)
+    if resolution:
+        work_engine.conversations.bind_conversation(resolution, answer.conversation_binding, tunnel_id)
     return answer
 
 

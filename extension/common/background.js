@@ -137,6 +137,7 @@ async function executeJob(job) {
       site,
       prompt: job.prompt,
       jobId: job.job_id,
+      continuing: job.conversation?.mode === "continue",
       timeoutMs: Math.max(1000, Math.floor((job.timeout_s ?? 300) * 1000))
     });
     if (!result || !result.ok) throw new Error(result?.error ?? "site content adapter failed");
