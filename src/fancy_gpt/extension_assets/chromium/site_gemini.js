@@ -51,6 +51,13 @@
     // attribution line such as "Gemini said" -- which is not part of what the
     // model replied and must not reach the parser.
     const content = node.querySelector("message-content") ?? node;
+    // Gemini renders fenced JSON with a visual language label ("JSON") beside
+    // the actual code. innerText includes that site chrome, while the code
+    // element contains only the model payload.
+    const codeBlocks = [...content.querySelectorAll("code")]
+      .map(element => (element.innerText ?? element.textContent ?? "").trim())
+      .filter(Boolean);
+    if (codeBlocks.length === 1) return codeBlocks[0];
     const text = (content.innerText ?? "").trim();
     return text || null;
   }

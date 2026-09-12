@@ -110,6 +110,12 @@ def test_adapter_uses_the_shared_input_path(tmp_path: Path, site_id: str) -> Non
     assert "composer.textContent = prompt" not in source, "the adapter must use the kit, not its own write"
 
 
+def test_gemini_extracts_code_without_the_visual_language_label(tmp_path: Path) -> None:
+    source = (export_extension("edge", tmp_path / "edge-gemini-code") / "site_gemini.js").read_text(encoding="utf-8")
+    assert 'content.querySelectorAll("code")' in source
+    assert "codeBlocks.length === 1" in source
+
+
 def test_a_binding_is_never_reused_across_sites(tmp_path: Path) -> None:
     # A conversation id only means something on the site that issued it; opening
     # a ChatGPT thread id on Gemini navigates to a URL that does not exist.
