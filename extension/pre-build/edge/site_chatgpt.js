@@ -119,8 +119,20 @@
     if (location.hostname !== "chatgpt.com") throw new Error("FancyGPT ChatGPT adapter loaded on unexpected host");
     const composer = await waitFor(() => firstVisible(SELECTORS.composer), 20000, "ChatGPT composer unavailable; sign in first");
     const baseline = new Set(turnIds());
-    setComposer(composer, prompt);
-    const send = await waitFor(() => firstVisible(SELECTORS.send), 10000, "unique ChatGPT send button not found");
+    // Resuming an existing conversation lands on a page that is still hydrating:
+    // the composer is already visible, but the app has not attached to it yet, so
+    // a single write is silently dropped and the send button never appears. Keep
+    // re-writing until the app acknowledges by revealing the send control.
+    let send = null;
+    for (let attempt = 0; attempt < 6 && !send; ++attempt) {
+      setComposer(firstVisible(SELECTORS.composer) || composer, prompt);
+      try {
+        send = await waitFor(() => firstVisible(SELECTORS.send), 2500, "send control not ready yet");
+      } catch (_) {
+        await new Promise(resolve => setTimeout(resolve, 600));
+      }
+    }
+    if (!send) throw new Error("unique ChatGPT send button not found");
     send.click();
 
     const deadline = Date.now() + timeoutMs;

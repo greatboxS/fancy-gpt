@@ -151,6 +151,7 @@ def run_self_test() -> dict:
         return {
             "ok": True,
             "version_contract": __version__,
+            "team_code_change": True,
             "skills": len(skills),
             "workflows": len(workflows),
             "domains": len(domains),
