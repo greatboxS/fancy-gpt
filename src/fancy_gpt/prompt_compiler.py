@@ -5,6 +5,8 @@ import json
 from .catalog import load_domains, load_skills
 from .models import ContextPack, FinalReport, RawRequest, ResearchManifest, RequestMode, RoutingDecision
 from .request_sanitizer import request_metadata_for_online
+from .relevance import semantic_policy_text
+from .scope import ScopeInterpreter
 
 
 class FinalPromptCompiler:
@@ -69,6 +71,17 @@ This is the only channel through which local artifact bodies enter the final mod
 ```json
 {json.dumps(context.model_dump(mode="json"), indent=2, ensure_ascii=False)}
 ```
+
+## SCOPE CONTRACT
+This contract defines what the current turn is actually trying to resolve. It is not a suggestion to expand coverage.
+```json
+{json.dumps(ScopeInterpreter().build(request).model_dump(mode="json"), indent=2, ensure_ascii=False)}
+```
+
+## RELEVANCE & SUFFICIENCY POLICY
+{semantic_policy_text(request.relevance_policy, request.response_intent)}
+- If you materially expand beyond the requested scope, record each expansion in `relevance_assessment.necessary_expansions` with a permitted trigger and concrete rationale.
+- `relevance_assessment.within_requested_scope` should remain true when the answer stays within scope or uses only materially necessary expansions.
 
 ## ONLINE RESEARCH RULES
 - Execute the manifest's online research tasks when materially applicable; add missing research if needed.

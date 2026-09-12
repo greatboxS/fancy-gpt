@@ -21,6 +21,14 @@ def request_metadata_for_online(request: RawRequest) -> dict:
         artifacts.append(item)
     payload["artifacts"] = artifacts
     if request.mode == RequestMode.DESIGN:
+        # Independent design must not be anchored by candidate-oriented local
+        # navigation metadata. Requirements remain represented by the explicit
+        # objective/focus/questions and requirement-role artifacts, while
+        # include/exclude/notes can reveal candidate filenames, module names,
+        # or implementation hints even when candidate bodies are removed.
+        payload["include"] = []
+        payload["exclude"] = []
+        payload["notes"] = None
         payload["include_git_diff"] = False
     return payload
 

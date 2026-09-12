@@ -51,3 +51,20 @@ def test_final_prompt_does_not_reintroduce_candidate_or_host_path(tmp_path: Path
     assert "candidate-secret-name" not in prompt
     assert str(tmp_path) not in prompt
     assert "REQ-1" in prompt
+
+
+def test_design_sanitizer_removes_candidate_navigation_metadata(tmp_path: Path):
+    marker = "candidate-super-secret-module"
+    req = RawRequest(
+        mode="design",
+        objective="design a replacement from requirements",
+        repo_root=str(tmp_path),
+        domains=["architecture"],
+        include=[f"src/{marker}.cpp"],
+        exclude=[f"legacy/{marker}/**"],
+        notes=f"Current candidate uses {marker}; do not anchor on it.",
+    )
+    route = ReviewEngine(tmp_path / "work", allowed_roots=[tmp_path]).route(req, skill_name="independent-design")
+    prompt = PreRequestPlanner().build_prompt("abc", req, route)
+    assert marker not in prompt
+    assert str(tmp_path) not in prompt
