@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "RequestMode": {
+      "enum": [
+        "review",
+        "design",
+        "consult",
+        "investigate",
+        "verify",
+        "write"
+      ],
+      "title": "RequestMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "route_kind": {
+      "enum": [
+        "skill",
+        "workflow"
+      ],
+      "title": "Route Kind",
+      "type": "string"
+    },
+    "route_name": {
+      "title": "Route Name",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/RequestMode"
+    },
+    "primary_skill": {
+      "title": "Primary Skill",
+      "type": "string"
+    },
+    "component_skills": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Component Skills",
+      "type": "array"
+    },
+    "domains": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Domains",
+      "type": "array"
+    },
+    "focus": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Focus",
+      "type": "array"
+    },
+    "allowed_capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Allowed Capabilities",
+      "type": "array"
+    },
+    "source_priority": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Priority",
+      "type": "array"
+    },
+    "required_sections": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Required Sections",
+      "type": "array"
+    },
+    "quality_gates": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Quality Gates",
+      "type": "array"
+    }
+  },
+  "required": [
+    "route_kind",
+    "route_name",
+    "mode",
+    "primary_skill",
+    "component_skills",
+    "domains",
+    "focus",
+    "allowed_capabilities",
+    "source_priority",
+    "required_sections",
+    "quality_gates"
+  ],
+  "title": "RoutingDecision",
+  "type": "object"
+}

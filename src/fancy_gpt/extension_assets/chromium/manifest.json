@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "FancyGPT Browser Tunnel",
+  "version": "0.7.0",
+  "description": "Connect an existing Chrome/Edge ChatGPT session to FancyGPT without exporting cookies or tokens.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FancyGPT Tunnel"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "site_chatgpt.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "minimum_chrome_version": "116"
+}

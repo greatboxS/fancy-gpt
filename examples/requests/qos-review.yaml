@@ -1,0 +1,23 @@
+mode: review
+objective: >
+  Review the current Linux/Yocto QoS architecture and determine whether it can preserve
+  C2 and telemetry ahead of media when the real network bottleneck is saturated.
+repo_root: .
+domains: [network, embedded-linux, yocto]
+focus:
+  - QoS classification with cgroup, nftables and tc
+  - bottleneck placement and congestion behavior
+  - runtime counters and impairment evidence
+constraints:
+  - Sockets may be created inside third-party libraries.
+  - C2 must have higher survivability than telemetry; telemetry must outrank media.
+  - Verification must be possible on the real target device.
+questions:
+  - Is process/cgroup classification sufficient for this architecture?
+  - Where must prioritization be enforced relative to the actual bottleneck?
+  - What runtime counters and impairment tests prove that it works?
+include:
+  - examples/context/qos-policy.txt
+freshness: version-specific
+risk: production
+max_context_bytes: 200000

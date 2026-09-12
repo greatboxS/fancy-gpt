@@ -1,0 +1,40 @@
+{
+  "request_id": "__REQUEST_ID__",
+  "mode": "review",
+  "status": "complete",
+  "verdict": "needs-evidence",
+  "executive_summary": "The simulated final reviewer requires runtime QoS evidence before approving the design.",
+  "report_sections_completed": ["executive-summary", "findings", "recommendation", "unknowns", "validation-plan"],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "high",
+      "category": "verification",
+      "claim": "Configuration alone does not prove mission traffic survives saturation.",
+      "evidence": [
+        {"source": "examples/context/qos-policy.txt", "locator": "captured policy", "claim_supported": "The fixture shows configuration commands but no runtime impairment measurements."}
+      ],
+      "impact": "A deployed system can appear configured correctly while packets still traverse the wrong class or bottleneck.",
+      "recommendation": "Measure classification counters, qdisc counters, C2 latency, telemetry delivery, and media loss under an enforced bottleneck."
+    }
+  ],
+  "options": [],
+  "hypotheses": [],
+  "deliverables": [],
+  "recommendation": "Gate approval on real-device impairment evidence.",
+  "assumptions_challenged": ["Presence of tc/nft rules implies effective prioritization."],
+  "unknowns": ["Exact target qdisc/class counters are not present in the simulated fixture."],
+  "validation_plan": [
+    {"step": "Saturate the real egress bottleneck while generating C2, telemetry, and media traffic.", "expected_evidence": "Per-class counters plus latency/loss measurements.", "pass_condition": "C2 remains within the project latency/loss budget and outranks telemetry/media under saturation."}
+  ],
+  "research_trace": [
+    {"task_id": "WEB1", "status": "completed", "source_urls": ["https://docs.kernel.org/"], "note": "Offline fixture representing a primary-source lookup."}
+  ],
+  "evidence_coverage": [
+    {"requirement_id": "EV1", "status": "partial", "evidence": [{"source": "examples/context/qos-policy.txt", "locator": "whole fixture", "claim_supported": "Configuration exists but runtime proof is missing."}], "note": "Real counters and impairment measurements remain required."}
+  ],
+  "sources": [
+    {"title": "Linux kernel documentation (offline fixture reference)", "url": "https://docs.kernel.org/", "authority": "primary", "used_for": ["WEB1"]}
+  ],
+  "confidence": 0.7
+}

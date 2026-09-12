@@ -1,0 +1,77 @@
+skills:
+  - name: technical-review
+    mode: review
+    description: Challenge an existing artifact, implementation, configuration, or design against evidence.
+    purpose: Reconstruct the mechanism, find defects/risks, challenge assumptions, and recommend bounded corrections.
+    required_sections: [executive-summary, findings, recommendation, unknowns, validation-plan]
+    research_hints:
+      - Prefer direct evidence from the artifact and authoritative external sources.
+      - Separate configuration intent from runtime proof.
+    evidence_hints:
+      - High and critical findings require concrete evidence.
+    quality_gates:
+      - Findings explain mechanism and impact, not only symptoms.
+      - Recommendations stay within stated constraints.
+
+  - name: independent-design
+    mode: design
+    description: Derive a complete design from requirements and constraints without candidate-solution anchoring.
+    purpose: Produce an independent architecture/design with explicit trade-offs, failure handling, and verification plan.
+    required_sections: [executive-summary, design, alternatives, risks, validation-plan]
+    research_hints:
+      - Verify current platform and standards constraints that materially affect design choices.
+    evidence_hints:
+      - Distinguish requirement facts from design choices and assumptions.
+    quality_gates:
+      - Candidate-solution artifacts are excluded by data flow.
+      - A complete reusable design deliverable is required.
+
+  - name: technical-consult
+    mode: consult
+    description: Support a technical decision with options, trade-offs, risks, and a recommendation.
+    purpose: Frame the decision, compare viable options, expose assumptions, and recommend when evidence supports it.
+    required_sections: [problem-framing, options, trade-offs, recommendation, unknowns, validation-plan]
+    research_hints:
+      - Find the decision variables that actually differentiate the options.
+    evidence_hints:
+      - Cite authoritative evidence for material claims that drive the recommendation.
+    quality_gates:
+      - At least one concrete option analysis is required.
+      - State when each option should be chosen.
+
+  - name: root-cause-investigation
+    mode: investigate
+    description: Determine the mechanism/root cause of a failure from evidence and discriminating tests.
+    purpose: Build ranked hypotheses, test them against evidence, and define the next highest-information experiment.
+    required_sections: [symptom, evidence, hypotheses, root-cause-assessment, next-test]
+    research_hints:
+      - Prefer tests that distinguish competing mechanisms rather than generic diagnostics.
+    evidence_hints:
+      - Track evidence for and against every material hypothesis.
+    quality_gates:
+      - Structured hypotheses are required.
+      - Unresolved hypotheses require a next discriminating test.
+
+  - name: evidence-verification
+    mode: verify
+    description: Verify a claim, requirement, or readiness statement against explicit acceptance evidence.
+    purpose: Convert claims into evidence requirements, inspect proof, identify gaps, and return a bounded verdict.
+    required_sections: [claims, evidence-requirements, evidence-coverage, verdict, gaps]
+    research_hints:
+      - Define what evidence would falsify or prove the claim before evaluating it.
+    evidence_hints:
+      - Configuration alone is not runtime evidence when behavior is the claim.
+    quality_gates:
+      - At least one explicit evidence requirement and evidence coverage record is required.
+
+  - name: technical-writing
+    mode: write
+    description: Produce or transform a reusable technical artifact while preserving technical constraints and evidence.
+    purpose: Turn context into a finished document, decision, specification section, review response, or concise technical artifact.
+    required_sections: [deliverable, assumptions, unresolved-items]
+    research_hints:
+      - Research terminology or standards only when needed for correctness.
+    evidence_hints:
+      - Do not invent project facts to make prose complete.
+    quality_gates:
+      - At least one complete reusable deliverable is required.

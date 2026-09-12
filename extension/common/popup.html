@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+body{font:13px system-ui;width:360px;padding:12px}label{display:block;margin:8px 0 3px}input,select{width:100%;box-sizing:border-box}button{margin-top:12px}pre{white-space:pre-wrap}
+</style></head><body>
+<strong>FancyGPT Tunnel</strong>
+<label>Transport</label><select id="transport"><option value="websocket">WebSocket / SSH</option><option value="native">Native Messaging</option></select>
+<label>Bridge endpoint</label><input id="endpoint" value="ws://127.0.0.1:8765">
+<label>Pair token</label><input id="token" type="password">
+<label>Tunnel ID</label><input id="tunnelId" value="chrome-extension-ws-remote">
+<label>Browser name</label><input id="browserName" value="chrome">
+<button id="save">Save & reconnect</button>
+<pre id="status"></pre>
+<script src="popup.js"></script></body></html>

@@ -1,0 +1,44 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "const": "completed",
+      "default": "completed",
+      "title": "Status",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "planner",
+        "final"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "provider": {
+      "title": "Provider",
+      "type": "string"
+    },
+    "raw_text": {
+      "title": "Raw Text",
+      "type": "string"
+    },
+    "response_identity": {
+      "title": "Response Identity",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "stage",
+    "provider",
+    "raw_text",
+    "response_identity"
+  ],
+  "title": "AutomatedModelResponse",
+  "type": "object"
+}

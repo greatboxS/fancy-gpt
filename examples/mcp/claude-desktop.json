@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fancy-gpt": {
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/fancy-gpt", "run", "fancy-gpt-mcp"],
+      "env": {
+        "FANCY_GPT_ALLOWED_ROOTS": "/absolute/path/to/project",
+        "FANCY_GPT_BROWSER_PROFILE": "/absolute/path/to/fancy-gpt/.fancy-gpt/browser-profile"
+      }
+    }
+  }
+}

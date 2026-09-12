@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fancy-gpt"
+version = "0.7.0"
+description = "Tunnel-composable independent technical reasoning toolkit with MCP and multi-browser ChatGPT Web integration."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{name = "fancy-gpt contributors"}]
+dependencies = [
+  "pydantic>=2.12,<3",
+  "typer>=0.26,<1",
+  "PyYAML>=6,<7",
+  "mcp>=2,<3",
+  "playwright>=1.55,<2",
+  "websockets>=15,<17",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9,<10",
+  "pytest-cov>=7,<8",
+]
+automation = []
+
+[project.scripts]
+fancy-gpt = "fancy_gpt.cli:app"
+fancy-gpt-mcp = "fancy_gpt.mcp_server:main"
+fancy-gpt-native-host = "fancy_gpt.bridge.native_host:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fancy_gpt = ["catalog/*.yaml", "agent_skills/*/SKILL.md", "extension_assets/chromium/*", "extension_assets/firefox/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

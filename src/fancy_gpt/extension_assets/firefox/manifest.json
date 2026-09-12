@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "FancyGPT Browser Tunnel",
+  "version": "0.7.0",
+  "description": "Connect an existing Firefox ChatGPT session to FancyGPT without exporting cookies or tokens.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ],
+  "background": {
+    "scripts": [
+      "bridge_transport.js",
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FancyGPT Tunnel"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "site_chatgpt.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "fancy-gpt@local"
+    }
+  }
+}

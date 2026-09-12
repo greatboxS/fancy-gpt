@@ -1,0 +1,215 @@
+{
+  "$defs": {
+    "ArtifactRole": {
+      "enum": [
+        "context",
+        "requirement",
+        "candidate-solution",
+        "evidence"
+      ],
+      "title": "ArtifactRole",
+      "type": "string"
+    },
+    "ArtifactSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "kind": {
+          "default": "text",
+          "title": "Kind",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ArtifactRole",
+          "default": "context"
+        },
+        "priority": {
+          "$ref": "#/$defs/Priority",
+          "default": "P1"
+        }
+      },
+      "title": "ArtifactSpec",
+      "type": "object"
+    },
+    "Freshness": {
+      "enum": [
+        "static",
+        "version-specific",
+        "current"
+      ],
+      "title": "Freshness",
+      "type": "string"
+    },
+    "Priority": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "title": "Priority",
+      "type": "string"
+    },
+    "RequestMode": {
+      "enum": [
+        "review",
+        "design",
+        "consult",
+        "investigate",
+        "verify",
+        "write"
+      ],
+      "title": "RequestMode",
+      "type": "string"
+    },
+    "RiskLevel": {
+      "enum": [
+        "normal",
+        "production",
+        "security-critical",
+        "safety-critical"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "mode": {
+      "$ref": "#/$defs/RequestMode"
+    },
+    "objective": {
+      "minLength": 3,
+      "title": "Objective",
+      "type": "string"
+    },
+    "repo_root": {
+      "default": ".",
+      "title": "Repo Root",
+      "type": "string"
+    },
+    "domains": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Domains",
+      "type": "array"
+    },
+    "focus": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Focus",
+      "type": "array"
+    },
+    "constraints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Constraints",
+      "type": "array"
+    },
+    "questions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Questions",
+      "type": "array"
+    },
+    "include": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Include",
+      "type": "array"
+    },
+    "exclude": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Exclude",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactSpec"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "include_git_diff": {
+      "default": false,
+      "title": "Include Git Diff",
+      "type": "boolean"
+    },
+    "freshness": {
+      "$ref": "#/$defs/Freshness",
+      "default": "version-specific"
+    },
+    "risk": {
+      "$ref": "#/$defs/RiskLevel",
+      "default": "normal"
+    },
+    "max_context_bytes": {
+      "default": 180000,
+      "maximum": 50000000,
+      "minimum": 4096,
+      "title": "Max Context Bytes",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "mode",
+    "objective"
+  ],
+  "title": "RawRequest",
+  "type": "object"
+}

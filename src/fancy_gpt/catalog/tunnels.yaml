@@ -1,0 +1,181 @@
+tunnels:
+  - id: chrome-extension-native-local
+    description: Existing local Google Chrome session through the FancyGPT extension and Native Messaging.
+    site: chatgpt
+    runtime: extension
+    transport: native-messaging
+    scope: local
+    browser: chrome
+    priority: 10
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, native, local, existing-session]
+    capabilities:
+      automatic: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      requires_native_host: true
+      browser_families: [chrome]
+
+  - id: edge-extension-native-local
+    description: Existing local Microsoft Edge session through the FancyGPT extension and Native Messaging.
+    site: chatgpt
+    runtime: extension
+    transport: native-messaging
+    scope: local
+    browser: edge
+    priority: 11
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, native, local, existing-session]
+    capabilities:
+      automatic: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      requires_native_host: true
+      browser_families: [edge]
+
+  - id: firefox-extension-native-local
+    description: Existing local Firefox session through the FancyGPT extension and Native Messaging.
+    site: chatgpt
+    runtime: extension
+    transport: native-messaging
+    scope: local
+    browser: firefox
+    priority: 12
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, native, local, existing-session]
+    capabilities:
+      automatic: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      requires_native_host: true
+      browser_families: [firefox]
+
+  - id: chrome-extension-ws-remote
+    description: Chrome on a workstation connected to a remote FancyGPT host over WebSocket, normally carried through SSH local forwarding.
+    site: chatgpt
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: chrome
+    priority: 20
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, websocket, remote, ssh, existing-session]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [chrome]
+
+  - id: edge-extension-ws-remote
+    description: Edge on a workstation connected to a remote FancyGPT host over WebSocket, normally carried through SSH local forwarding.
+    site: chatgpt
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: edge
+    priority: 21
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, websocket, remote, ssh, existing-session]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [edge]
+
+  - id: firefox-extension-ws-remote
+    description: Firefox on a workstation connected to a remote FancyGPT host over WebSocket, normally carried through SSH local forwarding.
+    site: chatgpt
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: firefox
+    priority: 22
+    endpoint: ws://127.0.0.1:8765
+    tags: [extension, websocket, remote, ssh, existing-session]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [firefox]
+
+  - id: chrome-cdp-local
+    description: Attach to an explicitly debuggable Chrome instance through Chrome DevTools Protocol.
+    site: chatgpt
+    runtime: cdp
+    transport: cdp
+    scope: local
+    browser: chrome
+    priority: 40
+    endpoint: http://127.0.0.1:9222
+    tags: [cdp, local, existing-session, advanced]
+    capabilities:
+      automatic: true
+      existing_session: true
+      persistent_session: true
+      browser_families: [chrome, edge]
+
+  - id: playwright-chromium-local
+    description: FancyGPT-owned Chromium profile controlled directly by Playwright.
+    site: chatgpt
+    runtime: playwright
+    transport: local-process
+    scope: local
+    browser: chromium
+    priority: 60
+    tags: [playwright, local, fallback]
+    capabilities:
+      automatic: true
+      persistent_session: true
+      headless: true
+      requires_browser_install: true
+      browser_families: [chromium]
+
+  - id: playwright-firefox-local
+    description: FancyGPT-owned Firefox profile controlled directly by Playwright.
+    site: chatgpt
+    runtime: playwright
+    transport: local-process
+    scope: local
+    browser: firefox
+    priority: 65
+    tags: [playwright, local, fallback]
+    capabilities:
+      automatic: true
+      persistent_session: true
+      headless: true
+      requires_browser_install: true
+      browser_families: [firefox]
+
+  - id: interactive-manual
+    description: Human-in-the-loop prompt handoff through any browser. Last-resort compatibility tunnel.
+    site: chatgpt
+    runtime: interactive
+    transport: human
+    scope: any
+    browser: any
+    priority: 900
+    tags: [interactive, fallback]
+    capabilities:
+      automatic: false
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      browser_families: [chrome, edge, firefox, safari, any]

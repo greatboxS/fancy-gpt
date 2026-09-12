@@ -1,0 +1,138 @@
+{
+  "$defs": {
+    "ArtifactRole": {
+      "enum": [
+        "context",
+        "requirement",
+        "candidate-solution",
+        "evidence"
+      ],
+      "title": "ArtifactRole",
+      "type": "string"
+    },
+    "ContextArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "filesystem",
+            "inline",
+            "git-diff"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/$defs/ArtifactRole",
+          "default": "context"
+        },
+        "priority": {
+          "$ref": "#/$defs/Priority"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "path",
+        "kind",
+        "priority",
+        "sha256",
+        "size",
+        "content"
+      ],
+      "title": "ContextArtifact",
+      "type": "object"
+    },
+    "Priority": {
+      "enum": [
+        "P0",
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "title": "Priority",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "repo_root": {
+      "default": "<local-repo-root>",
+      "title": "Repo Root",
+      "type": "string"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/ContextArtifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "total_bytes": {
+      "title": "Total Bytes",
+      "type": "integer"
+    },
+    "context_hash": {
+      "title": "Context Hash",
+      "type": "string"
+    },
+    "omitted": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Omitted",
+      "type": "array"
+    },
+    "revision": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Revision"
+    },
+    "satisfied_requirements": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Satisfied Requirements",
+      "type": "array"
+    }
+  },
+  "required": [
+    "artifacts",
+    "total_bytes",
+    "context_hash"
+  ],
+  "title": "ContextPack",
+  "type": "object"
+}

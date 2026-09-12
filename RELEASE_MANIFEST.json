@@ -1,0 +1,20 @@
+{
+  "version": "0.7.0",
+  "files": 189,
+  "skills": 6,
+  "workflows": 4,
+  "domains": 13,
+  "tunnels": 10,
+  "tests": {
+    "passed": 67,
+    "skipped": 1,
+    "failed": 0
+  },
+  "wheel": {
+    "path": "dist/fancy_gpt-0.7.0-py3-none-any.whl",
+    "sha256": "6fbbc0997cd77723ff9b41647557108f0fa2268fc15661fcd26f0730cab91cc5"
+  },
+  "release_gate": "PASS",
+  "functional_review": "PASS",
+  "tunnel_review": "PASS"
+}
