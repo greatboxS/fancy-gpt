@@ -109,3 +109,18 @@ def test_session_conversation_binding_is_persisted(tmp_path: Path) -> None:
     service.bind_session_conversation(project.project_id, session.session_id, "https://chatgpt.com/c/test-thread")
     reloaded = _service(tmp_path).session(project.project_id, session.session_id)
     assert reloaded.conversation_binding == "https://chatgpt.com/c/test-thread"
+
+
+def test_acceptance_criteria_default_to_evidence_backed_completion(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    project = service.create_project(
+        project_id="default-evidence",
+        name="Default evidence",
+        target="Never complete from assertion alone",
+        acceptance=[AcceptanceCriterion(id="ac-1", statement="Feature works")],
+    )
+    criterion = project.target.acceptance_criteria[0]
+    assert criterion.evidence_required == ["Feature works"]
+    import pytest
+    with pytest.raises(ValueError, match="requires evidence"):
+        service.update_criterion(project.project_id, "ac-1", status=CriterionStatus.SATISFIED)

@@ -65,7 +65,7 @@ class TunnelManager:
                     self._bridge_probe_cache[cache_key] = (now, tunnel_ids)
                 else:
                     tunnel_ids = cached[1]
-                if spec.id not in tunnel_ids and "*" not in tunnel_ids:
+                if spec.id not in tunnel_ids:
                     return TunnelHealth(
                         tunnel_id=spec.id,
                         state=TunnelHealthState.UNAVAILABLE,

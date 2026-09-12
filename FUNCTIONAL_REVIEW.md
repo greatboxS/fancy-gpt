@@ -1,4 +1,4 @@
-# Independent functional review — fancy-gpt v0.7.0
+# Independent functional review — fancy-gpt v0.8.0
 
 Scope: reasoning pipeline plus tunnel composition/selection. Live ChatGPT DOM compatibility is excluded.
 
@@ -39,3 +39,15 @@ Scope: reasoning pipeline plus tunnel composition/selection. Live ChatGPT DOM co
 - PASS: browser-specific export patches default tunnel/browser identity.
 - PASS: Native Messaging manifest shape differs correctly for Chromium vs Firefox.
 - PASS: deterministic extension build/check prevents packaged assets from drifting from source.
+
+## Persistent engineering-team runtime
+
+- PASS: project target, acceptance criteria, work items, sessions, decisions, evidence, findings and artifacts persist in an append-only journal.
+- PASS: raw browser history is not replayed into teammates; each assignment receives `RelevantProjectContext`.
+- PASS: semantic Relevance/Sufficiency policy is shared by planner, final report, focused answers and team-agent handoffs.
+- PASS: scope expansion must be justified by correctness, material risk, decision quality, confidence, a blocking unknown or the next required action.
+- PASS: project completion requires evidence-backed acceptance criteria, completion/skipping of required work and zero open findings.
+- PASS: verifier outcomes can create fresh evidence and bind that evidence to acceptance criteria in the same durable handoff.
+- PASS: implementer outcomes can resolve review findings through the structured team protocol.
+- PASS: a clean independent review skips unnecessary fix work and advances directly to acceptance verification.
+- PASS: review/focused/team model execution all produce structured `ExecutionStatus` records before tunnel selection can fail.

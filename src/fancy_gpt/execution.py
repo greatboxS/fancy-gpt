@@ -12,6 +12,9 @@ from typing import Callable, ContextManager
 from pydantic import BaseModel, ConfigDict
 
 from .engine import ReviewEngine
+from .focused import FocusedAnswer, FocusedAnswerEngine, FocusedQuestion
+from .project_models import AgentAssignment, AgentOutcome
+from .team_agent import TeamAgentEngine
 from .models import FinalReport, RawRequest
 from .tunnels import TunnelManager
 
@@ -33,6 +36,10 @@ class ExecutionPhase(str, Enum):
     REPORT_VALIDATE = "report-validate"
     COMPLETE = "complete"
     FAILED = "failed"
+    FOCUSED_DISPATCH = "focused-dispatch"
+    FOCUSED_WAIT = "focused-wait"
+    AGENT_DISPATCH = "agent-dispatch"
+    AGENT_WAIT = "agent-wait"
     CANCELLED = "cancelled"
 
 
@@ -107,12 +114,16 @@ class ExecutionCoordinator:
         engine: ReviewEngine | None = None,
         manager: TunnelManager | None = None,
         tunnel_lock_factory: Callable[[str], ContextManager[object]] | None = None,
+        focused_engine: FocusedAnswerEngine | None = None,
+        agent_engine: TeamAgentEngine | None = None,
     ) -> None:
         self.workdir = workdir.expanduser().resolve()
         self.store = ExecutionStore(self.workdir)
         self.engine = engine or ReviewEngine(self.workdir)
         self.manager = manager or TunnelManager()
         self.tunnel_lock_factory = tunnel_lock_factory
+        self.focused_engine = focused_engine or FocusedAnswerEngine()
+        self.agent_engine = agent_engine or TeamAgentEngine()
 
     def _update(self, status: ExecutionStatus, *, phase: ExecutionPhase | None = None, tunnel_id: str | None = None, error: ExecutionError | None = None) -> ExecutionStatus:
         updated = status.model_copy(update={
@@ -128,7 +139,7 @@ class ExecutionCoordinator:
     def _error_for(phase: ExecutionPhase, exc: Exception) -> ExecutionError:
         if phase == ExecutionPhase.TUNNEL_SELECT:
             layer, code, retriable = "tunnel", "TUNNEL_SELECTION_FAILED", True
-        elif phase in {ExecutionPhase.PROVIDER_START, ExecutionPhase.PLANNER_DISPATCH, ExecutionPhase.PLANNER_WAIT, ExecutionPhase.FINAL_DISPATCH, ExecutionPhase.FINAL_WAIT}:
+        elif phase in {ExecutionPhase.PROVIDER_START, ExecutionPhase.PLANNER_DISPATCH, ExecutionPhase.PLANNER_WAIT, ExecutionPhase.FINAL_DISPATCH, ExecutionPhase.FINAL_WAIT, ExecutionPhase.FOCUSED_DISPATCH, ExecutionPhase.FOCUSED_WAIT, ExecutionPhase.AGENT_DISPATCH, ExecutionPhase.AGENT_WAIT}:
             layer, code, retriable = "provider", "MODEL_EXECUTION_FAILED", True
         elif phase == ExecutionPhase.CONTEXT_BUILD:
             layer, code, retriable = "context", "CONTEXT_BUILD_FAILED", False
@@ -137,6 +148,96 @@ class ExecutionCoordinator:
         else:
             layer, code, retriable = "engine", "EXECUTION_FAILED", False
         return ExecutionError(layer=layer, code=code, message=f"{type(exc).__name__}: {exc}", retriable=retriable)
+
+
+    def _new_status(
+        self,
+        *,
+        kind: str,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        work_item_id: str | None = None,
+    ) -> ExecutionStatus:
+        now = _now()
+        status = ExecutionStatus(
+            execution_id=f"exec-{uuid.uuid4().hex[:12]}",
+            request_id=uuid.uuid4().hex[:16],
+            kind=kind,
+            phase=ExecutionPhase.CREATED,
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+            session_id=session_id,
+            work_item_id=work_item_id,
+        )
+        self.store.save(status)
+        return status
+
+    def run_focused(
+        self,
+        question: FocusedQuestion,
+        *,
+        tunnel_id: str | None = None,
+        tunnel_policy: str = "auto",
+    ) -> FocusedAnswer:
+        status = self._new_status(
+            kind="focused",
+            project_id=question.project_context.project_id if question.project_context else None,
+        )
+        current_phase = ExecutionPhase.CREATED
+        try:
+            current_phase = ExecutionPhase.TUNNEL_SELECT
+            status = self._update(status, phase=current_phase)
+            selection = self.manager.select(tunnel_id=tunnel_id, policy=tunnel_policy, require_automatic=True)
+            status = self._update(status, tunnel_id=selection.tunnel_id)
+            provider = self.manager.provider(selection)
+            lock = self.tunnel_lock_factory(selection.tunnel_id) if self.tunnel_lock_factory else nullcontext()
+            with lock:
+                current_phase = ExecutionPhase.FOCUSED_DISPATCH
+                status = self._update(status, phase=current_phase)
+                current_phase = ExecutionPhase.FOCUSED_WAIT
+                status = self._update(status, phase=current_phase)
+                answer = self.focused_engine.run(question, provider, request_id=status.request_id)
+            status = self._update(status, phase=ExecutionPhase.COMPLETE)
+            return answer
+        except Exception as exc:
+            error = self._error_for(current_phase, exc)
+            status = self._update(status, phase=ExecutionPhase.FAILED, error=error)
+            raise ExecutionFailed(status) from exc
+
+    def run_agent(
+        self,
+        assignment: AgentAssignment,
+        *,
+        tunnel_id: str | None = None,
+        tunnel_policy: str = "auto",
+    ) -> AgentOutcome:
+        status = self._new_status(
+            kind="team",
+            project_id=assignment.project_id,
+            session_id=assignment.session.session_id,
+            work_item_id=assignment.work_item_id,
+        )
+        current_phase = ExecutionPhase.CREATED
+        try:
+            current_phase = ExecutionPhase.TUNNEL_SELECT
+            status = self._update(status, phase=current_phase)
+            selection = self.manager.select(tunnel_id=tunnel_id, policy=tunnel_policy, require_automatic=True)
+            status = self._update(status, tunnel_id=selection.tunnel_id)
+            provider = self.manager.provider(selection)
+            lock = self.tunnel_lock_factory(selection.tunnel_id) if self.tunnel_lock_factory else nullcontext()
+            with lock:
+                current_phase = ExecutionPhase.AGENT_DISPATCH
+                status = self._update(status, phase=current_phase)
+                current_phase = ExecutionPhase.AGENT_WAIT
+                status = self._update(status, phase=current_phase)
+                outcome = self.agent_engine.run(assignment, provider, request_id=status.request_id)
+            status = self._update(status, phase=ExecutionPhase.COMPLETE)
+            return outcome
+        except Exception as exc:
+            error = self._error_for(current_phase, exc)
+            status = self._update(status, phase=ExecutionPhase.FAILED, error=error)
+            raise ExecutionFailed(status) from exc
 
     def run_review(
         self,
@@ -150,19 +251,13 @@ class ExecutionCoordinator:
         session_id: str | None = None,
         work_item_id: str | None = None,
     ) -> FinalReport:
-        execution_id = f"exec-{uuid.uuid4().hex[:12]}"
-        request_id = uuid.uuid4().hex[:16]
-        status = ExecutionStatus(
-            execution_id=execution_id,
-            request_id=request_id,
-            phase=ExecutionPhase.CREATED,
-            created_at=_now(),
-            updated_at=_now(),
+        status = self._new_status(
+            kind="review",
             project_id=project_id,
             session_id=session_id,
             work_item_id=work_item_id,
         )
-        self.store.save(status)
+        request_id = status.request_id
         current_phase = ExecutionPhase.CREATED
         try:
             current_phase = ExecutionPhase.TUNNEL_SELECT

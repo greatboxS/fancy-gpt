@@ -43,7 +43,13 @@ class WorkItemState(str, Enum):
     NEEDS_FIX = "needs-fix"
     VERIFIED = "verified"
     DONE = "done"
+    SKIPPED = "skipped"
     FAILED = "failed"
+
+
+class WorkActivationCondition(str, Enum):
+    ALWAYS = "always"
+    OPEN_FINDINGS = "open-findings"
 
 
 class SessionState(str, Enum):
@@ -118,6 +124,7 @@ class WorkItem(StrictModel):
     session_ids: list[str] = Field(default_factory=list)
     result_summary: str | None = None
     required_for_completion: bool = True
+    activation_condition: WorkActivationCondition = WorkActivationCondition.ALWAYS
 
 
 class SessionRecord(StrictModel):
@@ -191,6 +198,7 @@ class DecisionDraft(StrictModel):
 
 
 class EvidenceDraft(StrictModel):
+    ref: str | None = None
     claim: str
     source: str
     locator: str | None = None
@@ -201,6 +209,13 @@ class FindingDraft(StrictModel):
     claim: str
     impact: str
     required_action: str | None = None
+
+
+
+
+class FindingResolutionDraft(StrictModel):
+    finding_id: str
+    resolution: str
 
 
 class ArtifactDraft(StrictModel):
@@ -214,6 +229,7 @@ class CriterionAssessmentDraft(StrictModel):
     criterion_id: str
     status: CriterionStatus
     evidence_ids: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
     rationale: str
 
 
@@ -233,6 +249,7 @@ class AgentOutcome(StrictModel):
     decisions: list[DecisionDraft] = Field(default_factory=list)
     evidence: list[EvidenceDraft] = Field(default_factory=list)
     findings: list[FindingDraft] = Field(default_factory=list)
+    finding_resolutions: list[FindingResolutionDraft] = Field(default_factory=list)
     artifacts: list[ArtifactDraft] = Field(default_factory=list)
     criterion_assessments: list[CriterionAssessmentDraft] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
@@ -274,10 +291,10 @@ class ProjectSnapshot(StrictModel):
         raise KeyError(work_item_id)
 
     def ready_items(self) -> list[WorkItem]:
-        completed = {item.work_item_id for item in self.work_items if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED}}
+        completed = {item.work_item_id for item in self.work_items if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED}}
         ready: list[WorkItem] = []
         for item in self.work_items:
-            if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.RUNNING, WorkItemState.FAILED}:
+            if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED, WorkItemState.RUNNING, WorkItemState.FAILED}:
                 continue
             if set(item.dependencies).issubset(completed):
                 ready.append(item.model_copy(update={"state": WorkItemState.READY}))

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .project_models import AgentRole, TeamCyclePlan, WorkExecutionMode
+from .project_models import AgentRole, TeamCyclePlan, WorkActivationCondition, WorkExecutionMode
 from .project_service import ProjectService
 
 
@@ -77,6 +77,7 @@ class TeamOrchestrator:
             execution_mode=WorkExecutionMode.EXTERNAL_AGENT,
             dependencies=[review.work_item_id],
             expected_outputs=["fixes", "updated tests/evidence"],
+            activation_condition=WorkActivationCondition.OPEN_FINDINGS,
         )
         ids.append(fix.work_item_id)
         release_verify = self.service.add_work_item(

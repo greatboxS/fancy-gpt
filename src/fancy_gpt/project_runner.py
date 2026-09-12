@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Callable, ContextManager
+
+from .execution import ExecutionCoordinator
 from .orchestrator import TeamOrchestrator
 from .project_models import (
     AgentOutcomeStatus,
@@ -28,11 +31,15 @@ class ProjectRunner:
         *,
         manager: TunnelManager | None = None,
         agent_engine: TeamAgentEngine | None = None,
+        tunnel_lock_factory: Callable[[str], ContextManager[object]] | None = None,
     ) -> None:
         self.service = service
         self.orchestrator = TeamOrchestrator(service)
         self.manager = manager or TunnelManager()
         self.agent_engine = agent_engine or TeamAgentEngine()
+        self.execution = ExecutionCoordinator(
+            self.service.store.root, manager=self.manager, agent_engine=self.agent_engine, tunnel_lock_factory=tunnel_lock_factory
+        )
 
     def _persist_outcome(self, project_id: str, outcome) -> None:
         self.service.apply_agent_outcome(project_id, outcome)
@@ -76,13 +83,10 @@ class ProjectRunner:
                 reason="work item requires a local/external agent with repository mutation capability",
             )
 
-        selection = self.manager.select(
-            tunnel_id=tunnel_id,
-            policy=tunnel_policy,
-            require_automatic=True,
-        )
         try:
-            outcome = self.agent_engine.run(assignment, self.manager.provider(selection))
+            outcome = self.execution.run_agent(
+                assignment, tunnel_id=tunnel_id, tunnel_policy=tunnel_policy
+            )
             self._persist_outcome(project_id, outcome)
             if outcome.status == AgentOutcomeStatus.BLOCKED:
                 status = TeamStepStatus.BLOCKED
@@ -96,7 +100,7 @@ class ProjectRunner:
                 work_item=item,
                 assignment=assignment,
                 outcome=outcome,
-                reason=f"{assignment.role.value} assignment executed via {selection.tunnel_id}",
+                reason=f"{assignment.role.value} assignment executed through the selected runtime tunnel",
             )
         except Exception:
             # Failure is durable and visible in project state. Do not silently retry a model turn.

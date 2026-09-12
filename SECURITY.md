@@ -1,4 +1,4 @@
-# Security and independence model — v0.7.0
+# Security and independence model — v0.8.0
 
 ## Filesystem boundary
 

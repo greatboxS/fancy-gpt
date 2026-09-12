@@ -17,7 +17,7 @@ from fancy_gpt.project_service import ProjectService
 from fancy_gpt.providers import ChatGPTWebAutomationProvider
 
 
-def _response(*, summary: str, status: str = "complete", decisions=None, evidence=None, findings=None, artifacts=None, criterion_assessments=None, next_actions=None):
+def _response(*, summary: str, status: str = "complete", decisions=None, evidence=None, findings=None, finding_resolutions=None, artifacts=None, criterion_assessments=None, next_actions=None):
     def build(turn):
         return json.dumps({
             "request_id": turn.request_id,
@@ -29,6 +29,7 @@ def _response(*, summary: str, status: str = "complete", decisions=None, evidenc
             "decisions": decisions or [],
             "evidence": evidence or [],
             "findings": findings or [],
+            "finding_resolutions": finding_resolutions or [],
             "artifacts": artifacts or [],
             "criterion_assessments": criterion_assessments or [],
             "next_actions": next_actions or [],
@@ -219,3 +220,110 @@ def test_open_finding_blocks_project_completion_until_resolved(tmp_path: Path) -
     assert service.snapshot(project.project_id).project.status == ProjectStatus.ACTIVE
     service.resolve_finding(project.project_id, finding.finding_id, resolution="Generation guard added and tested")
     assert service.snapshot(project.project_id).project.status == ProjectStatus.COMPLETE
+
+
+def test_verifier_can_create_and_bind_new_evidence_in_same_outcome(tmp_path: Path) -> None:
+    from fancy_gpt.project_models import AcceptanceCriterion, CriterionStatus, ProjectStatus
+
+    service = ProjectService(tmp_path / "state")
+    project = service.create_project(
+        project_id="verify-new-evidence",
+        name="Verify new evidence",
+        target="Complete from evidence created by the verifier",
+        acceptance=[AcceptanceCriterion(id="ac-1", statement="Runtime passes", evidence_required=["runtime proof"])],
+    )
+    service.add_work_item(
+        project.project_id,
+        title="Verify",
+        objective="Run verification and bind the resulting evidence",
+        role=AgentRole.VERIFIER,
+    )
+    manager = ScriptedManager([
+        _response(
+            summary="Verifier produced and bound fresh runtime evidence.",
+            evidence=[{
+                "ref": "runtime-pass",
+                "claim": "Runtime passed",
+                "source": "pytest",
+                "locator": "test_runtime",
+            }],
+            criterion_assessments=[{
+                "criterion_id": "ac-1",
+                "status": CriterionStatus.SATISFIED.value,
+                "evidence_ids": [],
+                "evidence_refs": ["runtime-pass"],
+                "rationale": "The evidence produced in this verifier outcome directly proves the criterion.",
+            }],
+        )
+    ])
+    result = ProjectRunner(service, manager=manager).run_next(project.project_id)  # type: ignore[arg-type]
+    assert result.status == TeamStepStatus.MODEL_COMPLETED
+    snapshot = service.snapshot(project.project_id)
+    assert snapshot.project.status == ProjectStatus.COMPLETE
+    criterion = snapshot.project.target.acceptance_criteria[0]
+    assert len(criterion.evidence_ids) == 1
+    assert criterion.evidence_ids[0] == snapshot.evidence[0].evidence_id
+
+
+def test_developer_cycle_skips_fix_step_when_review_has_no_open_findings(tmp_path: Path) -> None:
+    from fancy_gpt.project_models import WorkItemState
+
+    service = ProjectService(tmp_path / "state")
+    project = service.create_project(project_id="clean-review", name="Clean review", target="Ship without needless fix work")
+    TeamOrchestrator(service).bootstrap_developer_cycle(project.project_id)
+    snapshot = service.snapshot(project.project_id)
+    by_title = {item.title: item for item in snapshot.work_items}
+
+    # Complete all dependencies through independent review without recording findings.
+    for title in ["Discover and research", "Design", "Implementation plan", "Implement", "Build and verify", "Independent review"]:
+        item = service.snapshot(project.project_id).work_item(by_title[title].work_item_id)
+        session = service.start_session(project.project_id, item.work_item_id)
+        service.finish_session(project.project_id, session.session_id, summary=f"{title} complete")
+
+    snapshot = service.snapshot(project.project_id)
+    fix = snapshot.work_item(by_title["Resolve findings"].work_item_id)
+    release_verify = snapshot.work_item(by_title["Acceptance verification"].work_item_id)
+    assert fix.state == WorkItemState.SKIPPED
+    assert release_verify.state == WorkItemState.READY
+
+
+def test_implementer_outcome_can_resolve_review_finding(tmp_path: Path) -> None:
+    service = ProjectService(tmp_path / "state")
+    project = service.create_project(project_id="resolve-through-outcome", name="Resolve", target="Close the review loop")
+    finding = service.record_finding(
+        project.project_id,
+        claim="Race remains",
+        impact="State can be corrupted",
+        severity="high",
+        required_action="Add generation guard",
+    )
+    work = service.add_work_item(
+        project.project_id,
+        title="Fix",
+        objective="Resolve the material race",
+        role=AgentRole.IMPLEMENTER,
+        execution_mode=WorkExecutionMode.EXTERNAL_AGENT,
+    )
+    assignment = service.start_assignment(project.project_id, work.work_item_id)
+    from fancy_gpt.project_models import AgentOutcome
+    outcome = AgentOutcome.model_validate({
+        "request_id": "external-1",
+        "session_id": assignment.session.session_id,
+        "work_item_id": assignment.work_item_id,
+        "role": "implementer",
+        "status": "complete",
+        "summary": "Generation guard implemented and tested.",
+        "decisions": [],
+        "evidence": [],
+        "findings": [],
+        "finding_resolutions": [{"finding_id": finding.finding_id, "resolution": "Generation guard implemented and regression-tested."}],
+        "artifacts": [],
+        "criterion_assessments": [],
+        "next_actions": [],
+        "confidence": 0.95,
+        "relevance_assessment": {"within_requested_scope": True, "necessary_expansions": [], "omitted_non_material_topics": []},
+    })
+    service.apply_agent_outcome(project.project_id, outcome)
+    snapshot = service.snapshot(project.project_id)
+    assert snapshot.findings[0].status.value == "resolved"
+    assert snapshot.work_item(work.work_item_id).state == WorkItemState.DONE

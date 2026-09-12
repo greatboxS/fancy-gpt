@@ -109,8 +109,8 @@ Return ONLY one JSON object matching this schema:
             },
         )
 
-    def run(self, question: FocusedQuestion, provider: AutomaticModelProvider) -> FocusedAnswer:
-        request = self.build_request(question)
+    def run(self, question: FocusedQuestion, provider: AutomaticModelProvider, *, request_id: str | None = None) -> FocusedAnswer:
+        request = self.build_request(question, request_id=request_id)
         provider_started = False
         try:
             provider.start()

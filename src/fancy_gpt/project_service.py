@@ -28,6 +28,7 @@ from .project_models import (
     SessionState,
     TeamCyclePlan,
     WorkExecutionMode,
+    WorkActivationCondition,
     WorkItem,
     WorkItemState,
 )
@@ -53,11 +54,15 @@ class ProjectService:
         project_id: str | None = None,
     ) -> ProjectRecord:
         now = utc_now()
+        normalized_acceptance = [
+            item if item.evidence_required else item.model_copy(update={"evidence_required": [item.statement]})
+            for item in (acceptance or [])
+        ]
         record = ProjectRecord(
             project_id=project_id or self._id("project"),
             name=name,
             repo_root=repo_root,
-            target=ProjectTarget(statement=target, acceptance_criteria=acceptance or []),
+            target=ProjectTarget(statement=target, acceptance_criteria=normalized_acceptance),
             status=ProjectStatus.ACTIVE,
             principles=RelevanceSufficiencyPolicy(),
             default_response_intent=ResponseIntent.FOCUSED,
@@ -79,6 +84,7 @@ class ProjectService:
         expected_outputs: list[str] | None = None,
         acceptance_notes: list[str] | None = None,
         required_for_completion: bool = True,
+        activation_condition: WorkActivationCondition = WorkActivationCondition.ALWAYS,
         work_item_id: str | None = None,
     ) -> WorkItem:
         snapshot = self.snapshot(project_id)
@@ -87,7 +93,7 @@ class ProjectService:
         unknown = set(dependencies) - known
         if unknown:
             raise ValueError(f"unknown work-item dependencies: {sorted(unknown)}")
-        completed = {item.work_item_id for item in snapshot.work_items if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED}}
+        completed = {item.work_item_id for item in snapshot.work_items if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED}}
         state = WorkItemState.READY if set(dependencies).issubset(completed) else WorkItemState.BLOCKED
         item = WorkItem(
             work_item_id=work_item_id or self._id("work"),
@@ -100,6 +106,7 @@ class ProjectService:
             expected_outputs=expected_outputs or [],
             acceptance_notes=acceptance_notes or [],
             required_for_completion=required_for_completion,
+            activation_condition=activation_condition,
         )
         self.store.append(project_id, ProjectEventType.WORK_ITEM_CREATED, item.model_dump(mode="json"))
         return item
@@ -335,8 +342,19 @@ class ProjectService:
             elif event.event_type == ProjectEventType.NEXT_ACTION_RECORDED:
                 next_actions.append(str(payload.get("action", "")))
 
-        # Materialize readiness without mutating the journal merely by reading it.
-        completed = {item_id for item_id, item in work.items() if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED}}
+        # Materialize conditional work before readiness without mutating the journal merely by reading it.
+        completed = {item_id for item_id, item in work.items() if item.state in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED}}
+        open_findings = any(item.status == FindingStatus.OPEN for item in findings.values())
+        for item_id, item in list(work.items()):
+            deps_complete = set(item.dependencies).issubset(completed)
+            if (
+                item.activation_condition == WorkActivationCondition.OPEN_FINDINGS
+                and deps_complete
+                and not open_findings
+                and item.state in {WorkItemState.BLOCKED, WorkItemState.READY}
+            ):
+                work[item_id] = item.model_copy(update={"state": WorkItemState.SKIPPED, "result_summary": "skipped: no open findings require resolution"})
+                completed.add(item_id)
         for item_id, item in list(work.items()):
             if item.state == WorkItemState.BLOCKED and set(item.dependencies).issubset(completed):
                 work[item_id] = item.model_copy(update={"state": WorkItemState.READY})
@@ -346,7 +364,7 @@ class ProjectService:
         criteria_complete = bool(all_criteria) and all(item.status == CriterionStatus.SATISFIED for item in all_criteria)
         required_work = [item for item in work.values() if item.required_for_completion]
         work_complete = not required_work or all(
-            item.state in {WorkItemState.DONE, WorkItemState.VERIFIED} for item in required_work
+            item.state in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED} for item in required_work
         )
         findings_complete = not any(item.status == FindingStatus.OPEN for item in findings.values())
         complete = criteria_complete and work_complete and findings_complete
@@ -383,7 +401,7 @@ class ProjectService:
             ]
         open_items = [
             item for item in snapshot.work_items
-            if item.state not in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.FAILED}
+            if item.state not in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED, WorkItemState.FAILED}
         ]
         # Decisions/evidence are already structured and compact; keep only records
         # tied to relevant sessions when possible, otherwise current project records.
@@ -484,16 +502,23 @@ class ProjectService:
                 project_id, statement=item.statement, rationale=item.rationale,
                 source_session_id=session.session_id
             )
+        evidence_ref_map: dict[str, str] = {}
         for item in outcome.evidence:
-            self.record_evidence(
+            recorded = self.record_evidence(
                 project_id, claim=item.claim, source=item.source, locator=item.locator,
                 source_session_id=session.session_id
             )
+            if item.ref:
+                if item.ref in evidence_ref_map:
+                    raise ValueError(f"duplicate evidence ref in agent outcome: {item.ref}")
+                evidence_ref_map[item.ref] = recorded.evidence_id
         for item in outcome.findings:
             self.record_finding(
                 project_id, severity=item.severity, claim=item.claim, impact=item.impact,
                 required_action=item.required_action, source_session_id=session.session_id
             )
+        for item in outcome.finding_resolutions:
+            self.resolve_finding(project_id, item.finding_id, resolution=item.resolution)
         for item in outcome.artifacts:
             self.record_artifact(
                 project_id, path=item.path, kind=item.kind, sha256=item.sha256,
@@ -503,9 +528,13 @@ class ProjectService:
             if outcome.role != AgentRole.VERIFIER:
                 raise ValueError("only verifier outcomes may update acceptance criteria")
             for assessment in outcome.criterion_assessments:
+                unknown_refs = [ref for ref in assessment.evidence_refs if ref not in evidence_ref_map]
+                if unknown_refs:
+                    raise ValueError(f"unknown evidence refs in criterion assessment: {unknown_refs}")
+                resolved_evidence = list(assessment.evidence_ids) + [evidence_ref_map[ref] for ref in assessment.evidence_refs]
                 self.update_criterion(
                     project_id, assessment.criterion_id, status=assessment.status,
-                    evidence_ids=assessment.evidence_ids
+                    evidence_ids=resolved_evidence
                 )
         for action in outcome.next_actions:
             self.add_next_action(project_id, action)
@@ -525,7 +554,7 @@ class ProjectService:
         if snapshot.project.status == ProjectStatus.COMPLETE:
             return TeamCyclePlan(project_id=project_id, ready_work_items=[], complete=True, blocked=False, reason="all acceptance criteria are satisfied")
         ready = snapshot.ready_items()
-        unfinished = [item for item in snapshot.work_items if item.state not in {WorkItemState.DONE, WorkItemState.VERIFIED}]
+        unfinished = [item for item in snapshot.work_items if item.state not in {WorkItemState.DONE, WorkItemState.VERIFIED, WorkItemState.SKIPPED}]
         blocked = bool(unfinished) and not ready and not any(item.state == WorkItemState.RUNNING for item in unfinished)
         reason = "ready work is available" if ready else ("work is blocked" if blocked else "work is running or awaiting evidence")
         return TeamCyclePlan(project_id=project_id, ready_work_items=ready, complete=False, blocked=blocked, reason=reason)

@@ -210,8 +210,9 @@ def ask_cmd(
     effective_work_item = session.work_item_id if session else work_item_id
     context = service.relevant_context(project_id, effective_work_item) if project_id else None
     manager = TunnelManager(timeout_s=timeout_s)
-    selection = manager.select(tunnel_id=tunnel, policy=tunnel_policy, require_automatic=True)
-    answer = FocusedAnswerEngine().run(
+    root = workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    coordinator = ExecutionCoordinator(root, manager=manager)
+    answer = coordinator.run_focused(
         FocusedQuestion(
             question=question,
             domains=domain or [],
@@ -221,7 +222,8 @@ def ask_cmd(
             conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
             conversation_binding=session.conversation_binding if session else None,
         ),
-        manager.provider(selection),
+        tunnel_id=tunnel,
+        tunnel_policy=tunnel_policy,
     )
     if session and answer.conversation_binding:
         service.bind_session_conversation(project_id, session.session_id, answer.conversation_binding)

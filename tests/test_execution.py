@@ -69,3 +69,70 @@ def test_execution_tracks_full_review_phases(tmp_path: Path) -> None:
     assert statuses[0].phase == ExecutionPhase.COMPLETE
     assert statuses[0].tunnel_id == "fake"
     assert statuses[0].request_id == report.request_id
+
+
+def test_execution_tracks_focused_answer(tmp_path: Path) -> None:
+    from fancy_gpt.focused import FocusedQuestion
+
+    def response(turn):
+        return json.dumps({
+            "request_id": turn.request_id,
+            "answer": "Read only.",
+            "material_context": ["The signal is an ADC input."],
+            "unknowns": [],
+            "next_action": None,
+            "sources": [],
+            "confidence": 0.95,
+            "relevance_assessment": {
+                "within_requested_scope": True,
+                "necessary_expansions": [],
+                "omitted_non_material_topics": ["ADC theory"],
+            },
+        })
+
+    provider = ChatGPTWebAutomationProvider(FakeBrowserDriver([response]))
+    coordinator = ExecutionCoordinator(tmp_path, manager=_Manager(provider=provider))
+    answer = coordinator.run_focused(FocusedQuestion(question="Is this ADC signal read-only?"))
+    status = coordinator.store.list_recent()[0]
+    assert answer.answer == "Read only."
+    assert status.kind == "focused"
+    assert status.phase == ExecutionPhase.COMPLETE
+    assert status.request_id == answer.request_id
+
+
+def test_execution_tracks_team_assignment(tmp_path: Path) -> None:
+    from fancy_gpt.project_models import AgentRole
+    from fancy_gpt.project_service import ProjectService
+
+    service = ProjectService(tmp_path / "state")
+    project = service.create_project(project_id="exec-team", name="Exec team", target="Research one fact")
+    work = service.add_work_item(project.project_id, title="Research", objective="Resolve one fact", role=AgentRole.RESEARCHER)
+    assignment = service.start_assignment(project.project_id, work.work_item_id)
+
+    def response(turn):
+        return json.dumps({
+            "request_id": turn.request_id,
+            "session_id": assignment.session.session_id,
+            "work_item_id": assignment.work_item_id,
+            "role": "researcher",
+            "status": "complete",
+            "summary": "Fact resolved.",
+            "decisions": [], "evidence": [], "findings": [], "artifacts": [],
+            "criterion_assessments": [], "next_actions": [], "confidence": 0.9,
+            "relevance_assessment": {
+                "within_requested_scope": True,
+                "necessary_expansions": [],
+                "omitted_non_material_topics": [],
+            },
+        })
+
+    provider = ChatGPTWebAutomationProvider(FakeBrowserDriver([response]))
+    coordinator = ExecutionCoordinator(tmp_path, manager=_Manager(provider=provider))
+    outcome = coordinator.run_agent(assignment)
+    status = coordinator.store.list_recent()[0]
+    assert outcome.summary == "Fact resolved."
+    assert status.kind == "team"
+    assert status.project_id == project.project_id
+    assert status.session_id == assignment.session.session_id
+    assert status.phase == ExecutionPhase.COMPLETE
+    assert status.request_id == outcome.request_id

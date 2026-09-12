@@ -251,3 +251,11 @@ def test_bridge_site_health_round_trip() -> None:
         driver.stop()
         stop.set()
         server.shutdown()
+
+
+def test_available_tunnels_rejects_wildcard_snapshot() -> None:
+    from fancy_gpt.bridge.probe import available_tunnels
+    import pytest
+
+    with pytest.raises(ValueError, match="forbidden wildcard"):
+        available_tunnels([{"worker_id": "legacy", "tunnel_ids": ["*"]}])

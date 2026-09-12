@@ -27,13 +27,10 @@ def probe_bridge_workers(endpoint: str, token: str, *, open_timeout_s: float = 1
 
 def available_tunnels(workers: list[dict]) -> set[str]:
     result: set[str] = set()
-    wildcard = False
     for worker in workers:
         for item in worker.get("tunnel_ids", []):
             if item == "*":
-                wildcard = True
-            elif isinstance(item, str):
+                raise ValueError("bridge worker snapshot contains forbidden wildcard tunnel id")
+            if isinstance(item, str) and item:
                 result.add(item)
-    if wildcard:
-        result.add("*")
     return result

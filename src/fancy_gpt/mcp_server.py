@@ -237,7 +237,7 @@ def run_project_next(
 ) -> TeamStepResult:
     """Run one ready team work item, or return a structured external-agent assignment."""
     manager = _manager()
-    return ProjectRunner(_project_service(), manager=manager).run_next(
+    return ProjectRunner(_project_service(), manager=manager, tunnel_lock_factory=_tunnel_lock).run_next(
         project_id, tunnel_id=tunnel_id, tunnel_policy=tunnel_policy
     )
 
@@ -251,7 +251,7 @@ def run_project_until_pause(
 ) -> list[TeamStepResult]:
     """Run model-backed teammates until complete, blocked, idle, or external-agent handoff."""
     manager = _manager()
-    return ProjectRunner(_project_service(), manager=manager).run_until_pause(
+    return ProjectRunner(_project_service(), manager=manager, tunnel_lock_factory=_tunnel_lock).run_until_pause(
         project_id, tunnel_id=tunnel_id, tunnel_policy=tunnel_policy, max_steps=max_steps
     )
 
@@ -380,20 +380,21 @@ def ask_focused(
     effective_work_item = session.work_item_id if session else work_item_id
     context = service.relevant_context(project_id, effective_work_item) if project_id else None
     manager = _manager()
-    selection = manager.select(tunnel_id=tunnel_id, policy=tunnel_policy, require_automatic=True)
-    with _tunnel_lock(selection.tunnel_id):
-        answer = FocusedAnswerEngine().run(
-            FocusedQuestion(
-                question=question,
-                domains=domains or [],
-                response_intent=response_intent,
-                principles=context.principles if context else FocusedQuestion(question=question).principles,
-                project_context=context,
-                conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
-                conversation_binding=session.conversation_binding if session else None,
-            ),
-            manager.provider(selection),
-        )
+    root = Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    coordinator = ExecutionCoordinator(root, manager=manager, tunnel_lock_factory=_tunnel_lock)
+    answer = coordinator.run_focused(
+        FocusedQuestion(
+            question=question,
+            domains=domains or [],
+            response_intent=response_intent,
+            principles=context.principles if context else FocusedQuestion(question=question).principles,
+            project_context=context,
+            conversation_strategy=session.conversation_strategy if session else ConversationStrategy.FRESH,
+            conversation_binding=session.conversation_binding if session else None,
+        ),
+        tunnel_id=tunnel_id,
+        tunnel_policy=tunnel_policy,
+    )
     if session and answer.conversation_binding:
         service.bind_session_conversation(project_id, session.session_id, answer.conversation_binding)
     return answer

@@ -1,4 +1,4 @@
-# Design review result — v0.7.0
+# Design review result — v0.8.0
 
 ## Verdict
 

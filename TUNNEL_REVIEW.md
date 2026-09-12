@@ -1,4 +1,4 @@
-# Independent tunnel architecture review — fancy-gpt v0.7.0
+# Independent tunnel architecture review — fancy-gpt v0.8.0
 
 **Result: PASS.**
 
