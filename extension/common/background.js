@@ -11,8 +11,31 @@ const DEFAULTS = {
   browserName: "chrome",
   nativeHost: "com.fancygpt.bridge",
   autoConnect: true,
-  reconnectIntervalMs: 2000
+  reconnectIntervalMs: 2000,
+  // Run task tabs in their own minimized window instead of the window you are
+  // working in, so automation never appears in your tab strip.
+  separateTaskWindow: false
 };
+
+let taskWindowId = null;
+
+async function taskWindowFor(url) {
+  if (taskWindowId != null) {
+    try {
+      await ext.windows.get(taskWindowId);
+      return ext.tabs.create({url, windowId: taskWindowId, active: false});
+    } catch (_) {
+      taskWindowId = null;
+    }
+  }
+  // A minimized, unfocused window keeps the page rendered -- the automation
+  // drives the real ChatGPT UI and needs a live document -- while staying out
+  // of the way. Chrome may throttle timers in a hidden window, so completion
+  // detection can be slower here than in a visible tab.
+  const created = await ext.windows.create({url, focused: false, state: "minimized"});
+  taskWindowId = created.id;
+  return created.tabs?.[0] ?? null;
+}
 
 async function getConfig() {
   const value = await ext.storage.local.get(DEFAULTS);
@@ -67,7 +90,11 @@ async function executeJob(job) {
   try {
     if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
     if (job.site !== "chatgpt") throw new Error(`unsupported site: ${job.site}`);
-    tab = await ext.tabs.create({url: taskUrlFor(job.conversation), active: false});
+    const taskUrl = taskUrlFor(job.conversation);
+    const config = await getConfig();
+    tab = config.separateTaskWindow
+      ? await taskWindowFor(taskUrl)
+      : await ext.tabs.create({url: taskUrl, active: false});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
     if (job.operation === "site.health") {
       const health = await sendToContentOrTabClose(tab.id, {type: "fancy_site_health", site: job.site});

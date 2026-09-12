@@ -1,6 +1,6 @@
 const ext = globalThis.browser ?? globalThis.chrome;
 const ids = ["transport", "endpoint", "token", "tunnelId", "browserName"];
-const checkboxIds = ["autoConnect"];
+const checkboxIds = ["autoConnect", "separateTaskWindow"];
 
 function expectedTunnel(browserName, transport) {
   return `${browserName}-extension-${transport === "native" ? "native-local" : "ws-remote"}`;
