@@ -22,6 +22,8 @@ from .chatgpt import CHATGPT_SITE, ChatGPTSelectors
 class _PageLease:
     page: Any
     baseline_turn_ids: set[str]
+    conversation_mode: str = "fresh"
+    conversation_binding: str | None = None
     submitted: bool = False
 
 
@@ -110,18 +112,40 @@ class ChatGPTSiteDriver:
         return [str(value) for value in values]
 
     def begin_turn(self, *, request_id: str, stage: str) -> BrowserTurn:
+        return self.begin_managed_turn(
+            request_id=request_id, stage=stage, conversation={"mode": "fresh", "binding": None}
+        )
+
+    def begin_managed_turn(self, *, request_id: str, stage: str, conversation: dict[str, str | None]) -> BrowserTurn:
         if len(self._leases) >= self.max_concurrent_turns:
             raise BrowserCapacityError("maximum concurrent ChatGPT Web turns reached")
+        mode = str(conversation.get("mode") or "fresh")
+        binding = conversation.get("binding")
+        if mode not in {"fresh", "resume", "fork"}:
+            raise ValueError(f"unsupported conversation mode: {mode}")
+        if mode == "resume":
+            if not binding:
+                raise ValueError("resume conversation requires a logical or ChatGPT binding")
+            target_url = str(binding) if str(binding).startswith("https://chatgpt.com/") else "https://chatgpt.com/"
+        elif mode == "fork":
+            # A fork is a new persistent ChatGPT thread. Reduced project state
+            # carries forward only relevant context without contaminating the source thread.
+            target_url = "https://chatgpt.com/"
+        else:
+            # Independent/fresh work deliberately uses Temporary Chat.
+            target_url = self.temporary_chat_url
         page = self.runtime.new_page()
         try:
-            page.goto(self.temporary_chat_url, wait_until="domcontentloaded", timeout=30_000)
+            page.goto(target_url, wait_until="domcontentloaded", timeout=30_000)
             self._wait_for_composer(page)
             baseline = set(self._turn_ids(page))
         except Exception:
             page.close()
             raise
         turn = BrowserTurn(turn_id=uuid.uuid4().hex, request_id=request_id, stage=stage)
-        self._leases[turn.turn_id] = _PageLease(page=page, baseline_turn_ids=baseline)
+        self._leases[turn.turn_id] = _PageLease(
+            page=page, baseline_turn_ids=baseline, conversation_mode=mode, conversation_binding=str(binding) if binding else None
+        )
         return turn
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:
@@ -185,10 +209,13 @@ class ChatGPTSiteDriver:
             completed = tracker.observe(assistant_candidates, stop_visible=stop_visible)
             if completed is not None:
                 response_identity, text = completed
+                current_url = str(getattr(lease.page, "url", "") or "")
+                binding = current_url if current_url.startswith("https://chatgpt.com/") else lease.conversation_binding
                 return BrowserResponse(
                     turn_id=turn.turn_id,
                     text=text,
                     response_identity=response_identity,
+                    conversation_binding=binding,
                 )
             time.sleep(self.poll_interval_s)
         raise BrowserTurnTimeoutError(f"ChatGPT Web response did not complete within {timeout_s:.1f}s")

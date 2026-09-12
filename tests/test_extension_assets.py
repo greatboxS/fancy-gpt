@@ -74,3 +74,10 @@ def test_chromium_manifest_requires_websocket_service_worker_lifetime_support(tm
     chrome = export_extension("chrome", tmp_path / "chrome-min-version")
     manifest = json.loads((chrome / "manifest.json").read_text())
     assert int(manifest["minimum_chrome_version"]) >= 116
+
+
+def test_extension_background_exposes_site_health_operation():
+    source = Path("extension/common/background.js").read_text(encoding="utf-8")
+    assert '"site.health"' in source
+    assert '"fancy_site_health"' in source
+    assert "JSON.stringify(payload)" in source

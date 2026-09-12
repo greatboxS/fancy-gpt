@@ -208,3 +208,46 @@ def test_bridge_snapshot_probe_lists_registered_tunnels() -> None:
     finally:
         stop.set()
         server.shutdown()
+
+
+def test_bridge_site_health_round_trip() -> None:
+    token = "health-token"
+    server = BridgeServer("127.0.0.1", 0, token)
+    server.start_background()
+    endpoint = f"ws://127.0.0.1:{server.port}"
+    stop = threading.Event()
+
+    def browser_worker() -> None:
+        connection = connect(endpoint)
+        connection.send(dumps(hello(
+            role="browser", token=token,
+            tunnel_ids=["edge-extension-ws-remote"], browser="edge"
+        )))
+        assert loads(connection.recv(timeout=5))["type"] == "hello_ack"
+        try:
+            while not stop.is_set():
+                message = loads(connection.recv(timeout=5))
+                if message.get("type") == "job" and message.get("operation") == "site.health":
+                    connection.send(dumps({
+                        "type": "job_result", "job_id": message["job_id"],
+                        "text": json.dumps({"ok": True, "reason": "ready"}),
+                        "response_identity": "site-health",
+                    }))
+        except Exception:
+            pass
+        finally:
+            connection.close()
+
+    threading.Thread(target=browser_worker, daemon=True).start()
+    deadline = time.monotonic() + 2
+    while server.hub.worker_for("edge-extension-ws-remote") is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+    driver = BridgeBrowserDriver(endpoint, token, "edge-extension-ws-remote")
+    try:
+        driver.start()
+        driver.health_check()
+        assert driver.site_health(timeout_s=5)["reason"] == "ready"
+    finally:
+        driver.stop()
+        stop.set()
+        server.shutdown()

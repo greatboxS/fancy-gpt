@@ -26,13 +26,47 @@ async function sendToContent(tabId, message, retries = 50) {
   throw lastError ?? new Error("site content adapter didn't become ready");
 }
 
+function conversationTarget(conversation) {
+  const mode = conversation?.mode ?? "fresh";
+  const binding = conversation?.binding ?? null;
+  if (!["fresh", "resume", "fork"].includes(mode)) throw new Error(`unsupported conversation mode: ${mode}`);
+  if (mode === "resume") {
+    if (!binding) throw new Error("resume conversation requires a logical or ChatGPT binding");
+    return String(binding).startsWith("https://chatgpt.com/") ? String(binding) : "https://chatgpt.com/";
+  }
+  if (mode === "fork") return "https://chatgpt.com/";
+  return "https://chatgpt.com/?temporary-chat=true";
+}
+
+async function captureConversationBinding(tabId, fallback = null) {
+  for (let i = 0; i < 20; ++i) {
+    try {
+      const current = await ext.tabs.get(tabId);
+      const url = current?.url ?? "";
+      if (url.startsWith("https://chatgpt.com/") && !url.includes("temporary-chat=true")) return url;
+    } catch (_) {}
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return fallback;
+}
+
 async function executeJob(job) {
   let tab = null;
   try {
-    if (job.operation !== "model.turn") throw new Error(`unsupported operation: ${job.operation}`);
+    if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
     if (job.site !== "chatgpt") throw new Error(`unsupported site: ${job.site}`);
-    tab = await ext.tabs.create({url: "https://chatgpt.com/?temporary-chat=true", active: false});
+    const targetUrl = conversationTarget(job.conversation);
+    tab = await ext.tabs.create({url: targetUrl, active: false});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
+    if (job.operation === "site.health") {
+      const health = await sendToContent(tab.id, {type: "fancy_site_health", site: job.site});
+      const payload = health ?? {ok: false, reason: "site-health-no-response"};
+      globalThis.FancyGPTTransport.send({
+        type: "job_result", job_id: job.job_id, text: JSON.stringify(payload),
+        response_identity: "site-health"
+      });
+      return;
+    }
     const result = await sendToContent(tab.id, {
       type: "fancy_execute_turn",
       site: job.site,
@@ -41,12 +75,14 @@ async function executeJob(job) {
       timeoutMs: Math.max(1000, Math.floor((job.timeout_s ?? 300) * 1000))
     });
     if (!result || !result.ok) throw new Error(result?.error ?? "site content adapter failed");
+    const binding = await captureConversationBinding(tab.id, job.conversation?.binding ?? null);
     globalThis.FancyGPTTransport.send({
       type: "job_result",
       job_id: job.job_id,
       text: result.text,
       assistant_turn_id: result.responseIdentity,
-      response_identity: result.responseIdentity
+      response_identity: result.responseIdentity,
+      conversation_binding: binding
     });
   } catch (error) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});

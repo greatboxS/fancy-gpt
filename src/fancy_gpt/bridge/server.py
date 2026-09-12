@@ -4,6 +4,7 @@ import ipaddress
 import queue
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,7 +27,9 @@ class BrowserWorker:
     connection: ServerConnection
     tunnel_ids: set[str]
     browser: str
+    worker_id: str = field(default_factory=lambda: f"worker-{uuid.uuid4().hex[:10]}")
     connected_at: float = field(default_factory=time.monotonic)
+    last_heartbeat: float = field(default_factory=time.monotonic)
     send_lock: threading.Lock = field(default_factory=threading.Lock)
     request_lock: threading.Lock = field(default_factory=threading.Lock)
     pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
@@ -60,12 +63,20 @@ class BrowserWorker:
 
 
 class BridgeHub:
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, *, stale_after_s: float = 60.0) -> None:
         self.token = token
+        self.stale_after_s = stale_after_s
         self._workers: list[BrowserWorker] = []
         self._lock = threading.RLock()
 
+    def _fresh(self, worker: BrowserWorker) -> bool:
+        return worker.alive and (time.monotonic() - worker.last_heartbeat) <= self.stale_after_s
+
     def register(self, worker: BrowserWorker) -> None:
+        if not worker.tunnel_ids:
+            raise ValueError("browser worker must register at least one exact tunnel id")
+        if "*" in worker.tunnel_ids:
+            raise ValueError("wildcard tunnel registration is forbidden")
         with self._lock:
             self._workers.append(worker)
 
@@ -77,15 +88,24 @@ class BridgeHub:
 
     def worker_for(self, tunnel_id: str) -> BrowserWorker | None:
         with self._lock:
-            for worker in self._workers:
-                if worker.alive and (tunnel_id in worker.tunnel_ids or "*" in worker.tunnel_ids):
-                    return worker
+            candidates = [worker for worker in self._workers if self._fresh(worker) and tunnel_id in worker.tunnel_ids]
+            if not candidates:
+                return None
+            return max(candidates, key=lambda worker: worker.last_heartbeat)
         return None
 
     def snapshot(self) -> list[dict[str, Any]]:
+        now = time.monotonic()
         with self._lock:
             return [
-                {"browser": worker.browser, "tunnel_ids": sorted(worker.tunnel_ids), "alive": worker.alive}
+                {
+                    "worker_id": worker.worker_id,
+                    "browser": worker.browser,
+                    "tunnel_ids": sorted(worker.tunnel_ids),
+                    "alive": worker.alive,
+                    "fresh": self._fresh(worker),
+                    "heartbeat_age_s": max(0.0, now - worker.last_heartbeat),
+                }
                 for worker in self._workers
                 if worker.alive
             ]
@@ -125,14 +145,13 @@ class BridgeServer:
             tunnel_ids=set(str(item) for item in hello.get("tunnel_ids", [])),
             browser=str(hello.get("browser") or "unknown"),
         )
-        if not worker.tunnel_ids:
-            raise ValueError("browser worker must register at least one tunnel id")
         self.hub.register(worker)
         connection.send(dumps({"type": "hello_ack", "protocol": PROTOCOL_VERSION, "role": "browser"}))
         try:
             while True:
                 message = loads(connection.recv())
                 if message.get("type") == "heartbeat":
+                    worker.last_heartbeat = time.monotonic()
                     worker.send({"type": "heartbeat_ack", "ts": message.get("ts")})
                     continue
                 if message.get("type") in {"job_result", "job_error"}:
@@ -167,7 +186,9 @@ class BridgeServer:
                     }))
                     continue
                 try:
-                    response = worker.request(message, timeout_s=float(message.get("timeout_s", self.job_timeout_s)))
+                    requested_timeout = float(message.get("timeout_s", self.job_timeout_s))
+                    effective_timeout = max(1.0, min(requested_timeout, self.job_timeout_s))
+                    response = worker.request(message, timeout_s=effective_timeout)
                 except Exception as exc:
                     response = {"type": "job_error", "job_id": message.get("job_id"), "error": str(exc)}
                 connection.send(dumps(response))

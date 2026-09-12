@@ -14,6 +14,7 @@ from .protocol import PROTOCOL_VERSION, dumps, hello, loads
 @dataclass
 class _PendingTurn:
     prompt: str | None = None
+    conversation: dict[str, str | None] | None = None
 
 
 class BridgeBrowserDriver:
@@ -65,9 +66,49 @@ class BridgeBrowserDriver:
             raise RuntimeError(f"browser bridge unavailable for {self.tunnel_id}")
         _ = time.monotonic() - started
 
+
+    def site_health(self, *, timeout_s: float = 20.0) -> dict:
+        """Probe the actual site adapter through the registered browser worker."""
+        job_id = f"health-{uuid.uuid4().hex}"
+        self._conn().send(dumps({
+            "type": "job",
+            "job_id": job_id,
+            "tunnel_id": self.tunnel_id,
+            "site": "chatgpt",
+            "operation": "site.health",
+            "request_id": job_id,
+            "stage": "health",
+            "conversation": {"mode": "fresh", "binding": None},
+            "timeout_s": min(timeout_s, self.job_timeout_s),
+        }))
+        result = loads(self._conn().recv(timeout=timeout_s))
+        if result.get("job_id") != job_id:
+            raise RuntimeError("bridge site-health response identity mismatch")
+        if result.get("type") == "job_error":
+            raise RuntimeError(str(result.get("error", "site health failed")))
+        if result.get("type") != "job_result":
+            raise RuntimeError(f"unexpected site-health response: {result.get('type')}")
+        import json
+        payload = json.loads(str(result.get("text") or "{}"))
+        if not isinstance(payload, dict):
+            raise RuntimeError("site health response is malformed")
+        if not payload.get("ok"):
+            raise RuntimeError(f"site not ready: {payload.get('reason', 'unknown')}")
+        return payload
+
     def begin_turn(self, *, request_id: str, stage: str) -> BrowserTurn:
+        return self.begin_managed_turn(
+            request_id=request_id, stage=stage, conversation={"mode": "fresh", "binding": None}
+        )
+
+    def begin_managed_turn(self, *, request_id: str, stage: str, conversation: dict[str, str | None]) -> BrowserTurn:
+        mode = str(conversation.get("mode") or "fresh")
+        if mode not in {"fresh", "resume", "fork"}:
+            raise ValueError(f"unsupported conversation mode: {mode}")
+        if mode == "resume" and not conversation.get("binding"):
+            raise ValueError("resume conversation requires a binding")
         turn_id = f"bridge-{uuid.uuid4().hex}"
-        self._turns[turn_id] = _PendingTurn()
+        self._turns[turn_id] = _PendingTurn(conversation={"mode": mode, "binding": conversation.get("binding")})
         return BrowserTurn(turn_id=turn_id, request_id=request_id, stage=stage)
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:
@@ -86,7 +127,7 @@ class BridgeBrowserDriver:
             "request_id": turn.request_id,
             "stage": turn.stage,
             "prompt": prompt,
-            "conversation": {"mode": "fresh"},
+            "conversation": pending.conversation or {"mode": "fresh", "binding": None},
             "timeout_s": self.job_timeout_s,
         }))
 
@@ -107,6 +148,7 @@ class BridgeBrowserDriver:
             turn_id=turn.turn_id,
             text=text,
             response_identity=str(result.get("response_identity") or result.get("assistant_turn_id") or turn.turn_id),
+            conversation_binding=(str(result.get("conversation_binding")) if result.get("conversation_binding") else None),
         )
 
     def close_turn(self, turn: BrowserTurn) -> None:

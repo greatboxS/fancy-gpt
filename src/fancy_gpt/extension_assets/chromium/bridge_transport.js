@@ -6,80 +6,135 @@
   let heartbeatTimer = null;
   let reconnectTimer = null;
   let handler = async () => {};
+  let generation = 0;
+  let connectedGeneration = 0;
 
-  function scheduleReconnect(connectFn) {
-    if (reconnectTimer) return;
+  function clearHeartbeat() {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+
+  function scheduleReconnect(connectFn, ownerGeneration) {
+    if (ownerGeneration !== generation || reconnectTimer) return;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
-      connectFn().catch(() => scheduleReconnect(connectFn));
+      if (ownerGeneration !== generation) return;
+      connectFn().catch(() => scheduleReconnect(connectFn, ownerGeneration));
     }, 2000);
   }
 
   function send(message) {
-    if (socket && socket.readyState === WebSocket.OPEN) {
+    if (socket && socket.readyState === WebSocket.OPEN && connectedGeneration === generation) {
       socket.send(JSON.stringify(message));
       return;
     }
-    if (nativePort) {
+    if (nativePort && connectedGeneration === generation) {
       nativePort.postMessage(message);
       return;
     }
     throw new Error("FancyGPT bridge transport is not connected");
   }
 
-  async function connectWebSocket(config, reconnect) {
-    socket = new WebSocket(config.endpoint);
-    socket.onopen = () => {
-      socket.send(JSON.stringify({
-        type: "hello",
-        protocol: "fancy-browser/1",
-        role: "browser",
-        token: config.token,
-        tunnel_ids: [config.tunnelId],
-        browser: config.browserName
-      }));
-      heartbeatTimer = setInterval(() => {
-        if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({type: "heartbeat", ts: Date.now()}));
-      }, 20000);
-    };
-    socket.onmessage = event => handler(typeof event.data === "string" ? JSON.parse(event.data) : event.data).catch(console.error);
-    socket.onerror = () => {};
-    socket.onclose = () => {
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
-      socket = null;
-      scheduleReconnect(reconnect);
-    };
+  async function connectWebSocket(config, ownerGeneration, reconnect) {
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(config.endpoint);
+      socket = ws;
+      let acknowledged = false;
+      const fail = error => {
+        if (!acknowledged) reject(error instanceof Error ? error : new Error(String(error)));
+      };
+      ws.onopen = () => {
+        if (ownerGeneration !== generation) { ws.close(); return; }
+        ws.send(JSON.stringify({
+          type: "hello",
+          protocol: "fancy-browser/1",
+          role: "browser",
+          token: config.token,
+          tunnel_ids: [config.tunnelId],
+          browser: config.browserName
+        }));
+      };
+      ws.onmessage = event => {
+        const message = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        if (!acknowledged && message?.type === "hello_ack") {
+          acknowledged = true;
+          connectedGeneration = ownerGeneration;
+          clearHeartbeat();
+          heartbeatTimer = setInterval(() => {
+            if (ownerGeneration === generation && ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({type: "heartbeat", ts: Date.now()}));
+            }
+          }, 20000);
+          resolve();
+          return;
+        }
+        handler(message).catch(console.error);
+      };
+      ws.onerror = () => fail(new Error("FancyGPT WebSocket connection failed"));
+      ws.onclose = () => {
+        if (ownerGeneration !== generation || socket !== ws) return;
+        clearHeartbeat();
+        socket = null;
+        connectedGeneration = 0;
+        scheduleReconnect(reconnect, ownerGeneration);
+        fail(new Error("FancyGPT WebSocket closed before bridge acknowledgement"));
+      };
+    });
   }
 
-  async function connectNative(config, reconnect) {
-    nativePort = ext.runtime.connectNative(config.nativeHost);
-    nativePort.onMessage.addListener(message => handler(message).catch(console.error));
-    nativePort.onDisconnect.addListener(() => {
+  async function connectNative(config, ownerGeneration, reconnect) {
+    const port = ext.runtime.connectNative(config.nativeHost);
+    nativePort = port;
+    connectedGeneration = ownerGeneration;
+    clearHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (ownerGeneration === generation && nativePort === port) {
+        try { port.postMessage({type: "heartbeat", ts: Date.now()}); } catch (_) {}
+      }
+    }, 20000);
+    port.onMessage.addListener(message => handler(message).catch(console.error));
+    port.onDisconnect.addListener(() => {
+      if (ownerGeneration !== generation || nativePort !== port) return;
+      clearHeartbeat();
       nativePort = null;
-      scheduleReconnect(reconnect);
+      connectedGeneration = 0;
+      scheduleReconnect(reconnect, ownerGeneration);
     });
   }
 
   async function connect(config) {
-    if (socket || nativePort) return;
-    const reconnect = () => connect(config);
-    if (config.transport === "native") await connectNative(config, reconnect);
-    else await connectWebSocket(config, reconnect);
+    if ((socket || nativePort) && connectedGeneration === generation) return;
+    generation += 1;
+    const ownerGeneration = generation;
+    const reconnect = () => {
+      if (ownerGeneration !== generation) return Promise.resolve();
+      return config.transport === "native"
+        ? connectNative(config, ownerGeneration, reconnect)
+        : connectWebSocket(config, ownerGeneration, reconnect);
+    };
+    await reconnect();
   }
 
   function disconnect() {
-    try { socket?.close(); } catch (_) {}
-    try { nativePort?.disconnect(); } catch (_) {}
+    generation += 1;
+    connectedGeneration = 0;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    clearHeartbeat();
+    const ws = socket;
+    const port = nativePort;
     socket = null;
     nativePort = null;
+    try { ws?.close(); } catch (_) {}
+    try { port?.disconnect(); } catch (_) {}
   }
 
   function status() {
     return {
-      connected: Boolean((socket && socket.readyState === WebSocket.OPEN) || nativePort),
-      websocket: Boolean(socket && socket.readyState === WebSocket.OPEN),
-      native: Boolean(nativePort)
+      connected: Boolean(connectedGeneration === generation && ((socket && socket.readyState === WebSocket.OPEN) || nativePort)),
+      websocket: Boolean(connectedGeneration === generation && socket && socket.readyState === WebSocket.OPEN),
+      native: Boolean(connectedGeneration === generation && nativePort),
+      generation
     };
   }
 

@@ -150,6 +150,34 @@ class TunnelManager:
             layers=layers,
         )
 
+    def inspect(self, spec: TunnelSpec) -> TunnelHealth:
+        """Deep diagnostic health including the live site adapter when possible."""
+        health = self.probe(spec)
+        if health.state == TunnelHealthState.UNAVAILABLE or spec.runtime.value != "extension":
+            return health
+        driver = self.driver_factory.build(spec)
+        site_health = getattr(driver, "site_health", None)
+        if not callable(site_health):
+            return health
+        try:
+            driver.start()
+            driver.health_check()
+            payload = site_health(timeout_s=min(20.0, self.timeout_s))
+            health.metadata["site_health"] = payload
+            health.detail = "browser worker connected and ChatGPT site adapter is ready"
+            health.state = TunnelHealthState.HEALTHY
+            return health
+        except Exception as exc:
+            health.state = TunnelHealthState.UNAVAILABLE
+            health.detail = f"browser worker connected but site is not ready: {type(exc).__name__}: {exc}"
+            health.metadata["site_ready"] = False
+            return health
+        finally:
+            try:
+                driver.stop()
+            except Exception:
+                pass
+
     def select(
         self,
         *,
