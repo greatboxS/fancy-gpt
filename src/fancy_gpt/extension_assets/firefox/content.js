@@ -150,7 +150,10 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     : adapter.executeTurn(
         String(message.prompt ?? ""),
         Number(message.timeoutMs ?? 300000),
-        text => ext.runtime.sendMessage({type: "fancy_progress", jobId: message.jobId, text}).catch(() => {}),
+        text => ext.runtime.sendMessage({
+          type: "fancy_progress", jobId: message.jobId, leaseId: message.leaseId,
+          generationEpoch: message.generationEpoch, text,
+        }).catch(() => {}),
         {
           continuing: Boolean(message.continuing),
           isCancelled: () => cancelledJobs.has(String(message.jobId ?? "")),
@@ -163,6 +166,10 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
            * place that does not depend on rendering.
            */
           streamFinishedAt: () => streamFinishedAt,
+          onSubmitted: () => ext.runtime.sendMessage({
+            type: "fancy_turn_submitted", jobId: message.jobId, leaseId: message.leaseId,
+            generationEpoch: message.generationEpoch,
+          }).catch(() => {}),
         },
       );
   Promise.resolve(task)

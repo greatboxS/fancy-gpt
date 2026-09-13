@@ -200,6 +200,13 @@
       );
     }
     send.click();
+    await waitFor(() => {
+      const current = firstVisible(SELECTORS.composer);
+      const composerText = current ? (current.value ?? current.textContent ?? "") : "";
+      return !composerText.includes(prompt.slice(0, 32)) || isGenerating()
+        || responseNodes().length > baselineCount;
+    }, 5000, "Gemini did not accept the submitted prompt");
+    options?.onSubmitted?.();
 
     // Give up on inactivity rather than elapsed time: a long reasoning turn
     // can legitimately outrun any fixed deadline, and the page is the thing

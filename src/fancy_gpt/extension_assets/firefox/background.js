@@ -18,6 +18,20 @@ const DEFAULTS = {
 
 let nextLeaseId = 1;
 const surfaceLeases = new Map();
+let focusTail = Promise.resolve();
+
+async function acquireFocus() {
+  const previous = focusTail;
+  let release;
+  focusTail = new Promise(resolve => { release = resolve; });
+  await previous;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    release();
+  };
+}
 
 async function acquireSurface(jobId, epoch, url) {
   /* Unfocused, but never minimized.
@@ -228,6 +242,7 @@ function reloadExtension(message) {
 
 async function executeJob(job) {
   let lease = null;
+  let releaseFocus = null;
   try {
     if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
     // Which sites this build can drive is decided by which adapters registered
@@ -253,6 +268,7 @@ async function executeJob(job) {
      * window is what makes that cost affordable -- it is the automation's own
      * space, reused for as long as work keeps arriving.
      */
+    releaseFocus = await acquireFocus();
     lease = await acquireSurface(job.job_id, entry.epoch, taskUrl);
     entry.tabId = lease.tabId;
     entry.leaseId = lease.leaseId;
@@ -265,6 +281,8 @@ async function executeJob(job) {
     }
     if (job.operation === "site.health") {
       const health = await sendToContentOrTabClose(lease.tabId, {type: "fancy_site_health", site});
+      releaseFocus();
+      releaseFocus = null;
       const payload = health ?? {ok: false, reason: "site-health-no-response"};
       globalThis.FancyGPTTransport.send({
         type: "job_result", job_id: job.job_id, text: JSON.stringify(payload),
@@ -272,11 +290,16 @@ async function executeJob(job) {
       });
       return;
     }
-    const result = await sendToContentOrTabClose(lease.tabId, {
+    let submittedResolve;
+    entry.submitted = new Promise(resolve => { submittedResolve = resolve; });
+    entry.noteSubmitted = submittedResolve;
+    const responsePromise = sendToContentOrTabClose(lease.tabId, {
       type: "fancy_execute_turn",
       site,
       prompt: job.prompt,
       jobId: job.job_id,
+      leaseId: lease.leaseId,
+      generationEpoch: entry.epoch,
       continuing: job.conversation?.mode === "continue",
       // Deliberately short of the job's own deadline. If the adapter and the
       // bridge time out together, the bridge wins the race and reports a
@@ -285,6 +308,13 @@ async function executeJob(job) {
       // intermittent hang diagnosable.
       timeoutMs: Math.max(1000, Math.floor(((job.timeout_s ?? 300) - 5) * 1000))
     });
+    // The response promise can settle before the explicit acknowledgement on a
+    // very fast failure/cancel. Either event releases focus; generation itself
+    // never owns the arbiter.
+    await Promise.race([entry.submitted, responsePromise.then(() => undefined, () => undefined)]);
+    releaseFocus();
+    releaseFocus = null;
+    const result = await responsePromise;
     if (!result || !result.ok) throw new Error(result?.error ?? "site content adapter failed");
     if (result.diagnostics) {
       console.info("FancyGPT turn diagnostics", {browser: config.browserName, site, jobId: job.job_id, ...result.diagnostics});
@@ -319,6 +349,7 @@ async function executeJob(job) {
   } catch (error) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});
   } finally {
+    if (releaseFocus) releaseFocus();
     activeJobs.delete(job.job_id);
     await releaseSurface(lease);
   }
@@ -416,8 +447,16 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message?.type === "fancy_status") sendResponse(globalThis.FancyGPTTransport.status());
   if (message?.type === "fancy_progress" && message.jobId) {
+    const entry = activeJobs.get(String(message.jobId));
+    if (!entry || entry.tabId !== _sender?.tab?.id || entry.leaseId !== message.leaseId
+        || entry.epoch !== Number(message.generationEpoch ?? 0)) return false;
     try { globalThis.FancyGPTTransport.send({type: "job_progress", job_id: message.jobId, text: String(message.text ?? "")}); }
     catch (_) {}
+  }
+  if (message?.type === "fancy_turn_submitted" && message.jobId) {
+    const entry = activeJobs.get(String(message.jobId));
+    if (entry && entry.tabId === _sender?.tab?.id && entry.leaseId === message.leaseId
+        && entry.epoch === Number(message.generationEpoch ?? 0)) entry.noteSubmitted?.();
   }
 });
 

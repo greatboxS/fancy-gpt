@@ -223,6 +223,7 @@
         "ChatGPT did not accept the submitted prompt (composer still holds it): " + describeControls(target)
       );
     }
+    options?.onSubmitted?.();
 
     /* Give up on inactivity, not on elapsed time.
      *

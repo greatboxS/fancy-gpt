@@ -16,6 +16,9 @@ function event() {
 }
 
 async function main() {
+  const waitUntil = async predicate => {
+    for (let i = 0; i < 20 && !predicate(); ++i) await new Promise(resolve => setImmediate(resolve));
+  };
   let nextWindow = 10;
   let nextTab = 100;
   const windows = new Map();
@@ -25,6 +28,7 @@ async function main() {
   const removed = event();
   let handler;
   let reloads = 0;
+  let autoSubmit = true;
 
   const browser = {
     windows: {
@@ -39,6 +43,12 @@ async function main() {
       onRemoved: removed,
       async sendMessage(tabId, message) {
         if (message.type === "fancy_cancel_turn") return {ok: true};
+        if (message.type === "fancy_execute_turn" && autoSubmit) {
+          setImmediate(() => browser.runtime.onMessage.emit(
+            {type: "fancy_turn_submitted", jobId: message.jobId, leaseId: message.leaseId,
+             generationEpoch: message.generationEpoch}, {tab: {id: tabId}}, () => {},
+          ));
+        }
         return new Promise((resolve, reject) => pending.set(tabId, {resolve, reject, message}));
       },
     },
@@ -71,9 +81,23 @@ async function main() {
   const source = fs.readFileSync(path.join(__dirname, "../common/background.js"), "utf8");
   vm.runInNewContext(source, context, {filename: "background.js"});
 
+  autoSubmit = false;
   const first = handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "a", prompt: "A", generation_epoch: 1});
   const second = handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "b", prompt: "B", generation_epoch: 1});
+  await waitUntil(() => windows.size === 1);
+  const firstEntry = context.FancyGPTBackgroundTest.activeJobs.get("a");
+  browser.runtime.onMessage.emit(
+    {type: "fancy_turn_submitted", jobId: "a", leaseId: firstEntry.leaseId + 99, generationEpoch: 1},
+    {tab: {id: firstEntry.tabId}}, () => {},
+  );
   await new Promise(resolve => setImmediate(resolve));
+  assert.strictEqual(windows.size, 1, "a wrong lease acknowledgement must not release focus");
+  browser.runtime.onMessage.emit(
+    {type: "fancy_turn_submitted", jobId: "a", leaseId: firstEntry.leaseId, generationEpoch: 1},
+    {tab: {id: firstEntry.tabId}}, () => {},
+  );
+  autoSubmit = true;
+  await waitUntil(() => windows.size === 2);
 
   assert.strictEqual(windows.size, 2, "concurrent turns must own separate windows");
   assert.strictEqual(context.FancyGPTBackgroundTest.surfaceLeases.size, 2);
@@ -97,7 +121,7 @@ async function main() {
   const jobs = ["c", "d", "e", "f"].map(job_id => handler({
     type: "job", operation: "model.turn", site: "chatgpt", job_id, prompt: job_id, generation_epoch: 1,
   }));
-  await new Promise(resolve => setImmediate(resolve));
+  await waitUntil(() => windows.size === 4);
   await handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "overflow", prompt: "x"});
   assert.strictEqual(windows.size, 4, "configured capacity must bound rendered surfaces");
   assert(sent.some(item => item.type === "job_error" && item.job_id === "overflow" && /capacity/.test(item.error)));
