@@ -305,8 +305,15 @@ async function executeJob(job) {
      * it would have to keep taking over the tab in front of them. The separate
      * window is what makes that cost affordable -- it is the automation's own
      * space, reused for as long as work keeps arriving.
-     */
+    */
     releaseFocus = await acquireFocus();
+    if (entry.cancelled) {
+      globalThis.FancyGPTTransport.send({
+        type: "job_cancelled", job_id: job.job_id, text: "", stopped_generation: false,
+        conversation_id: null, reason: "cancelled while waiting for browser focus"
+      });
+      return;
+    }
     lease = await acquireSurface(job.job_id, entry.epoch, taskUrl);
     entry.tabId = lease.tabId;
     entry.leaseId = lease.leaseId;

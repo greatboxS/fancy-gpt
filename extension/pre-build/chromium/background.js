@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "09ec86a6f9fb";
+const EXTENSION_BUILD = "e00ffcc2af16";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -305,8 +305,15 @@ async function executeJob(job) {
      * it would have to keep taking over the tab in front of them. The separate
      * window is what makes that cost affordable -- it is the automation's own
      * space, reused for as long as work keeps arriving.
-     */
+    */
     releaseFocus = await acquireFocus();
+    if (entry.cancelled) {
+      globalThis.FancyGPTTransport.send({
+        type: "job_cancelled", job_id: job.job_id, text: "", stopped_generation: false,
+        conversation_id: null, reason: "cancelled while waiting for browser focus"
+      });
+      return;
+    }
     lease = await acquireSurface(job.job_id, entry.epoch, taskUrl);
     entry.tabId = lease.tabId;
     entry.leaseId = lease.leaseId;

@@ -21,6 +21,7 @@ async function main() {
   };
   let nextWindow = 10;
   let nextTab = 100;
+  let createdWindows = 0;
   const windows = new Map();
   const pending = new Map();
   const sent = [];
@@ -34,6 +35,7 @@ async function main() {
   const browser = {
     windows: {
       async create(options) {
+        createdWindows += 1;
         const value = {id: nextWindow++, tabs: [{id: nextTab++}], options};
         windows.set(value.id, value);
         return value;
@@ -131,6 +133,31 @@ async function main() {
   assert.strictEqual(sessionStored.fancyGptSurfaceLeases.length, 0, "released leases leave no recovery record");
   assert.strictEqual(removed.size, 0);
   assert.deepStrictEqual(sent.filter(item => item.type === "job_result").map(item => item.job_id).sort(), ["a", "b"]);
+
+  // Cancellation while waiting for the focus arbiter must not allocate a
+  // browser surface, much less submit a prompt after the caller has gone.
+  autoSubmit = false;
+  const blocker = handler({
+    type: "job", operation: "model.turn", site: "chatgpt", job_id: "focus-owner", prompt: "owner", generation_epoch: 7,
+  });
+  const focusWaiter = handler({
+    type: "job", operation: "model.turn", site: "chatgpt", job_id: "focus-waiter", prompt: "waiter", generation_epoch: 7,
+  });
+  await waitUntil(() => context.FancyGPTBackgroundTest.activeJobs.get("focus-owner")?.tabId != null);
+  const ownerEntry = context.FancyGPTBackgroundTest.activeJobs.get("focus-owner");
+  const windowsBeforeCancel = createdWindows;
+  await handler({type: "cancel", job_id: "focus-waiter", generation_epoch: 7, control_id: "cancel-focus"});
+  browser.runtime.onMessage.emit(
+    {type: "fancy_turn_submitted", jobId: "focus-owner", leaseId: ownerEntry.leaseId, generationEpoch: 7},
+    {tab: {id: ownerEntry.tabId}}, () => {},
+  );
+  await focusWaiter;
+  assert.strictEqual(createdWindows, windowsBeforeCancel, "a cancelled focus waiter must not allocate a window");
+  assert(sent.some(item => item.type === "job_cancelled" && item.job_id === "focus-waiter"));
+  pending.get(ownerEntry.tabId).resolve({ok: true, text: "owner", responseIdentity: "owner1"});
+  await blocker;
+  assert.strictEqual(windows.size, 0);
+  autoSubmit = true;
 
   const jobs = ["c", "d", "e", "f"].map(job_id => handler({
     type: "job", operation: "model.turn", site: "chatgpt", job_id, prompt: job_id, generation_epoch: 1,
