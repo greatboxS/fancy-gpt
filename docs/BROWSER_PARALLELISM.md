@@ -244,3 +244,17 @@ Minimum acceptance scenarios:
 The release gate for parallelism is zero cross-turn response, progress,
 cancellation, capture, or cleanup leakage under repeated randomized completion
 order.
+
+## Implemented scheduler behavior
+
+The bridge owns both levels of queueing. A job waiting for its provider
+conversation and a job waiting for worker capacity are registered before they
+block, can be cancelled out of band, and return `job_cancelled` without sending
+the prompt to the extension. Once the conversation slot opens, routing is
+resolved again so a worker generation that went stale during the wait is never
+used.
+
+Worker selection is restricted to the exact tunnel and, when advertised, the
+requested site. Its load score includes active plus queued jobs. Operator worker
+snapshots expose those counts separately so saturation can be distinguished from
+a stuck active turn.

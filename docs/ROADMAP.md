@@ -176,9 +176,9 @@ Remaining:
 
 - End-to-end conformance runs driven by the real Codex, Claude Code and Gemini
   CLI binaries rather than protocol-level tests.
-- Parallel browser execution surfaces as specified in
-  `BROWSER_PARALLELISM.md`: per-turn leases, capacity negotiation, focus/render
-  arbitration, capture ownership, restart recovery, and composer-edit detection.
+- Live closeout for the parallel browser surfaces specified in
+  `BROWSER_PARALLELISM.md`: randomized Edge/Chrome soak, render/visibility
+  evidence, leaked-surface accounting, and composer-edit detection.
 - Join Grok and Copilot browser/decoder slices to the site registry, gateway
   model catalog, capabilities, CLI/MCP discovery, and cross-protocol tests.
 - Keep the per-layer readiness matrix and live compatibility evidence current.
@@ -199,3 +199,27 @@ Release gate:
 - Experimental browser-web limitations are stated separately from protocol support.
 - Parallel turns complete with randomized ordering and zero cross-turn response,
   progress, cancellation, capture, or cleanup leakage.
+
+### Parallel-runtime gate status
+
+Implemented and covered by executable tests:
+
+- exact per-turn surface leases and fenced progress/cancel/terminal handling;
+- worker capacity negotiation, bounded queuing, and least-loaded routing that
+  includes queued work and filters advertised site capabilities;
+- FIFO serialization for an exact `(tunnel, site, conversation_id)` while
+  unrelated conversations continue concurrently;
+- cancellable capacity and conversation waiters: cancellation before browser
+  submission is terminal locally and the prompt is never sent;
+- focus held only through verified prompt acceptance;
+- immediate failure of pending jobs on worker-generation loss;
+- conservative MV3 restart quarantine with no blind prompt replay;
+- self-reload accepted only while idle and verified by a new worker id plus the
+  expected extension build id.
+
+Still requiring live evidence before the parallel-runtime gate is closed:
+
+- randomized Edge and Chrome soak after the current build is deployed;
+- browser-visible throughput, latency, visibility, and leaked-surface evidence;
+- measured Grok and Copilot adapters/decoders and their provider-specific live
+  correlation fixtures.
