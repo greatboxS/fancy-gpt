@@ -137,6 +137,8 @@ def test_malformed_events_do_not_stop_the_decode() -> None:
         {"v": "b"},
     ))
     assert reply.text == "ab"
+    assert reply.framing_errors == 1
+    assert not reply.trustworthy
 
 
 def test_an_unmeasured_site_has_no_decoder_rather_than_a_guessed_one() -> None:
@@ -191,6 +193,13 @@ def test_gemini_framing_it_does_not_recognise_is_refused() -> None:
     assert not reply.trustworthy, "an unfamiliar body must not be improvised over"
 
 
+def test_gemini_valid_text_mixed_with_a_bad_chunk_is_not_trusted() -> None:
+    reply = decode_gemini_body(GEMINI_BODY + "\nnot-framing\n")
+    assert reply.text
+    assert reply.framing_errors == 1
+    assert not reply.trustworthy
+
+
 def test_gemini_is_registered_for_the_site() -> None:
     from fancy_gpt.stream_decoding import decode_stream
 
@@ -218,16 +227,12 @@ def test_the_reply_is_chosen_by_path_not_by_arriving_last() -> None:
     assert parse_json_object(reply.text)["answer"].startswith("A hash collision occurs")
 
 
-def test_the_largest_capture_is_the_fallback_not_the_rule() -> None:
-    # With nothing matching the site's known path, size is a reasonable guess --
-    # but only once the path has failed to decide, since "usually the biggest"
-    # is exactly the assumption that let telemetry stand in for an answer.
+def test_an_unknown_endpoint_is_never_guessed_by_size() -> None:
     captures = [
         {"path": "/unknown/small", "text": "tiny"},
         {"path": "/unknown/large", "text": GEMINI_BODY},
     ]
-    reply = decode_stream("gemini", bodies=captures)
-    assert reply is not None and reply.trustworthy
+    assert decode_stream("gemini", bodies=captures) is None
 
 
 def test_choosing_never_invents_a_decoder() -> None:

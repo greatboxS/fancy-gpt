@@ -38,6 +38,7 @@ class DecodedReply:
     applied: int = 0
     skipped: int = 0
     skipped_text: int = 0
+    framing_errors: int = 0
     unknown_ops: set[str] = field(default_factory=set)
     skipped_paths: set[str] = field(default_factory=set)
 
@@ -53,6 +54,7 @@ class DecodedReply:
         return (
             self.saw_done
             and not self.unknown_ops
+            and self.framing_errors == 0
             and self.skipped_text == 0
             and bool(self.text)
         )
@@ -197,11 +199,15 @@ def decode_chatgpt_stream(events: Iterable[str]) -> DecodedReply:
         try:
             parsed = json.loads(raw)
         except (TypeError, ValueError):
+            reply.framing_errors += 1
             continue
         if isinstance(parsed, dict) and "message" in parsed and "o" not in parsed and "p" not in parsed:
             # The opening snapshot arrives as a whole conversation event.
             document.root = {"message": parsed["message"], "conversation_id": parsed.get("conversation_id")}
             reply.applied += 1
+            continue
+        if not isinstance(parsed, dict):
+            reply.framing_errors += 1
             continue
         handle(parsed)
 
@@ -254,17 +260,23 @@ def decode_gemini_body(body: str) -> DecodedReply:
             # Not a length line: either the framing changed or this is a body
             # we were not built for. Either way, do not improvise.
             reply.skipped += 1
+            reply.framing_errors += 1
             reply.skipped_paths.add("<unframed>")
             continue
         if index < len(lines):
             chunks.append(lines[index])
             index += 1
+        else:
+            reply.skipped += 1
+            reply.framing_errors += 1
+            reply.skipped_paths.add("<missing-chunk>")
 
     for chunk in chunks:
         try:
             outer = json.loads(chunk)
         except ValueError:
             reply.skipped += 1
+            reply.framing_errors += 1
             reply.skipped_paths.add("<chunk>")
             continue
         for entry in outer if isinstance(outer, list) else []:
@@ -274,6 +286,7 @@ def decode_gemini_body(body: str) -> DecodedReply:
                 payload = json.loads(entry[2]) if isinstance(entry[2], str) else None
             except ValueError:
                 reply.skipped += 1
+                reply.framing_errors += 1
                 reply.skipped_paths.add("<payload>")
                 continue
             if not isinstance(payload, list):
@@ -336,19 +349,20 @@ REPLY_PATHS = {
 
 
 def _pick(site: str, captures: Sequence[dict] | None, field: str) -> Any:
-    """The capture that looks like this site's reply, else the largest.
+    """Pick only a capture from the measured reply endpoint.
 
-    Size is the fallback rather than the rule: a reply is usually the biggest
-    thing a page received, but "usually" is how a telemetry call of a few
-    hundred characters came to stand in for an answer of eleven thousand.
+    Guessing by size can return a convincing telemetry payload from an endpoint
+    whose protocol the decoder was never written for. No match means no network
+    answer; the caller deliberately falls back to the rendered page.
     """
     if not captures:
         return None
     pattern = REPLY_PATHS.get(site)
     if pattern is not None:
         matching = [c for c in captures if pattern.search(str(c.get("path") or ""))]
-        if matching:
-            captures = matching
+        if not matching:
+            return None
+        captures = matching
     return max(captures, key=lambda c: len(c.get(field) or "")).get(field)
 
 
