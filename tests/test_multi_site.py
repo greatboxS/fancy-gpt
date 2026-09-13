@@ -185,8 +185,8 @@ def test_cancellation_is_wired_through_the_exported_extension(tmp_path: Path) ->
     # The controller's cancel is dispatched, not silently ignored.
     assert 'message.type === "cancel"' in background
     assert "async function cancelJob(" in background
-    # A cancel for a previous occupant of a recycled tab is discarded.
-    assert "stale: a recycled tab" in background
+    # A cancel naming a different generation is refused, with a reason.
+    assert "cancel names a different generation" in background
     # Cancellation is reported distinctly from a normal answer.
     assert '"job_cancelled"' in background
 
@@ -282,7 +282,10 @@ def test_the_tick_uses_a_port_not_a_service_worker_timer(tmp_path: Path) -> None
     assert "ext.runtime.connect(" in content
     assert "closeTickPort()" in content, "the port must be released when the turn ends"
     # The reason is recorded where the next reader will need it.
-    assert "does not keep one alive" in background
+    assert "does not keep a Manifest V3 service worker" in background
+    # The measured throttling figure is recorded, so the next reader does not
+    # have to rediscover why a clock is needed at all.
+    assert "once a MINUTE" in background
 
 
 def test_submission_is_verified_rather_than_assumed(tmp_path: Path) -> None:
@@ -344,3 +347,22 @@ def test_the_composer_is_not_submitted_after_a_user_edits_it(tmp_path: Path) -> 
     # Only real user input counts; our own writes are synthetic.
     assert "event.isTrusted" in source
     assert "refusing to submit" in source
+
+
+def test_the_job_carries_its_fencing_identity(tmp_path: Path) -> None:
+    """Without it the extension only ever sees the default generation."""
+    import inspect
+
+    from fancy_gpt.bridge.client import BridgeBrowserDriver
+
+    source = inspect.getsource(BridgeBrowserDriver.submit)
+    assert '"generation_epoch"' in source, "the job must carry the epoch a cancel is checked against"
+
+
+def test_the_extension_answers_every_cancel(tmp_path: Path) -> None:
+    exported = export_extension("edge", tmp_path / "edge-cancel-ack")
+    background = (exported / "background.js").read_text(encoding="utf-8")
+    assert '"cancel_result"' in background
+    # Each refusal path must say why, not fall silent.
+    for reason in ("no such job is running", "cancel names a different generation"):
+        assert reason in background

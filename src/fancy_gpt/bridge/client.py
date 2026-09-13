@@ -28,6 +28,9 @@ class _PendingTurn:
     conversation_id: str | None = None
     conversation_mode: str = "temporary"
     site: str | None = None
+    #: Fencing identity, sent with the job so a cancel aimed at an older
+    #: generation can be told apart from one aimed at this turn.
+    generation_epoch: int = 0
 
 
 class BrowserTurnCancelled(RuntimeError):
@@ -158,10 +161,12 @@ class BridgeBrowserDriver:
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
         site: str | None = None,
+        generation_epoch: int = 0,
     ) -> BrowserTurn:
         turn_id = f"bridge-{uuid.uuid4().hex}"
         self._turns[turn_id] = _PendingTurn(
-            conversation_id=conversation_id, conversation_mode=conversation_mode, site=site
+            conversation_id=conversation_id, conversation_mode=conversation_mode, site=site,
+            generation_epoch=generation_epoch,
         )
         return BrowserTurn(
             turn_id=turn_id,
@@ -192,6 +197,10 @@ class BridgeBrowserDriver:
             "site": pending.site,
             "operation": "model.turn",
             "request_id": turn.request_id,
+            # The extension checks this when a cancel arrives. Without it here
+            # the extension only ever sees the default, and any cancel carrying
+            # a real generation is silently discarded.
+            "generation_epoch": pending.generation_epoch,
             "stage": turn.stage,
             "prompt": prompt,
             "conversation": conversation,

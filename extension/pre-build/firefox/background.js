@@ -156,14 +156,21 @@ const activeJobs = new Map();
  * hard, so a reply that has finished - and therefore stops mutating the DOM -
  * can go unnoticed for a minute.
  *
- * The obvious fix, setInterval here in the background, does not work: this is a
- * Manifest V3 service worker, and a timer does not keep one alive. It is
- * terminated after about 30 seconds idle, the ticks stop, and the turn hangs
- * exactly as before - which is what happened, intermittently, in testing.
+ * Chrome applies intensive throttling to a minimized window: timers there fire
+ * about once a MINUTE. One of the conditions is that the page has been silent
+ * for 30 seconds, so it engages precisely when a reply has just finished - the
+ * moment a clock is most needed. Measured here: a reply that arrived at 7
+ * seconds took 69 to be noticed.
  *
- * A connected port does keep the worker alive, so the content script opens one
- * for the duration of its turn and is ticked over it. The tick carries no data;
- * it exists only so the turn gets to re-check.
+ * Timers inside an extension service worker are NOT throttled, so the clock
+ * belongs here. But a timer alone does not keep a Manifest V3 service worker
+ * alive: it is terminated after about 30 seconds idle, the ticks stop, and the
+ * turn hangs exactly as before - which is what happened, intermittently.
+ *
+ * A connected port does reset the idle timer. So the content script opens one
+ * for the duration of its turn and is ticked over it: the port keeps this
+ * worker alive, and this worker's unthrottled timer drives the tick. The tick
+ * carries no data; it exists only so the turn gets to re-check.
  */
 const TICK_INTERVAL_MS = 400;
 const TICK_PORT_PREFIX = "fancy-tick:";
@@ -177,17 +184,29 @@ ext.runtime.onConnect.addListener(port => {
   port.onDisconnect.addListener(() => clearInterval(timer));
 });
 
+/* Answer every cancel, rather than letting the bridge acknowledge it blind.
+ *
+ * A cancel can legitimately do nothing - the job is unknown, or it names an
+ * older generation - and a caller told "accepted" in those cases believes the
+ * turn is stopping when it is not. */
 async function cancelJob(message) {
   const jobId = String(message.job_id ?? "");
+  const reply = (accepted, reason) => {
+    try { globalThis.FancyGPTTransport.send({type: "cancel_result", job_id: jobId, accepted, reason}); }
+    catch (_) {}
+  };
   const entry = activeJobs.get(jobId);
-  if (!entry) return;
+  if (!entry) { reply(false, "no such job is running"); return; }
   const epoch = Number(message.generation_epoch ?? 0);
-  if (Number(entry.epoch ?? 0) !== epoch) return;  // stale: a recycled tab
+  if (Number(entry.epoch ?? 0) !== epoch) { reply(false, "cancel names a different generation"); return; }
   entry.cancelled = true;
+  if (entry.tabId == null) { reply(true, "cancelled before the tab was created"); return; }
   try {
     await ext.tabs.sendMessage(entry.tabId, {type: "fancy_cancel_turn", jobId});
+    reply(true, "the page was asked to stop");
   } catch (_) {
     // The tab may already be gone; the turn unwinds on its own.
+    reply(true, "the tab is already gone");
   }
 }
 

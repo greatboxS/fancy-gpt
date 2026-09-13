@@ -383,6 +383,59 @@ async function main() {
     );
   });
 
+  // -- fast replies must not be missed ---------------------------------------
+  await test("chatgpt notices a reply that updates an existing turn", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    // A turn is already on screen when the prompt is submitted.
+    const existing = assistantTurn("turn-existing", "an earlier answer");
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+
+    const running = adapter.executeTurn("PROMPT-Q", 8000, null, {});
+    // The page answers by updating that same turn rather than creating one.
+    setTimeout(() => existing.setText(ENVELOPE), 60);
+
+    const result = await running;
+    // Treating "already in the baseline" as "not mine" skipped this forever.
+    assertEqual(result.text, ENVELOPE, "an updated existing turn is still the reply");
+    assertEqual(result.responseIdentity, "turn-existing", "bound to the turn that changed");
+  });
+
+  await test("chatgpt ignores an existing turn that never changes", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    assistantTurn("turn-old", "an earlier answer");
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-R", 8000, null, {});
+    await replyAfterSend("turn-new", ENVELOPE);
+    const result = await running;
+    // The untouched earlier answer must not be mistaken for this turn's reply.
+    assertEqual(result.responseIdentity, "turn-new", "unchanged turns stay ignored");
+  });
+
+  await test("a generating indicator other than the stop control counts as active", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-S", 9000, null, {});
+    await replyAfterSend("turn-1", ENVELOPE);
+    // No stop control, but the page still says it is streaming.
+    const streaming = new StubElement("div", {"data-is-streaming": "true"});
+    document.body.append(streaming);
+
+    let finished = false;
+    running.then(() => { finished = true; }, () => { finished = true; });
+    await new Promise(resolve => setTimeout(resolve, 900));
+    assert(finished === false, "a streaming indicator must keep the turn open");
+
+    streaming.remove();
+    const result = await running;
+    assertEqual(result.text, ENVELOPE, "it finishes once nothing claims to be working");
+  });
+
   report();
 }
 

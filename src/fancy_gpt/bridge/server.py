@@ -34,6 +34,9 @@ class BrowserWorker:
     send_lock: threading.Lock = field(default_factory=threading.Lock)
     request_lock: threading.Lock = field(default_factory=threading.Lock)
     pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
+    #: Replies to control messages (cancel), kept apart from job replies so
+    #: a control round trip can never consume a turn's own response.
+    control_pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
     alive: bool = True
     jobs_started: int = 0
     jobs_succeeded: int = 0
@@ -83,13 +86,40 @@ class BrowserWorker:
                 self.pending.pop(job_id, None)
 
     def send_control(self, message: dict[str, Any]) -> None:
-        """Fire-and-forget message to the worker, outside any job's reply path.
-
-        Cancellation uses this: the turn's own reply still returns on the
-        request that is waiting for it, so the control message must not consume
-        or register a pending slot.
-        """
+        """Fire-and-forget message to the worker, outside any job's reply path."""
         self.send(message)
+
+    def request_control(self, message: dict[str, Any], timeout_s: float = 5.0) -> dict[str, Any] | None:
+        """Send a control message and wait for the worker's own answer.
+
+        Acknowledging a cancel the moment it is forwarded tells the caller it
+        worked when the extension may have ignored it - for an unknown job, or
+        a stale generation. The answer has to come from the side that acted.
+
+        Returns None if the worker does not answer in time.
+        """
+        control_id = str(message.get("job_id", ""))
+        reply: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
+        with self.request_lock:
+            self.control_pending[control_id] = reply
+        try:
+            self.send(message)
+            return reply.get(timeout=timeout_s)
+        except queue.Empty:
+            return None
+        finally:
+            with self.request_lock:
+                self.control_pending.pop(control_id, None)
+
+    def dispatch_control(self, message: dict[str, Any]) -> None:
+        control_id = str(message.get("job_id", ""))
+        with self.request_lock:
+            target = self.control_pending.get(control_id)
+        if target is not None:
+            try:
+                target.put_nowait(message)
+            except queue.Full:
+                pass
 
     def dispatch(self, message: dict[str, Any]) -> None:
         job_id = str(message.get("job_id", ""))
@@ -176,7 +206,7 @@ class BridgeHub:
         with self._lock:
             return len(self._subscribers)
 
-    def record_progress(self, job_id: str, text: str) -> None:
+    def record_progress(self, job_id: str, text: str, tunnel_id: str = "") -> None:
         with self._lock:
             self._progress[job_id] = (time.time(), text)
             if len(self._progress) > self._progress_cap:
@@ -189,7 +219,13 @@ class BridgeHub:
         # misses intermediate ones and still converges. The producer is never
         # blocked and a dead subscriber is dropped rather than retried.
         message = dumps({"type": "job_progress", "job_id": job_id, "text": text})
-        for key, (connection, lock, _tunnel) in subscribers:
+        for key, (connection, lock, subscriber_tunnel) in subscribers:
+            # A subscriber only ever sees its own tunnel's progress. Relying on
+            # the client to discard messages for other jobs is not
+            # confidentiality: it leaves the server handing one caller another
+            # caller's partial output.
+            if tunnel_id and subscriber_tunnel and subscriber_tunnel != tunnel_id:
+                continue
             try:
                 if lock.acquire(timeout=0.05):
                     try:
@@ -250,10 +286,11 @@ class BridgeHub:
 
     def stats(self) -> dict[str, Any]:
         with self._lock:
+            # _expire_stale_unlocked already ages workers out. The duplicate
+            # loop that used to be here referenced an undefined `now`, so this
+            # raised as soon as any worker was actually alive - the one state in
+            # which the endpoint matters.
             self._expire_stale_unlocked()
-            for worker in self._workers:
-                if worker.alive and now - worker.last_seen > self.stale_after_s:
-                    worker.alive = False
             return {
                 "started_at": self.started_at,
                 "uptime_seconds": round(time.time() - self.started_at, 1),
@@ -321,12 +358,17 @@ class BridgeServer:
                 # stopped turn produced no reply at all, so the controller
                 # waited out its whole timeout for a turn that had already
                 # ended in the browser.
-                if message.get("type") in {"job_result", "job_error", "job_cancelled"}:
+                if message.get("type") == "cancel_result":
+                    worker.dispatch_control(message)
+                elif message.get("type") in {"job_result", "job_error", "job_cancelled"}:
                     worker.dispatch(message)
                 elif message.get("type") == "job_progress":
                     job_id = str(message.get("job_id", ""))
                     if job_id:
-                        self.hub.record_progress(job_id, str(message.get("text", "")))
+                        # Attribute progress to the tunnel it came from, so it
+                        # is only ever delivered to subscribers of that tunnel.
+                        origin = next(iter(sorted(worker.tunnel_ids)), "")
+                        self.hub.record_progress(job_id, str(message.get("text", "")), origin)
         except Exception:
             pass
         finally:
@@ -409,13 +451,23 @@ class BridgeServer:
                         "reason": "no browser worker connected" if worker is None else "job_id is required",
                     }))
                     continue
-                worker.send_control({
+                answer = worker.request_control({
                     "type": "cancel",
                     "job_id": job_id,
                     "generation_epoch": message.get("generation_epoch", 0),
                     "reason": str(message.get("reason", "cancelled")),
                 })
-                connection.send(dumps({"type": "cancel_result", "job_id": job_id, "accepted": True}))
+                if answer is None:
+                    connection.send(dumps({
+                        "type": "cancel_result", "job_id": job_id, "accepted": False,
+                        "reason": "the browser did not answer the cancel",
+                    }))
+                else:
+                    connection.send(dumps({
+                        "type": "cancel_result", "job_id": job_id,
+                        "accepted": bool(answer.get("accepted")),
+                        "reason": str(answer.get("reason", "")),
+                    }))
             elif msg_type == "progress":
                 job_id = str(message.get("job_id", ""))
                 progress = self.hub.get_progress(job_id)

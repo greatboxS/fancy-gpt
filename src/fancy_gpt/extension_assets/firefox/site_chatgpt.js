@@ -10,12 +10,37 @@
     composer: ["#prompt-textarea", "textarea", '[contenteditable="true"]'],
     send: ['button[data-testid="send-button"]', 'button[aria-label*="Send"]'],
     stop: ['button[data-testid="stop-button"]', 'button[aria-label*="Stop"]'],
+    // Other ways the page says it is still working. The stop control alone is
+    // not enough: both independent reviews pointed out it disappears between a
+    // tool or reasoning phase and the text that follows, and a turn judged
+    // finished there is judged finished half way through. Selectors that do not
+    // match simply contribute nothing, so listing several is cheap insurance.
+    generating: [
+      '[data-is-streaming="true"]',
+      ".result-streaming",
+      '[aria-busy="true"]',
+      '[data-testid="thinking-indicator"]',
+    ],
     turns: "[data-turn-id]",
     assistant: ['[data-message-author-role="assistant"]', '[data-testid="conversation-turn-assistant"]']
   };
 
   function composerRoot(composer) {
     return composer?.closest("form") ?? composer?.parentElement ?? document;
+  }
+
+  /* Is the page still working on this turn?
+   *
+   * Any one of these is positive evidence of activity. Their absence is not
+   * evidence of completion, which is why the completion gate also requires the
+   * text to stop changing.
+   */
+  function isGenerating() {
+    if (firstVisible(SELECTORS.stop)) return true;
+    for (const selector of SELECTORS.generating) {
+      try { if (document.querySelector(selector)) return true; } catch (_) {}
+    }
+    return false;
   }
 
   function sendControl(composer) {
@@ -74,7 +99,14 @@
   async function executeTurn(prompt, timeoutMs, onProgress, options = {}) {
     if (location.hostname !== "chatgpt.com") throw new Error("FancyGPT ChatGPT adapter loaded on unexpected host");
     const composer = await waitFor(() => firstVisible(SELECTORS.composer), 20000, "ChatGPT composer unavailable; sign in first");
-    const baseline = new Set(turnIds());
+    /* Remember what each turn said, not merely that it existed.
+     *
+     * A fast reply is not always a new turn: the page can answer by updating a
+     * turn that was already on screen. Treating "already in the baseline" as
+     * "not mine" then skips the reply forever and the turn stalls with the
+     * answer visible - a false timeout on exactly the quickest replies.
+     */
+    const baseline = new Map(turnIds().map(id => [id, assistantText(id) ?? ""]));
     // Resuming an existing conversation lands on a page that is still hydrating:
     // the composer is already visible, but the app has not attached to it yet, so
     // a single write is silently dropped and the send button never appears. Keep
@@ -110,8 +142,13 @@
       const composerText = current ? (current.value ?? current.textContent ?? "") : "";
       // Any one of these means the app acted on the submission.
       if (!composerText.includes(prompt.slice(0, 32))) return true;
-      if (firstVisible(SELECTORS.stop)) return true;
-      return turnIds().some(id => !baseline.has(id));
+      if (isGenerating()) return true;
+      // A reply fast enough to land before the composer is observed as cleared
+      // still counts as acceptance.
+      return turnIds().some(id => {
+        const text = assistantText(id);
+        return Boolean(text) && (!baseline.has(id) || baseline.get(id) !== text);
+      });
     };
 
     /* Never submit a composer the user has typed into since we wrote to it.
@@ -209,9 +246,11 @@
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const candidates = [];
       for (const id of turnIds()) {
-        if (baseline.has(id)) continue;
         const text = assistantText(id);
-        if (text) candidates.push({id, text});
+        if (!text) continue;
+        // New, or an existing turn whose content changed after we submitted.
+        if (baseline.has(id) && baseline.get(id) === text) continue;
+        candidates.push({id, text});
       }
       if (boundId != null && assistantText(boundId) === null) {
         /* The turn we bound to is gone.
@@ -267,7 +306,7 @@
         // "No stop control" is negative evidence only: it also vanishes between
         // a tool phase and the text that follows. Treat any generating
         // indicator as still active.
-        const active = Boolean(firstVisible(SELECTORS.stop));
+        const active = isGenerating();
         // Either the reply growing or the site saying it is working counts as
         // the turn being alive, and resets the idle clock.
         if (active || text !== lastSeenText) {
@@ -289,7 +328,10 @@
      * reproducing it, and this one is intermittent. Report what the adapter
      * could actually see. Shapes and counts only - never page text, which
      * carries the user's content. */
-    const newTurns = turnIds().filter(id => !baseline.has(id));
+    const newTurns = turnIds().filter(id => {
+      const text = assistantText(id);
+      return Boolean(text) && (!baseline.has(id) || baseline.get(id) !== text);
+    });
     const boundText = boundId != null ? assistantText(boundId) : null;
     const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
     const stallReason = Date.now() >= hardDeadline ? "absolute limit" : `no activity for ${idleFor}s`;
@@ -304,7 +346,7 @@
       boundTextComplete: boundText != null && looksLikeCompleteJson(boundText),
       newTurnCount: newTurns.length,
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
-      stopVisible: Boolean(firstVisible(SELECTORS.stop)),
+      generating: isGenerating(),
       candidatePending: gate.pending,
     }));
   }

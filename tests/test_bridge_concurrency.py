@@ -217,3 +217,91 @@ def test_job_cancelled_is_a_terminal_reply_not_a_dropped_message() -> None:
     assert answered, "a cancelled turn must still resolve the waiting request"
     assert answered[0]["type"] == "job_cancelled"
     assert answered[0]["text"] == "half an answer"
+
+
+# -- findings from the independent Codex review ------------------------------
+
+
+def test_stats_works_while_a_worker_is_alive() -> None:
+    """The endpoint used to raise exactly when it mattered."""
+    from fancy_gpt.bridge.server import BridgeHub
+
+    hub = BridgeHub(token="t")
+    worker = make_worker()
+    hub.register(worker)
+    assert worker.alive is True
+
+    stats = hub.stats()
+    assert stats["connected_workers"] >= 1
+    assert "total_jobs_started" in stats
+
+
+def test_progress_never_crosses_tunnels() -> None:
+    """Relying on the client to discard other jobs is not confidentiality."""
+    from fancy_gpt.bridge.server import BridgeHub
+
+    hub = BridgeHub(token="t")
+    edge, chrome = FakeConnection(), FakeConnection()
+    hub.add_subscriber(edge, "edge-remote")
+    hub.add_subscriber(chrome, "chrome-remote")
+
+    hub.record_progress("job-1", "partial answer", "edge-remote")
+
+    assert len(edge.sent) == 1, "the owning tunnel's subscriber receives it"
+    assert chrome.sent == [], "another tunnel's subscriber must never see it"
+    # It is still stored for whoever polls for it.
+    assert hub.get_progress("job-1")["text"] == "partial answer"
+
+
+def test_a_cancel_is_answered_by_the_browser_not_acknowledged_blind() -> None:
+    """A cancel can legitimately do nothing; saying "accepted" then is a lie."""
+    worker = make_worker()
+    answers: list[dict] = []
+
+    def responder() -> None:
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if "job-x" in worker.control_pending:
+                worker.dispatch_control(
+                    {"type": "cancel_result", "job_id": "job-x", "accepted": False,
+                     "reason": "no such job is running"}
+                )
+                return
+            time.sleep(0.01)
+
+    threading.Thread(target=responder, daemon=True).start()
+    answer = worker.request_control({"type": "cancel", "job_id": "job-x"}, timeout_s=3)
+    assert answer is not None
+    assert answer["accepted"] is False
+    assert "no such job" in answer["reason"]
+
+
+def test_a_control_round_trip_never_consumes_a_job_reply() -> None:
+    worker = make_worker()
+    waiting: list[dict] = []
+
+    def hold() -> None:
+        waiting.append(worker.request({"type": "job", "job_id": "job-y"}, timeout_s=5))
+
+    thread = threading.Thread(target=hold)
+    thread.start()
+    deadline = time.monotonic() + 2
+    while "job-y" not in worker.pending and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    # A control message for the same id must not steal the job's reply slot.
+    threading.Thread(
+        target=lambda: worker.request_control({"type": "cancel", "job_id": "job-y"}, timeout_s=0.3),
+        daemon=True,
+    ).start()
+    time.sleep(0.5)
+    assert "job-y" in worker.pending, "the job is still waiting for its own reply"
+
+    worker.dispatch({"type": "job_result", "job_id": "job-y", "text": "answered"})
+    thread.join(timeout=5)
+    assert waiting and waiting[0]["text"] == "answered"
+
+
+def test_an_unanswered_cancel_is_reported_as_not_accepted() -> None:
+    worker = make_worker()
+    assert worker.request_control({"type": "cancel", "job_id": "job-z"}, timeout_s=0.2) is None

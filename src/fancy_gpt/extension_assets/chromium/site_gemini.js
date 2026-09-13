@@ -32,11 +32,32 @@
       'button[aria-label*="Dừng" i]',
     ],
     responses: ["message-content.model-response-text", "model-response"],
+    // Other ways the page says it is still working, beyond the stop control.
+    generating: [
+      '[aria-busy="true"]',
+      "model-thoughts[data-thinking='true']",
+      ".response-loading",
+      "mat-progress-bar",
+    ],
   };
 
   function currentConversationId() {
     const match = location.pathname.match(/^\/app\/([a-zA-Z0-9-]+)/);
     return match ? match[1] : null;
+  }
+
+  /* Is the page still working on this turn?
+   *
+   * The stop control alone is not enough: it also disappears between a search
+   * or tool phase and the text that follows. A selector that does not match
+   * contributes nothing, so listing several costs nothing.
+   */
+  function isGenerating() {
+    if (firstVisible(SELECTORS.stop)) return true;
+    for (const selector of SELECTORS.generating) {
+      try { if (document.querySelector(selector)) return true; } catch (_) {}
+    }
+    return false;
   }
 
   function responseNodes() {
@@ -223,7 +244,7 @@
       const text = latestResponseText(baselineCount);
       // The stop control also vanishes between a search or tool phase and the
       // text that follows, so its absence alone must not end the turn.
-      const active = Boolean(firstVisible(SELECTORS.stop));
+      const active = isGenerating();
       if (active || text !== lastSeenText) {
         lastActivityAt = Date.now();
         lastSeenText = text;
