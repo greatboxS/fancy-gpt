@@ -153,6 +153,25 @@ class BrowserWorker:
             except queue.Full:
                 pass
 
+    def fail_pending(self, reason: str) -> None:
+        """Wake every waiter when this browser generation disappears."""
+        with self.request_lock:
+            jobs = list(self.pending.items())
+            controls = list(self.control_pending.items())
+        for job_id, target in jobs:
+            try:
+                target.put_nowait({"type": "job_error", "job_id": job_id, "error": reason})
+            except queue.Full:
+                pass
+        for control_id, target in controls:
+            try:
+                target.put_nowait({
+                    "type": "control_error", "control_id": control_id,
+                    "accepted": False, "reason": reason,
+                })
+            except queue.Full:
+                pass
+
 
 class BridgeHub:
     def __init__(self, token: str, *, stale_after_s: float = 45.0) -> None:
@@ -417,6 +436,7 @@ class BridgeServer:
         except Exception:
             pass
         finally:
+            worker.fail_pending("browser worker disconnected before the operation completed")
             self.hub.unregister(worker)
 
     def _controller_session(self, connection: ServerConnection) -> None:

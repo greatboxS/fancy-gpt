@@ -65,6 +65,29 @@ def test_worker_capacity_queues_without_rejecting_or_overcommitting() -> None:
     assert peak == 2
 
 
+def test_worker_disconnect_wakes_all_pending_jobs_immediately() -> None:
+    worker = make_worker()
+    failures: list[dict] = []
+
+    def run(job_id: str) -> None:
+        failures.append(worker.request({"type": "job", "job_id": job_id}, timeout_s=30))
+
+    threads = [threading.Thread(target=run, args=(f"lost-{i}",)) for i in range(3)]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + 2
+    while len(worker.pending) < 3 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    started = time.monotonic()
+    worker.fail_pending("worker generation lost")
+    for thread in threads:
+        thread.join(timeout=1)
+
+    assert len(failures) == 3
+    assert time.monotonic() - started < 1
+    assert all(item["type"] == "job_error" and "generation lost" in item["error"] for item in failures)
+
+
 def _answer_when_registered(worker: BrowserWorker, work_s: float, stop: threading.Event) -> None:
     """Stand in for the browser: reply `work_s` after a job actually appears."""
     seen: set[str] = set()
