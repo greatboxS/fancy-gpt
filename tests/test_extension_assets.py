@@ -208,6 +208,38 @@ def test_provider_refuses_a_browser_running_a_different_adapter_build() -> None:
         require({"ok": True, "build": "deadbeef"})
 
 
+def test_drift_points_at_the_side_that_is_actually_stale(monkeypatch, tmp_path: Path) -> None:
+    """Two ids that differ say only that; either side could be the old one.
+
+    The guard fired in three directions in one day: a browser behind the
+    install, a browser ahead of it, and a long-running process holding code
+    from before the install it was reporting. Telling everyone to reload the
+    extension is wrong in two of those, and pointing at the wrong side costs
+    more than saying nothing.
+    """
+    import pytest
+
+    from fancy_gpt.browser import BrowserUiDriftError
+    from fancy_gpt.providers import ChatGPTWebAutomationProvider
+
+    with pytest.raises(BrowserUiDriftError) as raised:
+        ChatGPTWebAutomationProvider._require_current_adapter({"ok": True, "build": "deadbeef"})
+    message = str(raised.value)
+    assert "deadbeef" in message
+    # Both remedies are named, and neither is presented as the only one.
+    assert "reload the extension" in message
+    assert "restart" in message
+
+
+def test_a_process_older_than_its_package_says_so(monkeypatch) -> None:
+    import fancy_gpt.providers.web_automation as module
+
+    monkeypatch.setattr(module, "_stale_side_hint", lambda: "RESTART THIS PROCESS")
+    # The hint is consulted rather than hard-coded, so the runtime can tell the
+    # one case it is able to establish as fact.
+    assert module._stale_side_hint() == "RESTART THIS PROCESS"
+
+
 def test_adapter_drift_can_be_overridden_deliberately(monkeypatch) -> None:
     from fancy_gpt.providers import ChatGPTWebAutomationProvider
 

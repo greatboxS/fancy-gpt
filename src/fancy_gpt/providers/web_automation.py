@@ -4,11 +4,34 @@ import threading
 from typing import Callable
 
 import os
+from pathlib import Path
+from importlib.resources import files
 
 from fancy_gpt.bridge.client import SiteHealthUnsupported
 from fancy_gpt.extension_utils import adapter_build_id
 from fancy_gpt.browser import BrowserDriver, BrowserPromptTooLargeError, BrowserUiDriftError
 from fancy_gpt.models import AutomatedModelResponse, ModelRequest
+
+
+def _stale_side_hint() -> str:
+    try:
+        package = Path(str(files("fancy_gpt").joinpath("extension_utils.py")))
+        installed_at = package.stat().st_mtime
+        started_at = Path(f"/proc/{os.getpid()}").stat().st_mtime
+    except Exception:
+        installed_at = started_at = None
+    if installed_at is not None and started_at is not None and installed_at > started_at:
+        age = int((installed_at - started_at) / 60)
+        return (
+            f"This process started about {age} minutes before the installed package was last "
+            "written, so it is running code from before the install: restart it (reconnect the "
+            "MCP server, or restart the bridge) rather than touching the extension."
+        )
+    return (
+        "If the install is the newer side, re-export with 'fancy-gpt extension export-all <dir>' "
+        "and reload the extension; if this process has been running since before the last "
+        "install, restart it instead."
+    )
 
 
 class ChatGPTWebAutomationProvider:
@@ -76,10 +99,26 @@ class ChatGPTWebAutomationProvider:
             return
         running = f"build {live}" if live else "a build too old to report one"
         raise BrowserUiDriftError(
-            f"the browser extension is running {running}, but this install ships {expected}. "
-            "Re-export it with 'fancy-gpt extension export-all <dir>' and reload it in the browser. "
-            "Set FANCY_GPT_ALLOW_ADAPTER_DRIFT=1 to run anyway."
+            f"the browser extension is running {running}, but this process expects {expected}. "
+            + _stale_side_hint()
+            + " Set FANCY_GPT_ALLOW_ADAPTER_DRIFT=1 to run anyway."
         )
+
+    @staticmethod
+    def _stale_side_hint() -> str:
+        """Say which side is behind, when that can be established.
+
+        Two ids that differ say only that. Either could be the stale one, and
+        the guard fired in three different directions in a single day: a
+        browser behind the install, a browser ahead of it, and a long-running
+        process holding code from before the install it is reporting. Sending
+        everyone to reload the extension is wrong in two of those three, and a
+        message that points at the wrong side costs more than no message.
+
+        A process older than the package it imported is a fact, so it is
+        checked rather than guessed at.
+        """
+        return _stale_side_hint()
 
     def stop(self) -> None:
         if self._started:
