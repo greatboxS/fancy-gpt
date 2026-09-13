@@ -187,8 +187,77 @@
     return () => { try { observer.disconnect(); } catch (_) {} };
   }
 
+/* Decide that a reply has finished, without trusting any single signal.
+   *
+   * Both independent reviews of this agreed on the same two traps, and on the
+   * shape of the answer:
+   *
+   *  - The stop control disappearing is NEGATIVE evidence only. It also
+   *    disappears between a tool or search phase and the text that follows, so
+   *    on its own it reports a half-finished reply as complete.
+   *  - Text parsing as complete JSON is VALIDATION, not a completion signal. A
+   *    streaming prefix can momentarily parse and then receive more bytes.
+   *
+   * So a moment where both look finished only opens a *candidate*, and any
+   * further activity cancels it. The candidate becomes a result only after the
+   * page has stayed quiet for a stability window.
+   *
+   * `observe` must be called on DOM mutations and on a clock, because a reply
+   * that has genuinely finished produces no further mutations to trigger on.
+   */
+  function createCompletionGate(options = {}) {
+    const stabilityMs = options.stabilityMs ?? 1200;
+    const now = options.now ?? (() => Date.now());
+    let candidateText = null;
+    let candidateSince = 0;
+    return {
+      observe({text, active, complete}) {
+        if (active || !text || !complete) {
+          candidateText = null;
+          return null;
+        }
+        if (text !== candidateText) {
+          // New text restarts the window: this is what stops a momentarily
+          // valid JSON prefix from resolving.
+          candidateText = text;
+          candidateSince = now();
+          return null;
+        }
+        return now() - candidateSince >= stabilityMs ? {text} : null;
+      },
+      get pending() { return candidateText !== null; },
+    };
+  }
+
+/* Wait for the page to do something, rather than for a fixed delay.
+   *
+   * The automation window is minimized and browsers throttle setTimeout there
+   * severely - a reply that arrived in 7 seconds took 69 to be noticed. A
+   * mutation, or a tick pushed in from the extension's background worker, wakes
+   * the waiter immediately; the timeout is only a floor for pages that go
+   * completely quiet.
+   */
+  function createActivityWaiter(target = document.body) {
+    let wake = null;
+    const notify = () => { const resolve = wake; wake = null; if (resolve) resolve("activity"); };
+    const observer = new MutationObserver(notify);
+    observer.observe(target, {childList: true, subtree: true, characterData: true});
+    return {
+      notify,
+      wait(maxMs) {
+        return new Promise(resolve => {
+          let done = false;
+          const settle = reason => { if (done) return; done = true; wake = null; resolve(reason); };
+          wake = settle;
+          setTimeout(() => settle("timeout"), maxMs);
+        });
+      },
+      stop() { try { observer.disconnect(); } catch (_) {} wake = null; },
+    };
+  }
+
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "6ccd82828d7d";
+  const BUILD = "3e0e07d31e17";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,
@@ -203,5 +272,7 @@
     createSettleTracker,
     stopGeneration,
     observeText,
+    createCompletionGate,
+    createActivityWaiter,
   };
 })();

@@ -154,16 +154,30 @@ async function main() {
     assertEqual(result.responseIdentity, "turn-1", "the reply on screen must still be identified");
   });
 
-  await test("chatgpt cancellation before any reply still returns cleanly", async () => {
+  await test("chatgpt cancellation before the prompt is accepted is a clean cancel", async () => {
     loadAdapters(["site_chatgpt.js"]);
     chatgptPage();
     const adapter = globalThis.FancyGPTSites.chatgpt;
-    const running = adapter.executeTurn("PROMPT-H", 6000, null, {isCancelled: () => true});
-    const result = await running;
+    // Cancelled before the page takes the prompt: nothing was submitted, so
+    // this must report cancellation rather than a rejected submission, and
+    // nothing about it is uncertain.
+    const result = await adapter.executeTurn("PROMPT-H", 6000, null, {isCancelled: () => true});
     assert(result.cancelled === true, "cancelled");
-    // Nothing was generating, so there was no stop control to click.
     assert(result.stoppedGeneration === false, "no stop control means nothing to stop");
     assertEqual(result.text, "", "no partial text existed");
+  });
+
+  await test("chatgpt cancellation after acceptance but before a reply", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    let cancelled = false;
+    const running = adapter.executeTurn("PROMPT-H2", 6000, null, {isCancelled: () => cancelled});
+    setTimeout(() => { cancelled = true; }, 80);
+    const result = await running;
+    assert(result.cancelled === true, "cancelled");
+    assertEqual(result.text, "", "no reply had been produced yet");
   });
 
   await test("chatgpt disconnects its observer when the turn ends", async () => {
@@ -207,6 +221,92 @@ async function main() {
       assertEqual(adapter.executeTurn.length, 3,
         `${id}.executeTurn must take (prompt, timeoutMs, onProgress) with optional options`);
     }
+  });
+
+  // -- submission is verified, not assumed -----------------------------------
+  await test("chatgpt retries and then reports a prompt the page never accepted", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    // A send control that does nothing: the app ignores the click and the
+    // prompt stays in the composer. This used to wait out the whole timeout,
+    // indistinguishable from a slow model, until a human clicked submit.
+    send.onclick = () => {};
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    await rejects(adapter.executeTurn("PROMPT-J", 20000, null, {}), /did not accept/i,
+      "an ignored submission must be reported, not waited out");
+    assert(send.clicks >= 2, `the click should be retried, saw ${send.clicks}`);
+  });
+
+  await test("chatgpt accepts a submission once the composer is cleared", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    // The real page clears the composer when it takes the prompt.
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-K", 8000, null, {});
+    await replyAfterSend("turn-1", ENVELOPE);
+    const result = await running;
+    assertEqual(result.text, ENVELOPE, "the turn completes normally");
+    assertEqual(send.clicks, 1, "no retry is needed when the page accepts it");
+  });
+
+  await test("chatgpt treats an appearing stop control as acceptance", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {send} = chatgptPage();
+    // Some flows keep the composer text but start generating immediately.
+    send.onclick = () => stopControl();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-L", 8000, null, {});
+    await replyAfterSend("turn-1", ENVELOPE);
+    // Generation finishes, the stop control goes away.
+    setTimeout(() => { const s = document.querySelectorAll('button[data-testid="stop-button"]')[0]; if (s) s.remove(); }, 100);
+    const result = await running;
+    assertEqual(result.text, ENVELOPE, "acceptance can be signalled by generation starting");
+    assertEqual(send.clicks, 1, "no retry needed");
+  });
+
+  // -- gemini text extraction ------------------------------------------------
+  await test("gemini strips the site's own chrome from the reply", async () => {
+    loadAdapters(["site_gemini.js"], "gemini.google.com");
+    const response = new StubElement("model-response", {});
+    const content = new StubElement("message-content", {class: "model-response-text"});
+    content.append(new StubElement("div", {text: "The real reply."}));
+    content.append(new StubElement("button", {text: "Copy"}));
+    content.append(new StubElement("model-thoughts", {text: "Show thinking: internal notes"}));
+    response.append(content);
+    document.body.append(response);
+
+    const composer = new StubElement("div", {contentEditable: "true", role: "textbox"});
+    const send = new StubElement("button", {class: "send-button"});
+    document.body.append(composer); document.body.append(send);
+    document._composerTarget = composer;
+
+    const adapter = globalThis.FancyGPTSites.gemini;
+    const running = adapter.executeTurn("P", 6000, null, {});
+    setTimeout(() => {
+      const reply = new StubElement("model-response", {});
+      const replyContent = new StubElement("message-content", {class: "model-response-text"});
+      replyContent.append(new StubElement("div", {text: ENVELOPE}));
+      replyContent.append(new StubElement("button", {text: "Good response"}));
+      reply.append(replyContent);
+      document.body.append(reply);
+    }, 60);
+
+    const result = await running;
+    // Button labels and the reasoning panel must not reach the parser.
+    assert(!result.text.includes("Good response"), "action buttons must be excluded");
+    assert(!result.text.includes("Show thinking"), "reasoning panels must be excluded");
+    assertEqual(result.text, ENVELOPE, "only the model's own reply is returned");
+  });
+
+  await test("gemini finds its controls without relying on a language", async () => {
+    loadAdapters(["site_gemini.js"], "gemini.google.com");
+    // A UI in a language none of the aria-labels cover.
+    const composer = new StubElement("div", {contentEditable: "true", role: "textbox"});
+    const send = new StubElement("button", {class: "send-button", "aria-label": "Enviar mensaje"});
+    document.body.append(composer); document.body.append(send);
+    const health = await globalThis.FancyGPTSites.gemini.healthCheck();
+    assert(health.ok === true, "a localised UI must still be usable");
   });
 
   report();

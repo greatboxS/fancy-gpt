@@ -194,6 +194,77 @@ async function main() {
       "the stability count must restart when new text arrives");
   });
 
+  // -- completion gate: the consensus of both independent reviews ------------
+  await test("gate does not finish while the site says it is generating", () => {
+    loadAdapters([]);
+    let clock = 0;
+    const gate = globalThis.FancyGPTSiteKit.createCompletionGate({stabilityMs: 100, now: () => clock});
+    const text = '{"type":"message","text":"done"}';
+    for (let i = 0; i < 20; ++i) {
+      clock += 50;
+      assertEqual(gate.observe({text, active: true, complete: true}), null, "must not finish while active");
+    }
+  });
+
+  await test("gate requires the page to stay quiet before finishing", () => {
+    loadAdapters([]);
+    let clock = 0;
+    const gate = globalThis.FancyGPTSiteKit.createCompletionGate({stabilityMs: 1000, now: () => clock});
+    const text = '{"type":"message","text":"done"}';
+    assertEqual(gate.observe({text, active: false, complete: true}), null, "the first quiet look only opens a candidate");
+    clock += 999;
+    assertEqual(gate.observe({text, active: false, complete: true}), null, "still inside the window");
+    clock += 2;
+    assertEqual(gate.observe({text, active: false, complete: true}), {text}, "finishes once quiet for long enough");
+  });
+
+  await test("a tool phase between generations cannot finish the turn", () => {
+    loadAdapters([]);
+    let clock = 0;
+    const gate = globalThis.FancyGPTSiteKit.createCompletionGate({stabilityMs: 500, now: () => clock});
+    const partial = '{"type":"message","text":"before tool"}';
+    // The stop control vanishes while a tool runs: looks finished, is not.
+    gate.observe({text: partial, active: false, complete: true});
+    clock += 200;
+    // The tool phase starts: activity cancels the candidate.
+    assertEqual(gate.observe({text: partial, active: true, complete: true}), null, "activity cancels");
+    clock += 5000;
+    assertEqual(gate.observe({text: partial, active: true, complete: true}), null, "still generating");
+    // Text resumes and eventually settles.
+    const finalText = '{"type":"message","text":"before tool and after"}';
+    assertEqual(gate.observe({text: finalText, active: false, complete: true}), null, "new text restarts the window");
+    clock += 600;
+    assertEqual(gate.observe({text: finalText, active: false, complete: true}), {text: finalText}, "finishes on the real end");
+  });
+
+  await test("a momentarily valid JSON prefix does not finish the turn", () => {
+    loadAdapters([]);
+    let clock = 0;
+    const gate = globalThis.FancyGPTSiteKit.createCompletionGate({stabilityMs: 500, now: () => clock});
+    // The stream briefly forms a complete object, then keeps going.
+    assertEqual(gate.observe({text: '{"type":"message"}', active: false, complete: true}), null, "candidate only");
+    clock += 300;
+    assertEqual(gate.observe({text: '{"type":"message","text":"more"}', active: false, complete: true}), null,
+      "more bytes restart the window");
+    clock += 300;
+    assertEqual(gate.observe({text: '{"type":"message","text":"more"}', active: false, complete: true}), null,
+      "not yet quiet for long enough");
+    clock += 300;
+    assert(gate.observe({text: '{"type":"message","text":"more"}', active: false, complete: true}) !== null,
+      "finishes once it really stops changing");
+  });
+
+  await test("incomplete text never opens a candidate", () => {
+    loadAdapters([]);
+    let clock = 0;
+    const gate = globalThis.FancyGPTSiteKit.createCompletionGate({stabilityMs: 10, now: () => clock});
+    assertEqual(gate.observe({text: '{"type":"message","text":"half', active: false, complete: false}), null, "incomplete");
+    clock += 10000;
+    assertEqual(gate.observe({text: '{"type":"message","text":"half', active: false, complete: false}), null,
+      "time alone must not finish an incomplete reply");
+    assert(gate.pending === false, "no candidate is pending");
+  });
+
   report();
 }
 

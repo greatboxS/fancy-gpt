@@ -3,7 +3,8 @@
   // Everything that is not a ChatGPT DOM assumption comes from the shared kit,
   // so a second adapter starts from what already works rather than repeating it.
   const kit = globalThis.FancyGPTSiteKit;
-  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson, stopGeneration, observeText} = kit;
+  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson, stopGeneration,
+         observeText, createCompletionGate, createActivityWaiter} = kit;
 
   const SELECTORS = {
     composer: ["#prompt-textarea", "textarea", '[contenteditable="true"]'],
@@ -92,7 +93,56 @@
     if (!send) {
       throw new Error("ChatGPT send control unavailable: " + describeControls(target));
     }
-    send.click();
+
+    /* Clicking send is not the same as the page accepting the prompt.
+     *
+     * A click that the app ignores leaves the prompt sitting in the composer,
+     * and the turn then waits out its whole timeout for a reply that was never
+     * requested - which looks, from outside, exactly like the model being slow.
+     * Wait for the page to show that it took the prompt, and retry the click a
+     * couple of times before reporting it as a rejected submission.
+     */
+    // Deliberately synchronous: waitFor does not await its getter, so an
+    // async one would return a promise, which is always truthy, and every
+    // submission would look accepted.
+    const submitted = () => {
+      const current = firstVisible(SELECTORS.composer);
+      const composerText = current ? (current.value ?? current.textContent ?? "") : "";
+      // Any one of these means the app acted on the submission.
+      if (!composerText.includes(prompt.slice(0, 32))) return true;
+      if (firstVisible(SELECTORS.stop)) return true;
+      return turnIds().some(id => !baseline.has(id));
+    };
+
+    let accepted = false;
+    for (let attempt = 0; attempt < 3 && !accepted; ++attempt) {
+      // Cancelling while the page has not taken the prompt is the cleanest
+      // possible cancellation: nothing was submitted, so there is nothing
+      // uncertain about it.
+      if (options?.isCancelled?.()) {
+        return {
+          text: "", responseIdentity: "chatgpt-cancelled",
+          conversationId: currentConversationId(), cancelled: true,
+          stoppedGeneration: stopGeneration(SELECTORS.stop),
+        };
+      }
+      if (attempt > 0) {
+        const again = sendControl(target) || firstVisible(SELECTORS.send);
+        if (!again) break;
+        again.click();
+      } else {
+        send.click();
+      }
+      try {
+        await waitFor(submitted, 3000, "not accepted yet");
+        accepted = true;
+      } catch (_) { /* try again */ }
+    }
+    if (!accepted) {
+      throw new Error(
+        "ChatGPT did not accept the submitted prompt (composer still holds it): " + describeControls(target)
+      );
+    }
 
     const deadline = Date.now() + timeoutMs;
     let boundId = null;
@@ -112,9 +162,13 @@
         stoppedGeneration: stopped,
       };
     };
-    let stableText = null;
-    let stableCount = 0;
     let lastReported = null;
+    const gate = createCompletionGate({stabilityMs: 1200});
+    const activity = createActivityWaiter();
+    // A tick pushed from the background worker is an unthrottled clock: a reply
+    // that has finished produces no more mutations to wake us with.
+    if (options?.onTick) options.onTick(activity.notify);
+    const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < deadline) {
       const candidates = [];
       for (const id of turnIds()) {
@@ -131,7 +185,7 @@
       // screen and report an empty result.
       const cancelled = checkCancelled();
       if (cancelled) {
-        if (stopObserving) stopObserving();
+        release();
         return cancelled;
       }
       if (boundId != null) {
@@ -146,8 +200,7 @@
           : null;
         if (continueButton) {
           continueButton.click();
-          stableCount = 0;
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await activity.wait(500);
           continue;
         }
         if (onProgress && stopObserving === null && boundTurns.length === 1) {
@@ -161,19 +214,21 @@
           );
         }
         const text = assistantText(boundId);
-        const streaming = Boolean(firstVisible(SELECTORS.stop));
+        // "No stop control" is negative evidence only: it also vanishes between
+        // a tool phase and the text that follows. Treat any generating
+        // indicator as still active.
+        const active = Boolean(firstVisible(SELECTORS.stop));
         const complete = text != null && looksLikeCompleteJson(text);
-        if (text && text === stableText && !streaming && complete) stableCount += 1;
-        else stableCount = 0;
-        stableText = text;
-        if (text && stableCount >= 3) {
-          if (stopObserving) stopObserving();
-          return {text, responseIdentity: boundId, conversationId: currentConversationId()};
+        const settled = gate.observe({text, active, complete});
+        if (settled) {
+          release();
+          return {text: settled.text, responseIdentity: boundId, conversationId: currentConversationId()};
         }
       }
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Woken by a mutation or a background tick; the delay is only a floor.
+      await activity.wait(500);
     }
-    if (stopObserving) stopObserving();
+    release();
     throw new Error("ChatGPT response timed out");
   }
 

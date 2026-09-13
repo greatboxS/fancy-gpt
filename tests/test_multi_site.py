@@ -235,3 +235,68 @@ def test_the_automation_window_is_closed_when_idle(tmp_path: Path) -> None:
     # user's own.
     assert "remaining.length === 0" in background
     assert "activeJobs.size > 0" in background
+
+
+def test_completion_is_gated_not_inferred_from_one_signal(tmp_path: Path) -> None:
+    """Both independent reviews agreed no single signal may end a turn."""
+    exported = export_extension("edge", tmp_path / "edge-gate")
+    kit = (exported / "site_kit.js").read_text(encoding="utf-8")
+    assert "function createCompletionGate(" in kit
+    # The two traps both reviewers named are recorded where they are handled.
+    assert "NEGATIVE evidence" in kit
+    assert "VALIDATION, not a completion signal" in kit
+    for adapter in ("site_chatgpt.js", "site_gemini.js"):
+        source = (exported / adapter).read_text(encoding="utf-8")
+        assert "createCompletionGate(" in source, f"{adapter} must gate completion"
+        assert "gate.observe(" in source, f"{adapter} must consult the gate"
+
+
+def test_the_turn_loop_is_woken_by_activity_not_only_a_timer(tmp_path: Path) -> None:
+    """setTimeout is throttled in the minimized automation window."""
+    exported = export_extension("edge", tmp_path / "edge-activity")
+    kit = (exported / "site_kit.js").read_text(encoding="utf-8")
+    assert "function createActivityWaiter(" in kit
+    for adapter in ("site_chatgpt.js", "site_gemini.js"):
+        source = (exported / adapter).read_text(encoding="utf-8")
+        assert "activity.wait(" in source, f"{adapter} must wait on activity"
+        # A fixed sleep would reintroduce the throttling it was replacing.
+        assert "setTimeout(resolve, 500)" not in source, f"{adapter} still has a fixed sleep"
+
+
+def test_the_background_worker_ticks_running_jobs(tmp_path: Path) -> None:
+    """A finished reply stops mutating, so something must still wake the turn."""
+    exported = export_extension("edge", tmp_path / "edge-tick")
+    background = (exported / "background.js").read_text(encoding="utf-8")
+    content = (exported / "content.js").read_text(encoding="utf-8")
+    assert "function startTicking(" in background and "stopTicking()" in background
+    assert '"fancy_tick"' in background
+    assert '"fancy_tick"' in content
+    assert "onTick" in content
+    # The tick must stop when nothing is running, or it runs for the session.
+    assert "if (activeJobs.size === 0) stopTicking();" in background
+
+
+def test_submission_is_verified_rather_than_assumed(tmp_path: Path) -> None:
+    """A click the page ignores otherwise waits out the whole timeout."""
+    exported = export_extension("edge", tmp_path / "edge-submit")
+    source = (exported / "site_chatgpt.js").read_text(encoding="utf-8")
+    assert "did not accept the submitted prompt" in source
+    # The check must be synchronous: waitFor does not await its getter, so an
+    # async one is always truthy and every submission looks accepted.
+    assert "const submitted = () => {" in source
+
+
+def test_gemini_selectors_do_not_depend_on_a_language(tmp_path: Path) -> None:
+    exported = export_extension("edge", tmp_path / "edge-locale")
+    source = (exported / "site_gemini.js").read_text(encoding="utf-8")
+    send_block = source[source.index("send: ["):source.index("stop: [")]
+    # A structural anchor must come before any aria-label text match.
+    assert send_block.index("button.send-button") < send_block.index("aria-label")
+
+
+def test_gemini_strips_site_chrome_from_the_reply(tmp_path: Path) -> None:
+    exported = export_extension("edge", tmp_path / "edge-chrome")
+    source = (exported / "site_gemini.js").read_text(encoding="utf-8")
+    assert "function readWithoutChrome(" in source
+    for selector in ("button", "model-thoughts", "sources-list"):
+        assert selector in source, f"{selector} must be excluded from the reply text"

@@ -7,11 +7,22 @@ const ext = globalThis.browser ?? globalThis.chrome;
  * late is still recorded rather than starting an unstoppable turn. */
 const cancelledJobs = new Set();
 
+/* Ticks from the background worker, routed to the turn running in this tab.
+ * The tick carries no data: it exists only so a turn whose page has gone quiet
+ * still gets to re-check, despite this window's timers being throttled. */
+const tickHandlers = new Map();
+
 ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "fancy_cancel_turn") {
     const jobId = String(message.jobId ?? "");
     if (jobId) cancelledJobs.add(jobId);
     sendResponse({ok: Boolean(jobId)});
+    return false;
+  }
+  if (message?.type === "fancy_tick") {
+    const handler = tickHandlers.get(String(message.jobId ?? ""));
+    if (handler) { try { handler(); } catch (_) {} }
+    sendResponse({ok: true});
     return false;
   }
   if (message?.type !== "fancy_execute_turn" && message?.type !== "fancy_site_health") return undefined;
@@ -30,10 +41,13 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         {
           continuing: Boolean(message.continuing),
           isCancelled: () => cancelledJobs.has(String(message.jobId ?? "")),
+          onTick: handler => tickHandlers.set(String(message.jobId ?? ""), handler),
         },
       );
+  const jobId = String(message.jobId ?? "");
   Promise.resolve(task)
     .then(result => sendResponse({ok: true, ...result}))
-    .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}));
+    .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}))
+    .finally(() => tickHandlers.delete(jobId));
   return true;
 });

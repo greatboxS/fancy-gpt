@@ -37,20 +37,32 @@ async function taskWindowFor(url) {
   return created.tabs?.[0] ?? null;
 }
 
-/* Close the automation window once no job is using it.
+/* Close the automation window once it has been idle for a while.
  *
- * The window is reused across jobs, so it is not closed with each tab. Without
- * this it simply accumulates: the tab goes away and an empty minimized window
- * stays behind for the rest of the browser session, which is visible to the
- * user and is exactly the kind of leak automation should not leave.
+ * Closing it the instant a job ends means the next job creates a new one, and
+ * creating a window is visible to the user however unfocused it is asked to be.
+ * Keeping it forever leaves an empty minimized window behind for the rest of
+ * the session. So it is reused while work keeps arriving, and closed once it
+ * has genuinely gone quiet.
  */
+const TASK_WINDOW_IDLE_MS = 30000;
+let taskWindowIdleTimer = null;
+
+function scheduleTaskWindowClose() {
+  if (taskWindowIdleTimer != null) clearTimeout(taskWindowIdleTimer);
+  taskWindowIdleTimer = setTimeout(() => {
+    taskWindowIdleTimer = null;
+    closeTaskWindowIfIdle().catch(() => {});
+  }, TASK_WINDOW_IDLE_MS);
+}
+
 async function closeTaskWindowIfIdle() {
   if (taskWindowId == null || activeJobs.size > 0) return;
   const windowId = taskWindowId;
   try {
     const remaining = await ext.tabs.query({windowId});
-    // Only ever close a window this extension created, and only when nothing
-    // is left in it: never take away a tab the user opened.
+    // Only ever close a window this extension created, and only when nothing is
+    // left in it: never take away a tab the user opened.
     if (!remaining || remaining.length === 0) {
       taskWindowId = null;
       await ext.windows.remove(windowId);
@@ -138,6 +150,34 @@ function taskUrlFor(site, conversation) {
  * be discarded instead of stopping the turn currently using it. */
 const activeJobs = new Map();
 
+/* An unthrottled clock for the content script.
+ *
+ * The automation tab lives in a minimized window where setTimeout is throttled
+ * hard, so a reply that has finished - and therefore stops mutating the DOM -
+ * can go unnoticed for a minute. The background worker is not throttled the
+ * same way, so it ticks the tab while a job is running. The content script uses
+ * the tick only to re-check; it never carries data.
+ */
+const TICK_INTERVAL_MS = 500;
+let tickTimer = null;
+
+function startTicking() {
+  if (tickTimer != null) return;
+  tickTimer = setInterval(() => {
+    if (activeJobs.size === 0) { stopTicking(); return; }
+    for (const [jobId, entry] of activeJobs) {
+      if (entry.tabId == null) continue;
+      ext.tabs.sendMessage(entry.tabId, {type: "fancy_tick", jobId}).catch(() => {});
+    }
+  }, TICK_INTERVAL_MS);
+}
+
+function stopTicking() {
+  if (tickTimer == null) return;
+  clearInterval(tickTimer);
+  tickTimer = null;
+}
+
 async function cancelJob(message) {
   const jobId = String(message.job_id ?? "");
   const entry = activeJobs.get(jobId);
@@ -162,6 +202,10 @@ async function executeJob(job) {
     if (!SITES[site]) throw new Error(`unsupported site: ${site}`);
     const taskUrl = taskUrlFor(site, job.conversation);
     const config = await getConfig();
+    // Claimed before the tab exists: otherwise another job finishing in this
+    // moment sees an idle window and closes it while this tab is being created.
+    activeJobs.set(job.job_id, {tabId: null, epoch: Number(job.generation_epoch ?? 0), cancelled: false});
+    if (taskWindowIdleTimer != null) { clearTimeout(taskWindowIdleTimer); taskWindowIdleTimer = null; }
     tab = config.separateTaskWindow
       ? await taskWindowFor(taskUrl)
       : await ext.tabs.create({url: taskUrl, active: false});
@@ -176,6 +220,7 @@ async function executeJob(job) {
       return;
     }
     activeJobs.set(job.job_id, {tabId: tab.id, epoch: Number(job.generation_epoch ?? 0), cancelled: false});
+    startTicking();
     const result = await sendToContentOrTabClose(tab.id, {
       type: "fancy_execute_turn",
       site,
@@ -210,8 +255,9 @@ async function executeJob(job) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});
   } finally {
     activeJobs.delete(job.job_id);
+    if (activeJobs.size === 0) stopTicking();
     if (tab?.id != null) try { await ext.tabs.remove(tab.id); } catch (_) {}
-    await closeTaskWindowIfIdle();
+    scheduleTaskWindowClose();
   }
 }
 

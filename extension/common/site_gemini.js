@@ -7,7 +7,8 @@
  */
 (() => {
   const kit = globalThis.FancyGPTSiteKit;
-  const {firstVisible, waitFor, setComposer, createSettleTracker, stopGeneration, observeText} = kit;
+  const {firstVisible, waitFor, setComposer, looksLikeCompleteJson, stopGeneration,
+         observeText, createCompletionGate, createActivityWaiter} = kit;
 
   const SELECTORS = {
     composer: [
@@ -15,15 +16,20 @@
       'div[contenteditable="true"][role="textbox"]',
       "textarea",
     ],
+    // Structural anchors first, because matching aria-label text only works in
+    // the languages we happen to have listed: a Spanish or French UI matched
+    // none of them and the turn failed as "send control unavailable".
     send: [
+      "button.send-button",
+      'button[data-test-id="send-button"]',
       'button[aria-label*="Send" i]',
       'button[aria-label*="Gửi" i]',
-      "button.send-button",
     ],
     stop: [
+      "button.stop-button",
+      'button[data-test-id="stop-button"]',
       'button[aria-label*="Stop" i]',
       'button[aria-label*="Dừng" i]',
-      "button.stop-button",
     ],
     responses: ["message-content.model-response-text", "model-response"],
   };
@@ -39,6 +45,48 @@
       if (found.length) return found;
     }
     return [];
+  }
+
+  /* Site chrome that reads as text but is not part of the reply.
+   *
+   * innerText on the response element drags in action buttons ("Copy", "Good
+   * response"), reasoning panels ("Show thinking"), citation lists and draft
+   * switchers. None of that came from the model, and all of it corrupts the
+   * envelope the gateway has to parse.
+   */
+  const CHROME_SELECTORS = [
+    "button",
+    "[role=\"button\"]",
+    "[role=\"toolbar\"]",
+    "model-thoughts",
+    "sources-list",
+    "message-actions",
+    ".action-bar",
+    ".thought-panel",
+  ];
+
+  function readWithoutChrome(root) {
+    const chrome = new Set();
+    for (const selector of CHROME_SELECTORS) {
+      let matches = [];
+      try { matches = [...root.querySelectorAll(selector)]; } catch (_) { continue; }
+      for (const node of matches) chrome.add(node);
+    }
+    if (chrome.size === 0) return (root.innerText ?? "").trim();
+    // Read the parts that are not chrome, rather than string-subtracting the
+    // chrome afterwards: the same words can legitimately appear in the reply.
+    const parts = [];
+    const walk = node => {
+      if (chrome.has(node)) return;
+      if (!node.children || node.children.length === 0) {
+        const text = (node.innerText ?? node.textContent ?? "").trim();
+        if (text) parts.push(text);
+        return;
+      }
+      for (const child of node.children) walk(child);
+    };
+    walk(root);
+    return parts.join("\n").trim();
   }
 
   function latestResponseText(baselineCount) {
@@ -58,7 +106,7 @@
       .map(element => (element.innerText ?? element.textContent ?? "").trim())
       .filter(Boolean);
     if (codeBlocks.length === 1) return codeBlocks[0];
-    const text = (content.innerText ?? "").trim();
+    const text = readWithoutChrome(content);
     return text || null;
   }
 
@@ -138,9 +186,13 @@
     }
     send.click();
 
-    const tracker = createSettleTracker();
     const deadline = Date.now() + timeoutMs;
     let lastReported = null;
+    const gate = createCompletionGate({stabilityMs: 1200});
+    const activity = createActivityWaiter();
+    // An unthrottled clock from the background worker: a finished reply
+    // produces no further mutations to wake this loop with.
+    if (options?.onTick) options.onTick(activity.notify);
     // Driven by DOM mutations, because this loop's timer is throttled while the
     // automation window is hidden.
     const stopObserving = onProgress
@@ -149,10 +201,11 @@
           text => { lastReported = text; onProgress(text); },
         )
       : null;
+    const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < deadline) {
       if (options?.isCancelled?.()) {
         const stopped = stopGeneration(SELECTORS.stop);
-        if (stopObserving) stopObserving();
+        release();
         return {
           text: latestResponseText(baselineCount) ?? "",
           responseIdentity: `gemini-response-${baselineCount + 1}`,
@@ -162,18 +215,22 @@
         };
       }
       const text = latestResponseText(baselineCount);
-      const streaming = Boolean(firstVisible(SELECTORS.stop));
-      if (tracker.observe(text, {streaming})) {
-        if (stopObserving) stopObserving();
+      // The stop control also vanishes between a search or tool phase and the
+      // text that follows, so its absence alone must not end the turn.
+      const active = Boolean(firstVisible(SELECTORS.stop));
+      const complete = text != null && looksLikeCompleteJson(text);
+      if (gate.observe({text, active, complete})) {
+        release();
         return {
           text,
           responseIdentity: `gemini-response-${baselineCount + 1}`,
           conversationId: currentConversationId(),
         };
       }
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Woken by a mutation or a background tick; the delay is only a floor.
+      await activity.wait(500);
     }
-    if (stopObserving) stopObserving();
+    release();
     throw new Error("Gemini response timed out");
   }
 

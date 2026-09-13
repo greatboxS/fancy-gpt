@@ -11,7 +11,11 @@
 class StubElement {
   constructor(tag, attrs = {}) {
     this.tagName = tag.toUpperCase();
-    this.attributes = {...attrs};
+    // HTML attribute names are case-insensitive, so they are normalised here
+    // rather than letting a test pass only because it happened to match the
+    // casing a selector was written in.
+    this.attributes = {};
+    for (const [name, value] of Object.entries(attrs)) this.attributes[name.toLowerCase()] = value;
     this.children = [];
     this.parent = null;
     this._text = attrs.text ?? "";
@@ -19,7 +23,7 @@ class StubElement {
     this.focused = false;
     this.hidden = false;
     this.value = attrs.value ?? undefined;
-    this.isContentEditable = attrs.contentEditable === "true";
+    this.isContentEditable = this.attributes.contenteditable === "true";
   }
 
   get innerText() {
@@ -33,8 +37,8 @@ class StubElement {
 
   setText(value) { this._text = value; this._notify(); }
 
-  getAttribute(name) { return this.attributes[name] ?? null; }
-  setAttribute(name, value) { this.attributes[name] = value; this._notify(); }
+  getAttribute(name) { return this.attributes[String(name).toLowerCase()] ?? null; }
+  setAttribute(name, value) { this.attributes[String(name).toLowerCase()] = value; this._notify(); }
 
   append(child) { child.parent = this; this.children.push(child); this._notify(); }
   remove() {
@@ -102,7 +106,7 @@ function matchesSingle(node, selector) {
     const attr = rest.match(/^\[([\w-]+)(?:([*^$]?=)"([^"]*)")?\]/);
     if (attr) {
       const [, name, operator, value] = attr;
-      const actual = node.attributes[name];
+      const actual = node.attributes[name.toLowerCase()];
       if (actual === undefined || actual === null) return false;
       if (operator === "=" && actual !== value) return false;
       if (operator === "*=" && !String(actual).includes(value)) return false;
