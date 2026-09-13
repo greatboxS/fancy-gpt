@@ -3,8 +3,8 @@ const ext = globalThis.browser ?? globalThis.chrome;
 
 /* Jobs the controller asked to stop. The adapter's poll loop consults this,
  * so cancelling is a cooperative check rather than an attempt to kill a
- * running promise. Ids are kept after the turn ends so a cancel that arrives
- * late is still recorded rather than starting an unstoppable turn. */
+ * running promise. Each content script now serves one leased turn, so the id
+ * is discarded when that turn settles instead of growing for the tab lifetime. */
 const cancelledJobs = new Set();
 
 /* A turn opens a port to the background worker for its lifetime.
@@ -178,6 +178,9 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       },
     }))
     .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}))
-    .finally(() => { try { closeTickPort(); } catch (_) {} });
+    .finally(() => {
+      cancelledJobs.delete(String(message.jobId ?? ""));
+      try { closeTickPort(); } catch (_) {}
+    });
   return true;
 });

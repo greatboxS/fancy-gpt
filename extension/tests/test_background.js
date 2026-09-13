@@ -21,6 +21,7 @@ async function main() {
   const windows = new Map();
   const pending = new Map();
   const sent = [];
+  const stored = {};
   const removed = event();
   let handler;
 
@@ -40,7 +41,17 @@ async function main() {
         return new Promise((resolve, reject) => pending.set(tabId, {resolve, reject, message}));
       },
     },
-    storage: {local: {async get(defaults) { return defaults; }, async set() {}}},
+    storage: {local: {
+      async get(defaults) {
+        await new Promise(resolve => setImmediate(resolve));
+        if (typeof defaults === "string") return {[defaults]: stored[defaults]};
+        return {...defaults, ...stored};
+      },
+      async set(values) {
+        await new Promise(resolve => setImmediate(resolve));
+        Object.assign(stored, values);
+      },
+    }},
     runtime: {
       onConnect: event(), onInstalled: event(), onStartup: event(), onMessage: event(),
     },
@@ -94,6 +105,24 @@ async function main() {
   }
   await Promise.all(jobs);
   assert.strictEqual(windows.size, 0);
+
+  const closedJob = handler({
+    type: "job", operation: "model.turn", site: "chatgpt", job_id: "closed", prompt: "x", generation_epoch: 1,
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  const closedTab = context.FancyGPTBackgroundTest.activeJobs.get("closed").tabId;
+  removed.emit(closedTab);
+  await closedJob;
+  assert.strictEqual(windows.size, 0, "external tab close releases its exact window lease");
+  assert.strictEqual(removed.size, 0, "external close removes the watcher too");
+  assert(sent.some(item => item.type === "job_error" && item.job_id === "closed" && /closed/.test(item.error)));
+
+  await Promise.all(Array.from({length: 12}, (_, i) =>
+    context.FancyGPTBackgroundTest.rememberObservation("test", {sequence: i})
+  ));
+  const observations = await context.FancyGPTBackgroundTest.takeObservations();
+  assert.strictEqual(JSON.stringify(observations.map(item => item.sequence)), JSON.stringify(Array.from({length: 12}, (_, i) => i)));
+  assert.strictEqual((await context.FancyGPTBackgroundTest.takeObservations()).length, 0);
   console.log("background lifecycle: 1 passed");
 }
 

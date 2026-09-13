@@ -313,8 +313,19 @@ async function executeJob(job) {
  * Bounded, and shapes only. This is a notebook, not a log.
  */
 const OBSERVATION_KEY = "fancyGptSiteObservations";
+let observationQueue = Promise.resolve();
 
-async function rememberObservation(origin, report) {
+function withObservationLock(operation) {
+  const next = observationQueue.then(operation, operation);
+  observationQueue = next.catch(() => {});
+  return next;
+}
+
+function rememberObservation(origin, report) {
+  return withObservationLock(() => rememberObservationUnlocked(origin, report));
+}
+
+async function rememberObservationUnlocked(origin, report) {
   /* Stored, not held in a variable.
    *
    * A Manifest V3 service worker is torn down when it goes idle and started
@@ -335,7 +346,11 @@ async function rememberObservation(origin, report) {
   }
 }
 
-async function takeObservations() {
+function takeObservations() {
+  return withObservationLock(takeObservationsUnlocked);
+}
+
+async function takeObservationsUnlocked() {
   try {
     const stored = await ext.storage.local.get(OBSERVATION_KEY);
     const kept = Array.isArray(stored?.[OBSERVATION_KEY]) ? stored[OBSERVATION_KEY] : [];
@@ -386,7 +401,9 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // A narrow seam for the executable lifecycle test. It intentionally exposes
 // ownership operations, not browser credentials or transport internals.
 if (globalThis.__FANCYGPT_TEST__) {
-  globalThis.FancyGPTBackgroundTest = {acquireSurface, releaseSurface, surfaceLeases, activeJobs};
+  globalThis.FancyGPTBackgroundTest = {
+    acquireSurface, releaseSurface, surfaceLeases, activeJobs, rememberObservation, takeObservations,
+  };
 }
 
 connectBridge().catch(console.error);
