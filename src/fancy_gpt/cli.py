@@ -25,7 +25,7 @@ from .relevance import ResponseIntent
 from .providers import ChatGPTWebAutomationProvider
 from .skills import export_packaged_skills, packaged_skills_root, validate_skill_bundle
 from .runtime_paths import default_browser_profile, user_data_dir, default_bridge_token_file, default_bridge_native_config
-from .bridge import BridgeServer, load_or_create_token, send_extension_reload
+from .bridge import BridgeServer, load_or_create_token, load_token, send_extension_reload
 from .bridge.native_manifest import install_manifest, native_host_manifest
 from .extension_utils import adapter_build_id, export_extension
 from .tunnels import TunnelManager, TunnelRegistry, TunnelLayerInspector
@@ -901,7 +901,10 @@ def bridge_serve(
     port: Annotated[int, typer.Option("--port")] = 8765,
     allow_non_loopback: Annotated[bool, typer.Option("--allow-non-loopback")] = False,
 ) -> None:
-    token = load_or_create_token(default_bridge_token_file())
+    # Serving is a lifecycle action, never a credential-rotation action. Pair
+    # once with `bridge init`; a missing token is an explicit configuration
+    # error instead of silently disconnecting every existing extension.
+    token = load_token(default_bridge_token_file())
     typer.echo(json.dumps({"listening": f"ws://{host}:{port}", "token_file": str(default_bridge_token_file())}))
     BridgeServer(host, port, token, allow_non_loopback=allow_non_loopback).serve_forever()
 

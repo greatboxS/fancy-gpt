@@ -210,6 +210,10 @@ fancy-gpt extension export chrome ./fancy-gpt-extension
 
 Load the unpacked extension, configure the pair token printed by `fancy-gpt bridge init`, keep endpoint `ws://127.0.0.1:8765`, and select the browser route `chrome-remote`, `edge-remote`, or `firefox-remote`.
 
+`bridge serve` only reads the existing token and never generates or rotates it.
+Run `bridge init` once before the first start; restarting or reinstalling preserves
+the paired browsers.
+
 After updating files in an already loaded unpacked bundle, a current extension
 can reload and verify itself without opening the extensions page:
 

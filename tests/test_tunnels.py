@@ -253,6 +253,21 @@ def test_bridge_server_rejects_unbounded_or_invalid_timeouts() -> None:
         BridgeServer("127.0.0.1", 0, "token", job_timeout_s=0)
 
 
+def test_loading_an_existing_bridge_token_never_rewrites_it(tmp_path) -> None:
+    from fancy_gpt.bridge import load_or_create_token, load_token
+
+    path = tmp_path / "bridge-token"
+    original = load_or_create_token(path)
+    before = path.stat()
+
+    assert load_token(path) == original
+    assert load_or_create_token(path) == original
+    after = path.stat()
+    assert (after.st_ino, after.st_mtime_ns, after.st_size) == (
+        before.st_ino, before.st_mtime_ns, before.st_size,
+    )
+
+
 def test_bridge_hub_routes_concurrent_workers_by_exact_tunnel() -> None:
     from fancy_gpt.bridge.server import BridgeHub, BrowserWorker
 
