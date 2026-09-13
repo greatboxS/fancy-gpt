@@ -7,22 +7,30 @@ const ext = globalThis.browser ?? globalThis.chrome;
  * late is still recorded rather than starting an unstoppable turn. */
 const cancelledJobs = new Set();
 
-/* Ticks from the background worker, routed to the turn running in this tab.
- * The tick carries no data: it exists only so a turn whose page has gone quiet
- * still gets to re-check, despite this window's timers being throttled. */
-const tickHandlers = new Map();
+/* A turn opens a port to the background worker for its lifetime.
+ *
+ * The port is what gives this tab an unthrottled clock: this window's timers
+ * are throttled while it is minimized, and a reply that has finished stops
+ * mutating the DOM, so without a tick the turn has nothing to wake it. The port
+ * also keeps the Manifest V3 service worker alive, which a timer there would
+ * not. The tick carries no data. */
+function openTickPort(jobId, onTick) {
+  let port = null;
+  try {
+    port = ext.runtime.connect({name: `fancy-tick:${jobId}`});
+    port.onMessage.addListener(() => { try { onTick(); } catch (_) {} });
+  } catch (_) {
+    // No clock available; the turn still runs on DOM mutations alone.
+    return () => {};
+  }
+  return () => { try { port.disconnect(); } catch (_) {} };
+}
 
 ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "fancy_cancel_turn") {
     const jobId = String(message.jobId ?? "");
     if (jobId) cancelledJobs.add(jobId);
     sendResponse({ok: Boolean(jobId)});
-    return false;
-  }
-  if (message?.type === "fancy_tick") {
-    const handler = tickHandlers.get(String(message.jobId ?? ""));
-    if (handler) { try { handler(); } catch (_) {} }
-    sendResponse({ok: true});
     return false;
   }
   if (message?.type !== "fancy_execute_turn" && message?.type !== "fancy_site_health") return undefined;
@@ -32,6 +40,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ok: false, error: `unsupported site adapter: ${siteId}`});
     return false;
   }
+  let closeTickPort = () => {};
   const task = message.type === "fancy_site_health"
     ? adapter.healthCheck()
     : adapter.executeTurn(
@@ -41,13 +50,12 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         {
           continuing: Boolean(message.continuing),
           isCancelled: () => cancelledJobs.has(String(message.jobId ?? "")),
-          onTick: handler => tickHandlers.set(String(message.jobId ?? ""), handler),
+          onTick: handler => { closeTickPort = openTickPort(String(message.jobId ?? ""), handler); },
         },
       );
-  const jobId = String(message.jobId ?? "");
   Promise.resolve(task)
     .then(result => sendResponse({ok: true, ...result}))
     .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}))
-    .finally(() => tickHandlers.delete(jobId));
+    .finally(() => { try { closeTickPort(); } catch (_) {} });
   return true;
 });

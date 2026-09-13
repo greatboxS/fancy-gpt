@@ -150,33 +150,32 @@ function taskUrlFor(site, conversation) {
  * be discarded instead of stopping the turn currently using it. */
 const activeJobs = new Map();
 
-/* An unthrottled clock for the content script.
+/* An unthrottled clock for the content script, over a long-lived port.
  *
  * The automation tab lives in a minimized window where setTimeout is throttled
  * hard, so a reply that has finished - and therefore stops mutating the DOM -
- * can go unnoticed for a minute. The background worker is not throttled the
- * same way, so it ticks the tab while a job is running. The content script uses
- * the tick only to re-check; it never carries data.
+ * can go unnoticed for a minute.
+ *
+ * The obvious fix, setInterval here in the background, does not work: this is a
+ * Manifest V3 service worker, and a timer does not keep one alive. It is
+ * terminated after about 30 seconds idle, the ticks stop, and the turn hangs
+ * exactly as before - which is what happened, intermittently, in testing.
+ *
+ * A connected port does keep the worker alive, so the content script opens one
+ * for the duration of its turn and is ticked over it. The tick carries no data;
+ * it exists only so the turn gets to re-check.
  */
-const TICK_INTERVAL_MS = 500;
-let tickTimer = null;
+const TICK_INTERVAL_MS = 400;
+const TICK_PORT_PREFIX = "fancy-tick:";
 
-function startTicking() {
-  if (tickTimer != null) return;
-  tickTimer = setInterval(() => {
-    if (activeJobs.size === 0) { stopTicking(); return; }
-    for (const [jobId, entry] of activeJobs) {
-      if (entry.tabId == null) continue;
-      ext.tabs.sendMessage(entry.tabId, {type: "fancy_tick", jobId}).catch(() => {});
-    }
+ext.runtime.onConnect.addListener(port => {
+  if (!port.name || !port.name.startsWith(TICK_PORT_PREFIX)) return;
+  const timer = setInterval(() => {
+    try { port.postMessage({type: "fancy_tick"}); }
+    catch (_) { clearInterval(timer); }
   }, TICK_INTERVAL_MS);
-}
-
-function stopTicking() {
-  if (tickTimer == null) return;
-  clearInterval(tickTimer);
-  tickTimer = null;
-}
+  port.onDisconnect.addListener(() => clearInterval(timer));
+});
 
 async function cancelJob(message) {
   const jobId = String(message.job_id ?? "");
@@ -220,7 +219,6 @@ async function executeJob(job) {
       return;
     }
     activeJobs.set(job.job_id, {tabId: tab.id, epoch: Number(job.generation_epoch ?? 0), cancelled: false});
-    startTicking();
     const result = await sendToContentOrTabClose(tab.id, {
       type: "fancy_execute_turn",
       site,
@@ -255,7 +253,6 @@ async function executeJob(job) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});
   } finally {
     activeJobs.delete(job.job_id);
-    if (activeJobs.size === 0) stopTicking();
     if (tab?.id != null) try { await ext.tabs.remove(tab.id); } catch (_) {}
     scheduleTaskWindowClose();
   }

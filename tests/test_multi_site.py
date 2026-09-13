@@ -263,17 +263,26 @@ def test_the_turn_loop_is_woken_by_activity_not_only_a_timer(tmp_path: Path) -> 
         assert "setTimeout(resolve, 500)" not in source, f"{adapter} still has a fixed sleep"
 
 
-def test_the_background_worker_ticks_running_jobs(tmp_path: Path) -> None:
-    """A finished reply stops mutating, so something must still wake the turn."""
+def test_the_tick_uses_a_port_not_a_service_worker_timer(tmp_path: Path) -> None:
+    """A finished reply stops mutating, so something must still wake the turn.
+
+    A setInterval in the background does not survive: this is a Manifest V3
+    service worker and a timer does not keep one alive, so it is terminated
+    after about 30s idle and the turn hangs. A connected port does keep it
+    alive. This was observed intermittently in live runs before the fix.
+    """
     exported = export_extension("edge", tmp_path / "edge-tick")
     background = (exported / "background.js").read_text(encoding="utf-8")
     content = (exported / "content.js").read_text(encoding="utf-8")
-    assert "function startTicking(" in background and "stopTicking()" in background
-    assert '"fancy_tick"' in background
-    assert '"fancy_tick"' in content
-    assert "onTick" in content
-    # The tick must stop when nothing is running, or it runs for the session.
-    assert "if (activeJobs.size === 0) stopTicking();" in background
+    manifest = (exported / "manifest.json").read_text(encoding="utf-8")
+
+    assert '"manifest_version": 3' in manifest, "the reasoning below assumes MV3"
+    assert "ext.runtime.onConnect.addListener(" in background
+    assert "port.onDisconnect.addListener(" in background, "the ticker must stop with the port"
+    assert "ext.runtime.connect(" in content
+    assert "closeTickPort()" in content, "the port must be released when the turn ends"
+    # The reason is recorded where the next reader will need it.
+    assert "does not keep one alive" in background
 
 
 def test_submission_is_verified_rather_than_assumed(tmp_path: Path) -> None:
