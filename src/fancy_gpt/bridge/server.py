@@ -118,6 +118,11 @@ class BridgeHub:
         self._total_probes = 0
         self._progress: dict[str, tuple[float, str]] = {}
         self._progress_cap = 200
+        # Controllers that asked to be pushed progress instead of polling
+        # for it. Each carries its own send lock, because a push happens on
+        # the worker's thread while the controller's own thread is blocked
+        # in recv().
+        self._subscribers: dict[int, tuple[Any, threading.Lock, str]] = {}
 
     def _fresh(self, worker: BrowserWorker) -> bool:
         return worker.alive and (time.monotonic() - worker.last_seen) <= self.stale_after_s
@@ -157,12 +162,42 @@ class BridgeHub:
             else:
                 self._total_jobs_failed += 1
 
+    def add_subscriber(self, connection: Any, tunnel_id: str) -> int:
+        key = id(connection)
+        with self._lock:
+            self._subscribers[key] = (connection, threading.Lock(), tunnel_id)
+        return key
+
+    def remove_subscriber(self, key: int) -> None:
+        with self._lock:
+            self._subscribers.pop(key, None)
+
+    def subscriber_count(self) -> int:
+        with self._lock:
+            return len(self._subscribers)
+
     def record_progress(self, job_id: str, text: str) -> None:
         with self._lock:
             self._progress[job_id] = (time.time(), text)
             if len(self._progress) > self._progress_cap:
                 oldest = min(self._progress, key=lambda key: self._progress[key][0])
                 self._progress.pop(oldest, None)
+            subscribers = list(self._subscribers.items())
+        if not subscribers:
+            return
+        # Snapshots are cumulative, so a subscriber that cannot keep up simply
+        # misses intermediate ones and still converges. The producer is never
+        # blocked and a dead subscriber is dropped rather than retried.
+        message = dumps({"type": "job_progress", "job_id": job_id, "text": text})
+        for key, (connection, lock, _tunnel) in subscribers:
+            try:
+                if lock.acquire(timeout=0.05):
+                    try:
+                        connection.send(message)
+                    finally:
+                        lock.release()
+            except Exception:
+                self.remove_subscriber(key)
 
     def get_progress(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
@@ -296,6 +331,19 @@ class BridgeServer:
 
     def _controller_session(self, connection: ServerConnection) -> None:
         connection.send(dumps({"type": "hello_ack", "protocol": PROTOCOL_VERSION, "role": "controller"}))
+        subscriber_key: int | None = None
+        try:
+            self._controller_loop(connection)
+        finally:
+            if subscriber_key is not None:
+                self.hub.remove_subscriber(subscriber_key)
+            # A controller that subscribed is identified by its connection, so
+            # dropping it by identity is enough even if the loop never saw the
+            # key assignment.
+            self.hub.remove_subscriber(id(connection))
+
+    def _controller_loop(self, connection: ServerConnection) -> None:
+        subscriber_key: int | None = None
         while True:
             message = loads(connection.recv())
             msg_type = message.get("type")
@@ -338,6 +386,13 @@ class BridgeServer:
                 connection.send(dumps({"type": "workers_result", "workers": self.hub.snapshot()}))
             elif msg_type == "stats":
                 connection.send(dumps({"type": "stats_result", "stats": self.hub.stats(), "workers": self.hub.snapshot()}))
+            elif msg_type == "subscribe":
+                # This connection becomes a progress feed. Its recv() below keeps
+                # blocking; pushes are written from the worker's thread under
+                # this subscriber's own lock.
+                tunnel_id = str(message.get("tunnel_id", ""))
+                subscriber_key = self.hub.add_subscriber(connection, tunnel_id)
+                connection.send(dumps({"type": "subscribe_result", "accepted": True}))
             elif msg_type == "cancel":
                 # Cancellation is out of band on purpose: the turn's own reply
                 # still returns on whichever request is waiting for it, so this

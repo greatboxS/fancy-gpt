@@ -7,7 +7,7 @@
  */
 (() => {
   const kit = globalThis.FancyGPTSiteKit;
-  const {firstVisible, waitFor, setComposer, createSettleTracker, stopGeneration} = kit;
+  const {firstVisible, waitFor, setComposer, createSettleTracker, stopGeneration, observeText} = kit;
 
   const SELECTORS = {
     composer: [
@@ -141,9 +141,15 @@
     const tracker = createSettleTracker();
     const deadline = Date.now() + timeoutMs;
     let lastReported = null;
+    // Driven by DOM mutations, because this loop's timer is throttled while the
+    // automation window is hidden.
+    const stopObserving = onProgress
+      ? observeText(() => latestResponseText(baselineCount), text => { lastReported = text; onProgress(text); })
+      : null;
     while (Date.now() < deadline) {
       if (options?.isCancelled?.()) {
         const stopped = stopGeneration(SELECTORS.stop);
+        if (stopObserving) stopObserving();
         return {
           text: latestResponseText(baselineCount) ?? "",
           responseIdentity: `gemini-response-${baselineCount + 1}`,
@@ -153,12 +159,9 @@
         };
       }
       const text = latestResponseText(baselineCount);
-      if (text && text !== lastReported) {
-        lastReported = text;
-        try { onProgress?.(text); } catch (_) {}
-      }
       const streaming = Boolean(firstVisible(SELECTORS.stop));
       if (tracker.observe(text, {streaming})) {
+        if (stopObserving) stopObserving();
         return {
           text,
           responseIdentity: `gemini-response-${baselineCount + 1}`,
@@ -167,6 +170,7 @@
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
+    if (stopObserving) stopObserving();
     throw new Error("Gemini response timed out");
   }
 

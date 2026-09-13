@@ -18,6 +18,7 @@ class SiteHealthUnsupported(RuntimeError):
     asked" apart from "this worker says the site is not ready".
     """
 
+from .progress import ProgressSubscription
 from .protocol import PROTOCOL_VERSION, dumps, hello, loads
 
 
@@ -76,6 +77,7 @@ class BridgeBrowserDriver:
         self.job_timeout_s = job_timeout_s
         self._connection: ClientConnection | None = None
         self._turns: dict[str, _PendingTurn] = {}
+        self._progress: ProgressSubscription | None = None
 
     def start(self) -> None:
         if self._connection is not None:
@@ -92,6 +94,9 @@ class BridgeBrowserDriver:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+        if self._progress is not None:
+            self._progress.close()
+            self._progress = None
         self._turns.clear()
 
     def _conn(self) -> ClientConnection:
@@ -221,6 +226,22 @@ class BridgeBrowserDriver:
 
     def close_turn(self, turn: BrowserTurn) -> None:
         self._turns.pop(turn.turn_id, None)
+
+    def watch_progress(self, turn_id: str, on_progress) -> bool:
+        """Have the bridge push this turn's progress instead of polling for it.
+
+        Returns False when the push feed is unavailable, so the caller can fall
+        back to polling rather than silently losing streaming.
+        """
+        if self._progress is None:
+            self._progress = ProgressSubscription(self.endpoint, self.token, self.tunnel_id)
+        return self._progress.subscribe(turn_id, on_progress)
+
+    def stop_watching_progress(self, turn_id: str) -> None:
+        """Release the route at the terminal reply, so a snapshot that arrives
+        after completion has nowhere to go."""
+        if self._progress is not None:
+            self._progress.unsubscribe(turn_id)
 
     def cancel_turn(self, turn_id: str, *, generation_epoch: int = 0, reason: str = "cancelled") -> bool:
         """Ask the browser to stop generating this turn.

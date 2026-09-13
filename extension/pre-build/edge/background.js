@@ -37,6 +37,30 @@ async function taskWindowFor(url) {
   return created.tabs?.[0] ?? null;
 }
 
+/* Close the automation window once no job is using it.
+ *
+ * The window is reused across jobs, so it is not closed with each tab. Without
+ * this it simply accumulates: the tab goes away and an empty minimized window
+ * stays behind for the rest of the browser session, which is visible to the
+ * user and is exactly the kind of leak automation should not leave.
+ */
+async function closeTaskWindowIfIdle() {
+  if (taskWindowId == null || activeJobs.size > 0) return;
+  const windowId = taskWindowId;
+  try {
+    const remaining = await ext.tabs.query({windowId});
+    // Only ever close a window this extension created, and only when nothing
+    // is left in it: never take away a tab the user opened.
+    if (!remaining || remaining.length === 0) {
+      taskWindowId = null;
+      await ext.windows.remove(windowId);
+    }
+  } catch (_) {
+    // Already gone, which is the state we wanted anyway.
+    taskWindowId = null;
+  }
+}
+
 async function getConfig() {
   const value = await ext.storage.local.get(DEFAULTS);
   return {...DEFAULTS, ...value};
@@ -187,6 +211,7 @@ async function executeJob(job) {
   } finally {
     activeJobs.delete(job.job_id);
     if (tab?.id != null) try { await ext.tabs.remove(tab.id); } catch (_) {}
+    await closeTaskWindowIfIdle();
   }
 }
 

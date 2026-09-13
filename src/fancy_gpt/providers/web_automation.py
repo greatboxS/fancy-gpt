@@ -42,6 +42,10 @@ class ChatGPTWebAutomationProvider:
         #: Bridge turn id of the turn currently in flight, so an out-of-band
         #: cancel can name it while execute() is still blocked.
         self.active_turn_id: str | None = None
+        self._pushed_progress_turn: str | None = None
+        #: How partial output is being obtained, and why if it degraded.
+        self.progress_mode: str = "none"
+        self.progress_fallback_reason: str = ""
 
     def start(self) -> None:
         if not self._started:
@@ -128,6 +132,14 @@ class ChatGPTWebAutomationProvider:
             self.active_turn_id = None
             if poller is not None:
                 poller.stop()
+            if self._pushed_progress_turn is not None:
+                stop_watching = getattr(self.driver, "stop_watching_progress", None)
+                if callable(stop_watching):
+                    try:
+                        stop_watching(self._pushed_progress_turn)
+                    except Exception:
+                        pass
+                self._pushed_progress_turn = None
             self.driver.close_turn(turn)
 
     def cancel(self, turn_id: str, *, generation_epoch: int = 0, reason: str = "cancelled") -> bool:
@@ -147,9 +159,29 @@ class ChatGPTWebAutomationProvider:
     def _start_progress_poller(
         self, turn_id: str, on_progress: Callable[[str], None] | None
     ) -> "_ProgressPoller | None":
-        poll = getattr(self.driver, "poll_progress", None)
-        if on_progress is None or poll is None:
+        """Prefer a pushed feed; poll only when the driver cannot push.
+
+        Polling puts a floor under streaming latency equal to its interval, so
+        it is the fallback rather than the design.
+        """
+        if on_progress is None:
             return None
+        watch = getattr(self.driver, "watch_progress", None)
+        if callable(watch):
+            try:
+                if watch(turn_id, on_progress):
+                    self._pushed_progress_turn = turn_id
+                    self.progress_mode = "push"
+                    return None
+                self.progress_fallback_reason = "the bridge declined the progress subscription"
+            except Exception as exc:
+                # Falling back silently is how a broken push path hides as
+                # merely slow streaming. Record why, then degrade.
+                self.progress_fallback_reason = f"{type(exc).__name__}: {exc}"[:200]
+        poll = getattr(self.driver, "poll_progress", None)
+        if poll is None:
+            return None
+        self.progress_mode = "poll"
         return _ProgressPoller(lambda: poll(turn_id), on_progress, interval_s=self.progress_interval_s).start()
 
     def __enter__(self) -> "ChatGPTWebAutomationProvider":

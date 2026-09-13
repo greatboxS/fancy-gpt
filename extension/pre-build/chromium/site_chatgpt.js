@@ -3,7 +3,7 @@
   // Everything that is not a ChatGPT DOM assumption comes from the shared kit,
   // so a second adapter starts from what already works rather than repeating it.
   const kit = globalThis.FancyGPTSiteKit;
-  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson, stopGeneration} = kit;
+  const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson, stopGeneration, observeText} = kit;
 
   const SELECTORS = {
     composer: ["#prompt-textarea", "textarea", '[contenteditable="true"]'],
@@ -96,6 +96,9 @@
 
     const deadline = Date.now() + timeoutMs;
     let boundId = null;
+    // Progress is reported by a DOM observer rather than by this loop, because
+    // the loop's timer is throttled while the automation window is hidden.
+    let stopObserving = null;
     // Cancellation is checked inside the poll loop: clicking stop ends
     // generation in the page, and whatever text exists is returned as partial.
     const checkCancelled = () => {
@@ -113,8 +116,6 @@
     let stableCount = 0;
     let lastReported = null;
     while (Date.now() < deadline) {
-      const cancelled = checkCancelled();
-      if (cancelled) return cancelled;
       const candidates = [];
       for (const id of turnIds()) {
         if (baseline.has(id)) continue;
@@ -124,6 +125,14 @@
       if (boundId == null) {
         if (candidates.length > 1) throw new Error("ambiguous ChatGPT response: multiple new assistant turns");
         if (candidates.length === 1) boundId = candidates[0].id;
+      }
+      // Checked after binding, not before: a cancel arriving before the first
+      // successful bind would otherwise discard a reply that is already on
+      // screen and report an empty result.
+      const cancelled = checkCancelled();
+      if (cancelled) {
+        if (stopObserving) stopObserving();
+        return cancelled;
       }
       if (boundId != null) {
         // A long conversation may retain a visible "Continue generating"
@@ -141,20 +150,27 @@
           await new Promise(resolve => setTimeout(resolve, 500));
           continue;
         }
-        const text = assistantText(boundId);
-        if (text && text !== lastReported) {
-          lastReported = text;
-          try { onProgress?.(text); } catch (_) {}
+        if (onProgress && stopObserving === null) {
+          const observedId = boundId;
+          stopObserving = observeText(() => assistantText(observedId), text => {
+            lastReported = text;
+            onProgress(text);
+          });
         }
+        const text = assistantText(boundId);
         const streaming = Boolean(firstVisible(SELECTORS.stop));
         const complete = text != null && looksLikeCompleteJson(text);
         if (text && text === stableText && !streaming && complete) stableCount += 1;
         else stableCount = 0;
         stableText = text;
-        if (text && stableCount >= 3) return {text, responseIdentity: boundId, conversationId: currentConversationId()};
+        if (text && stableCount >= 3) {
+          if (stopObserving) stopObserving();
+          return {text, responseIdentity: boundId, conversationId: currentConversationId()};
+        }
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
+    if (stopObserving) stopObserving();
     throw new Error("ChatGPT response timed out");
   }
 

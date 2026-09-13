@@ -69,6 +69,7 @@ src/fancy_gpt/bridge/client.py
 src/fancy_gpt/bridge/native_host.py
 src/fancy_gpt/bridge/native_manifest.py
 src/fancy_gpt/bridge/probe.py
+src/fancy_gpt/bridge/progress.py
 src/fancy_gpt/bridge/protocol.py
 src/fancy_gpt/bridge/server.py
 src/fancy_gpt/browser/__init__.py
@@ -125,6 +126,7 @@ src/fancy_gpt/web/sites/gemini.py
 src/fancy_gpt/web/transport/__init__.py
 src/fancy_gpt/web/transport/contracts.py
 tests/test_bridge_concurrency.py
+tests/test_bridge_progress_push.py
 tests/test_bridge_stats.py
 tests/test_browser.py
 tests/test_catalog_routing.py
@@ -135,6 +137,7 @@ tests/test_conversation_index.py
 tests/test_engine.py
 tests/test_execution.py
 tests/test_extension_assets.py
+tests/test_extension_behaviour.py
 tests/test_gateway.py
 tests/test_gateway_cancel_path.py
 tests/test_gateway_correlation.py

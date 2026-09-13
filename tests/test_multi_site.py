@@ -204,3 +204,34 @@ def test_each_adapter_honours_cancellation_in_its_poll_loop(tmp_path: Path, adap
     assert "stopGeneration(SELECTORS.stop)" in source
     assert "cancelled: true" in source
     assert "isCancelled" in source
+
+
+def test_progress_is_observed_not_polled_in_the_exported_extension(tmp_path: Path) -> None:
+    """A hidden window throttles timers, so progress must be DOM-driven."""
+    exported = export_extension("edge", tmp_path / "edge-observer")
+    kit = (exported / "site_kit.js").read_text(encoding="utf-8")
+    assert "function observeText(" in kit
+    assert "new MutationObserver(" in kit
+    # The reason is recorded where the next reader will need it.
+    assert "throttle" in kit.lower()
+
+
+@pytest.mark.parametrize("adapter", ["site_chatgpt.js", "site_gemini.js"])
+def test_each_adapter_observes_and_disconnects(tmp_path: Path, adapter: str) -> None:
+    exported = export_extension("edge", tmp_path / f"edge-obs-{adapter}")
+    source = (exported / adapter).read_text(encoding="utf-8")
+    assert "observeText(" in source
+    # An observer that is never disconnected leaks for the life of the page.
+    assert "stopObserving()" in source
+
+
+def test_the_automation_window_is_closed_when_idle(tmp_path: Path) -> None:
+    """An empty minimized window left behind is a leak the user can see."""
+    exported = export_extension("edge", tmp_path / "edge-window")
+    background = (exported / "background.js").read_text(encoding="utf-8")
+    assert "async function closeTaskWindowIfIdle(" in background
+    assert "closeTaskWindowIfIdle()" in background
+    # It must never close a window that still holds tabs, which could be the
+    # user's own.
+    assert "remaining.length === 0" in background
+    assert "activeJobs.size > 0" in background

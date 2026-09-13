@@ -138,6 +138,32 @@
     try { control.click(); return true; } catch (_) { return false; }
   }
 
+  /* Report text changes as the DOM makes them, not on a polling timer.
+   *
+   * Automation runs in a minimized window so it stays out of the user's way,
+   * and browsers throttle setTimeout hard in hidden windows - observed as
+   * 24-second gaps where the page had actually been streaming all along. A
+   * MutationObserver is driven by the DOM changing rather than by a timer, so
+   * partial output keeps flowing while the window is hidden.
+   *
+   * Returns a stop function. Never let a reporting error break the turn.
+   */
+  function observeText(getText, onChange) {
+    let last = null;
+    const report = () => {
+      let text = null;
+      try { text = getText(); } catch (_) { return; }
+      if (text && text !== last) {
+        last = text;
+        try { onChange(text); } catch (_) {}
+      }
+    };
+    const observer = new MutationObserver(report);
+    observer.observe(document.body, {childList: true, subtree: true, characterData: true});
+    report();
+    return () => { try { observer.disconnect(); } catch (_) {} };
+  }
+
   // Stamped at export time; every adapter reports this one value.
   const BUILD = "__FANCYGPT_ADAPTER_BUILD__";
 
@@ -153,5 +179,6 @@
     looksLikeCompleteJson,
     createSettleTracker,
     stopGeneration,
+    observeText,
   };
 })();
