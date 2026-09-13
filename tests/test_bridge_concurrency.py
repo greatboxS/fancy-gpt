@@ -24,7 +24,45 @@ class FakeConnection:
 
 
 def make_worker() -> BrowserWorker:
-    return BrowserWorker(connection=FakeConnection(), tunnel_ids={"edge-remote"}, browser="edge")
+    return BrowserWorker(connection=FakeConnection(), tunnel_ids={"edge-remote"}, browser="edge", max_turns=16)
+
+
+def test_worker_capacity_queues_without_rejecting_or_overcommitting() -> None:
+    worker = BrowserWorker(
+        connection=FakeConnection(), tunnel_ids={"edge-remote"}, browser="edge", max_turns=2,
+    )
+    peak = 0
+    stop = threading.Event()
+
+    def answer() -> None:
+        nonlocal peak
+        seen: set[str] = set()
+        while not stop.wait(0.005):
+            pending = list(worker.pending)
+            peak = max(peak, len(pending))
+            for job_id in pending:
+                if job_id not in seen:
+                    seen.add(job_id)
+                    threading.Timer(
+                        0.08, worker.dispatch,
+                        args=({"type": "job_result", "job_id": job_id, "text": "ok"},),
+                    ).start()
+
+    threading.Thread(target=answer, daemon=True).start()
+    results: list[str] = []
+    threads = [threading.Thread(
+        target=lambda job_id=f"bounded-{i}": results.append(
+            worker.request({"type": "job", "job_id": job_id}, timeout_s=2)["text"]
+        )
+    ) for i in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=3)
+    stop.set()
+
+    assert results == ["ok"] * 5
+    assert peak == 2
 
 
 def _answer_when_registered(worker: BrowserWorker, work_s: float, stop: threading.Event) -> None:

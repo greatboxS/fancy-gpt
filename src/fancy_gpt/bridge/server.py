@@ -46,6 +46,12 @@ class BrowserWorker:
     jobs_started: int = 0
     jobs_succeeded: int = 0
     jobs_failed: int = 0
+    capacity_slots: threading.BoundedSemaphore = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.max_turns < 1:
+            raise ValueError("browser worker max_turns must be positive")
+        self.capacity_slots = threading.BoundedSemaphore(self.max_turns)
 
     def send(self, message: dict[str, Any]) -> None:
         with self.send_lock:
@@ -62,16 +68,20 @@ class BrowserWorker:
         had already come and gone.
         """
         job_id = str(message["job_id"])
+        started_waiting = time.monotonic()
+        if not self.capacity_slots.acquire(timeout=timeout_s):
+            raise TimeoutError(f"browser worker capacity wait timed out for job {job_id}")
         response_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
-        with self.request_lock:
-            if job_id in self.pending:
-                raise ValueError(f"job {job_id} is already in flight")
-            self.pending[job_id] = response_queue
-            self.job_tunnels[job_id] = str(message.get("tunnel_id", ""))
-            self.jobs_started += 1
         try:
+            with self.request_lock:
+                if job_id in self.pending:
+                    raise ValueError(f"job {job_id} is already in flight")
+                self.pending[job_id] = response_queue
+                self.job_tunnels[job_id] = str(message.get("tunnel_id", ""))
+                self.jobs_started += 1
             self.send(message)
-            response = response_queue.get(timeout=timeout_s)
+            remaining = max(0.0, timeout_s - (time.monotonic() - started_waiting))
+            response = response_queue.get(timeout=remaining)
         except queue.Empty as exc:
             with self.request_lock:
                 self.jobs_failed += 1
@@ -91,6 +101,7 @@ class BrowserWorker:
             with self.request_lock:
                 self.pending.pop(job_id, None)
                 self.job_tunnels.pop(job_id, None)
+            self.capacity_slots.release()
 
     def send_control(self, message: dict[str, Any]) -> None:
         """Fire-and-forget message to the worker, outside any job's reply path."""
@@ -274,7 +285,10 @@ class BridgeHub:
             candidates = [worker for worker in self._workers if self._fresh(worker) and tunnel_id in worker.tunnel_ids]
             if not candidates:
                 return None
-            return max(candidates, key=lambda worker: worker.last_seen)
+            return min(
+                candidates,
+                key=lambda worker: (len(worker.pending) / worker.max_turns, -worker.last_seen),
+            )
         return None
 
     def snapshot(self) -> list[dict[str, Any]]:

@@ -270,6 +270,23 @@ def test_bridge_hub_routes_concurrent_workers_by_exact_tunnel() -> None:
     assert len(hub.snapshot()) == 2
 
 
+def test_bridge_prefers_the_worker_with_more_spare_capacity() -> None:
+    from fancy_gpt.bridge.server import BridgeHub, BrowserWorker
+
+    class Connection:
+        def send(self, _message):
+            pass
+
+    hub = BridgeHub("token")
+    busy = BrowserWorker(Connection(), {"edge-remote"}, "edge", max_turns=2)
+    idle = BrowserWorker(Connection(), {"edge-remote"}, "edge", max_turns=2)
+    busy.pending["running"] = __import__("queue").Queue(maxsize=1)
+    hub.register(busy)
+    hub.register(idle)
+
+    assert hub.worker_for("edge-remote") is idle
+
+
 def test_bridge_rejects_wrong_pairing_token() -> None:
     server = BridgeServer("127.0.0.1", 0, "correct-token")
     server.start_background()
