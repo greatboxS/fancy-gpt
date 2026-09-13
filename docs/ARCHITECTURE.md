@@ -45,8 +45,12 @@ request.site --------------------------------> Site adapter
 request.tunnel ------------------------------> Browser route
 ```
 
-The browser tunnel remains a transport concern. `site=gemini` may use any healthy
-Edge, Chrome, or Firefox tunnel, and selecting a tunnel never implies a site.
+The browser tunnel remains a transport concern. `site=gemini`, `site=grok`, or
+`site=copilot` may use any healthy Edge, Chrome, or Firefox tunnel whose worker
+reports that site as ready, and selecting a tunnel never implies a site. The
+target site set is ChatGPT, Gemini, Grok, and Microsoft Copilot; readiness is
+tracked per layer in [SITE_INTEGRATION_HANDOFF.md](SITE_INTEGRATION_HANDOFF.md),
+so an observed domain is not mistaken for an end-to-end supported route.
 
 ## Separation rules
 

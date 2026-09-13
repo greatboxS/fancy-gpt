@@ -197,3 +197,39 @@ def test_gemini_is_registered_for_the_site() -> None:
     assert decode_stream("gemini", body=GEMINI_BODY) is not None
     # And not by the shape the other site produces.
     assert decode_stream("gemini", events=[GEMINI_BODY]) is None
+
+
+# -- choosing which capture is the reply --------------------------------------
+
+
+def test_the_reply_is_chosen_by_path_not_by_arriving_last() -> None:
+    """A telemetry call that finished later used to stand in for the answer.
+
+    The extension kept only its most recent capture, so a few hundred
+    characters of batchexecute replaced eleven thousand characters of reply and
+    the turn decoded an empty answer -- or reported no stream at all.
+    """
+    captures = [
+        {"path": "/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate", "text": GEMINI_BODY},
+        {"path": "/_/BardChatUi/data/batchexecute", "text": ")]}'\n\n12\n[[\"wrb.fr\"]]\n"},
+    ]
+    reply = decode_stream("gemini", bodies=captures)
+    assert reply is not None and reply.trustworthy
+    assert parse_json_object(reply.text)["answer"].startswith("A hash collision occurs")
+
+
+def test_the_largest_capture_is_the_fallback_not_the_rule() -> None:
+    # With nothing matching the site's known path, size is a reasonable guess --
+    # but only once the path has failed to decide, since "usually the biggest"
+    # is exactly the assumption that let telemetry stand in for an answer.
+    captures = [
+        {"path": "/unknown/small", "text": "tiny"},
+        {"path": "/unknown/large", "text": GEMINI_BODY},
+    ]
+    reply = decode_stream("gemini", bodies=captures)
+    assert reply is not None and reply.trustworthy
+
+
+def test_choosing_never_invents_a_decoder() -> None:
+    captures = [{"path": "/whatever", "text": GEMINI_BODY}]
+    assert decode_stream("grok", bodies=captures) is None

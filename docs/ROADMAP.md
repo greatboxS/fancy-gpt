@@ -13,6 +13,8 @@ Deliverables:
   extension, sessions, and persisted request state.
 - Complete ChatGPT and Gemini adapter parity for submit, progress, final extraction,
   conversation continuation, temporary/new chat, timeout, cancellation, and errors.
+- Complete Grok and Microsoft Copilot as vertical site slices: measured capture,
+  DOM adapter, runtime decoder, core registration, gateway alias, and live evidence.
 - Harden DOM interaction around Playwright-style role/label semantics, explicit
   adapter capabilities, bounded waits, and recorded DOM fixtures.
 - Validate every MCP tool schema and return shape through an in-process MCP client.
@@ -35,6 +37,9 @@ PYTHONPATH=src python scripts/release_gate.py
 Additionally, live authenticated smoke tests must pass for ChatGPT and Gemini on at
 least one Chromium tunnel. Browser-specific release claims require the same smoke
 test on that browser; offline fixtures alone do not establish live UI compatibility.
+Grok and Copilot become release-supported only when they satisfy the per-site
+definition of done in `SITE_INTEGRATION_HANDOFF.md`; until then discovery must
+report their actual layer readiness rather than a blanket supported flag.
 
 ## Phase 2: Gateway core and context ledger
 
@@ -172,17 +177,9 @@ Remaining:
 - End-to-end conformance runs driven by the real Codex, Claude Code and Gemini
   CLI binaries rather than protocol-level tests.
 - Browser tab-lease ownership and composer-edit detection.
-
-- Push-based progress transport. Streaming works, but its latency granularity
-  is the existing ~1.5s progress poll; the bridge keeps only the latest
-  snapshot per job, so a push channel would cut latency without changing the
-  delta semantics.
-
-- Browser tab-lease ownership and composer-edit detection.
-- End-to-end conformance runs driven by the real Codex, Claude Code and Gemini CLI
-  binaries rather than protocol-level tests.
-
-Status was: **planned**
+- Join Grok and Copilot browser/decoder slices to the site registry, gateway
+  model catalog, capabilities, CLI/MCP discovery, and cross-protocol tests.
+- Keep the per-layer readiness matrix and live compatibility evidence current.
 
 Deliverables:
 

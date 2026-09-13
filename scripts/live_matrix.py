@@ -33,38 +33,118 @@ from fancy_gpt.execution import ExecutionCoordinator, ExecutionFailed  # noqa: E
 from fancy_gpt.focused import FocusedQuestion  # noqa: E402
 from fancy_gpt.tunnels.manager import TunnelManager  # noqa: E402
 
-DEFAULT_QUESTION = "In one sentence: what is a hash collision?"
+# One reload costs a round trip, so a run should learn as much as it can.
+# Each scenario exercises a different part of a turn, and they are cheap next
+# to the reload they share.
+SCENARIOS = {
+    "short": "In one sentence: what is a hash collision?",
+    "long": (
+        "In about 200 words, explain how a B-tree differs from a binary search "
+        "tree, covering node fan-out, height, disk locality and when each is "
+        "preferred."
+    ),
+    "fenced": (
+        "Answer normally, but put your entire JSON reply inside a ```json "
+        "fenced code block. Question: in one sentence, what is a race condition?"
+    ),
+    "quoted": (
+        'In one sentence, explain what the string "world: "MAIN"" would do to a '
+        "JSON parser if the inner quotes were not escaped."
+    ),
+}
 
 
 def healthy_tunnels(manager: TunnelManager) -> list[str]:
     return [probe.tunnel_id for probe in manager.health() if probe.browser_connected]
 
 
-def run_one(root: Path, manager: TunnelManager, site: str, tunnel: str, question: str) -> dict:
+def diagnostics_for(root: Path, request_id: str) -> dict:
+    """The shape report a turn left behind, found by the request it belongs to."""
+    executions = root / "executions"
+    for record in sorted(executions.glob("exec-*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if record.name.endswith(".diagnostics.json"):
+            continue
+        try:
+            if json.loads(record.read_text()).get("request_id") != request_id:
+                continue
+        except (OSError, ValueError):
+            continue
+        sidecar = record.with_suffix("").with_suffix(".diagnostics.json")
+        sidecar = executions / f"{record.stem}.diagnostics.json"
+        if sidecar.exists():
+            try:
+                return json.loads(sidecar.read_text())
+            except (OSError, ValueError):
+                return {}
+        return {}
+    return {}
+
+
+def check_stream(site: str, diagnostics: dict, page_text: str) -> str:
+    """Whether the stream reading agrees with the page reading.
+
+    Compared as parsed payloads rather than byte for byte: the stream carries
+    the fence the model wrote and the rendered page loses it, so the two differ
+    in a way that means nothing. What matters is whether they say the same.
+    """
+    from fancy_gpt.response_parser import parse_json_object
+    from fancy_gpt.stream_decoding import decode_stream
+
+    captures = diagnostics.get("streams") or []
+    bodies = diagnostics.get("streamBodies") or []
+    if not captures and not bodies:
+        return "no stream"
+    decoded = (
+        decode_stream(site, captures=captures) if captures else decode_stream(site, bodies=bodies)
+    )
+    if decoded is None:
+        return "no decoder"
+    if not decoded.trustworthy:
+        return f"untrusted ({len(decoded.unknown_ops or [])} unknown ops, {decoded.skipped_text} lost)"
+    try:
+        return "agrees" if parse_json_object(decoded.text) == parse_json_object(page_text) else "DIFFERS"
+    except ValueError as exc:
+        return f"unparseable: {exc}"
+
+
+def run_one(root: Path, manager: TunnelManager, site: str, tunnel: str,
+            scenario: str, question: str) -> dict:
     started = time.monotonic()
     coordinator = ExecutionCoordinator(root, manager=manager)
     try:
         answer = coordinator.run_focused(
             FocusedQuestion(question=question, site=site), tunnel_id=tunnel
         )
+        diagnostics = diagnostics_for(root, answer.request_id)
+        page_text = ""
+        executions = root / "executions"
+        for record in sorted(executions.glob("exec-*.response.txt"), key=lambda p: p.stat().st_mtime, reverse=True)[:6]:
+            text = record.read_text(encoding="utf-8")
+            if answer.request_id in text:
+                page_text = text
+                break
         return {
-            "site": site, "tunnel": tunnel, "ok": True,
+            "site": site, "tunnel": tunnel, "scenario": scenario, "ok": True,
             "seconds": round(time.monotonic() - started, 1),
             "chars": len(answer.answer),
+            "stream": check_stream(site, diagnostics, page_text) if page_text else "no page text",
+            "others": diagnostics.get("otherSites") or [],
         }
     except ExecutionFailed as failure:
         error = failure.status.error
         return {
-            "site": site, "tunnel": tunnel, "ok": False,
+            "site": site, "tunnel": tunnel, "scenario": scenario, "ok": False,
             "seconds": round(time.monotonic() - started, 1),
             "layer": error.layer if error else "?",
             "error": (error.message if error else "")[:160],
+            "others": [],
         }
     except Exception as exc:  # noqa: BLE001 - the point is to survive and report
         return {
-            "site": site, "tunnel": tunnel, "ok": False,
+            "site": site, "tunnel": tunnel, "scenario": scenario, "ok": False,
             "seconds": round(time.monotonic() - started, 1),
             "layer": "runner", "error": f"{type(exc).__name__}: {exc}"[:160],
+            "others": [],
         }
 
 
@@ -72,7 +152,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sites", default="chatgpt,gemini")
     parser.add_argument("--tunnels", default="", help="default: every tunnel with a live worker")
-    parser.add_argument("--question", default=DEFAULT_QUESTION)
+    parser.add_argument("--scenarios", default=",".join(SCENARIOS))
     parser.add_argument("--root", default=os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
     args = parser.parse_args()
 
@@ -82,30 +162,56 @@ def main() -> int:
         print("no tunnel has a live worker; start the bridge and reload the extension")
         return 2
     sites = [s for s in args.sites.split(",") if s]
+    scenarios = [s for s in args.scenarios.split(",") if s in SCENARIOS]
     root = Path(args.root)
 
-    combinations = [(site, tunnel) for tunnel in tunnels for site in sites]
-    print(f"running {len(combinations)} turns across {len(tunnels)} tunnel(s)\n")
+    # Grouped by tunnel: turns on one browser queue behind each other anyway,
+    # so a thread per tunnel is exactly as much parallelism as exists.
+    work = {tunnel: [(site, name) for site in sites for name in scenarios] for tunnel in tunnels}
+    total = sum(len(items) for items in work.values())
+    print(f"{total} turns: {len(sites)} site(s) x {len(scenarios)} scenario(s) x {len(tunnels)} tunnel(s)\n")
 
-    # One worker per tunnel: more would only queue on the runtime's own lock.
+    def run_tunnel(tunnel: str) -> list[dict]:
+        return [
+            run_one(root, manager, site, tunnel, name, SCENARIOS[name])
+            for site, name in work[tunnel]
+        ]
+
     with ThreadPoolExecutor(max_workers=len(tunnels)) as pool:
-        results = list(pool.map(
-            lambda pair: run_one(root, manager, pair[0], pair[1], args.question), combinations
-        ))
+        results = [row for rows in pool.map(run_tunnel, tunnels) for row in rows]
 
-    width = max(len(f"{r['site']}/{r['tunnel']}") for r in results)
+    width = max(len(f"{r['site']}/{r['tunnel']}/{r['scenario']}") for r in results)
     failures = 0
-    for result in sorted(results, key=lambda r: (r["site"], r["tunnel"])):
-        name = f"{result['site']}/{result['tunnel']}".ljust(width)
+    for result in sorted(results, key=lambda r: (r["site"], r["scenario"], r["tunnel"])):
+        name = f"{result['site']}/{result['tunnel']}/{result['scenario']}".ljust(width)
         if result["ok"]:
-            print(f"  ok    {name}  {result['seconds']:>5}s  {result['chars']} chars")
+            flag = " " if result["stream"] in ("agrees", "no decoder", "no stream") else "!"
+            print(f" {flag}ok   {name}  {result['seconds']:>5}s  {result['chars']:>5} chars  stream: {result['stream']}")
         else:
             failures += 1
-            print(f"  FAIL  {name}  {result['seconds']:>5}s  [{result['layer']}] {result['error']}")
+            print(f"  FAIL {name}  {result['seconds']:>5}s  [{result['layer']}] {result['error']}")
 
+    # Sites we watch but do not drive report through whichever turn ran next.
+    seen: dict[tuple, dict] = {}
+    for result in results:
+        for observation in result["others"]:
+            seen[(observation.get("origin"), observation.get("kind"), observation.get("path"))] = observation
+    if seen:
+        print("\nwatched elsewhere:")
+        for observation in seen.values():
+            detail = " ".join(
+                f"{key}={observation[key]}"
+                for key in ("chars", "chunks", "frames", "progressive", "sawDone")
+                if observation.get(key) is not None
+            )
+            print(f"  {observation.get('origin')}  {observation.get('kind'):6} {str(observation.get('path'))[:52]:52} {detail}")
+    else:
+        print("\nwatched elsewhere: nothing seen")
+
+    disagreements = [r for r in results if r.get("ok") and r["stream"] not in ("agrees", "no decoder", "no stream")]
     print()
-    print(json.dumps({"turns": len(results), "failed": failures}, indent=2))
-    return 1 if failures else 0
+    print(json.dumps({"turns": len(results), "failed": failures, "stream_disagreements": len(disagreements)}, indent=2))
+    return 1 if failures or disagreements else 0
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 # Adding a site
 
-A site is a web chat product FancyGPT can drive: ChatGPT and Gemini today,
-others by following this process. Adding one is deliberately a loop of
+A site is a web chat product FancyGPT can drive. The current target set is
+ChatGPT, Gemini, Grok, and Microsoft Copilot, with readiness tracked separately
+for observation, browser driving, decoding, core routing, and live verification.
+Adding one is deliberately a loop of
 *measure, then write*, because the alternative has a specific and expensive
 failure mode.
 
@@ -85,17 +87,21 @@ The events captured in step 2 are the fixture. Tests belong in
 cut short, an unrecognised operation, and malformed events — each asserting
 that the result is refused rather than quietly wrong.
 
-## Sites worth adding
+## Site status
 
 Anything that answers a logged-in browser session over a stream. Measured
 first, in every case.
 
 | Site | State |
 | --- | --- |
-| ChatGPT | measured; SSE on `/backend-api/f/conversation`, delta encoding, ends with `[DONE]` |
-| Gemini | page adapter exists; stream not yet measured |
-| Grok, Claude.ai, DeepSeek, Mistral, Qwen, Kimi, Perplexity | same shape; unmeasured |
-| Microsoft Copilot | answers over a WebSocket rather than a response body |
+| ChatGPT | measured; DOM adapter, SSE decoder, and core route exist |
+| Gemini | measured; DOM adapter, completed-response decoder, and core route exist |
+| Grok | admitted and observed by the extension; browser adapter/decoder work is in progress |
+| Microsoft Copilot | admitted and observed; its WebSocket transport requires a site-specific measured decoder |
+| Claude.ai, DeepSeek, Mistral, Qwen, Kimi, Perplexity | candidates; unmeasured |
+
+The integration boundary, ownership, readiness matrix, and definition of done
+are maintained in [SITE_INTEGRATION_HANDOFF.md](SITE_INTEGRATION_HANDOFF.md).
 
 ## Prior art
 

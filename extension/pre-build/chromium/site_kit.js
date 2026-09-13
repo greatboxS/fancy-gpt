@@ -503,7 +503,7 @@
   }
 
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "2f48b0930f8e";
+  const BUILD = "babe5b0f92b5";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,

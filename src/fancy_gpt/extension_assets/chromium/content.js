@@ -66,18 +66,33 @@ function installPageHook() {
  * changes when a site changes, and knowledge kept in an extension can only be
  * corrected by asking someone to reload their browser.
  */
-let streamedEvents = null;
-let streamedBody = null;
+/* Several, not the latest.
+ *
+ * Keeping only the most recent capture meant any request that finished after
+ * the reply overwrote it -- a telemetry call of a few hundred characters
+ * replacing a reply of eleven thousand, so the turn reported no stream at all
+ * or decoded an empty answer. Which request carries the reply is knowledge
+ * about a site, and that belongs in the runtime, so all of them are handed
+ * over and it chooses.
+ */
+const CAPTURES = 4;
+let streamedEvents = [];
+let streamedBody = [];
+
+function remember(list, report) {
+  list.push(report);
+  while (list.length > CAPTURES) list.shift();
+}
 
 window.addEventListener("message", event => {
   if (event.source !== window) return;
   const data = event.data;
   if (!data || data.source !== "fancygpt-page-hook") return;
   const {source, ...report} = data;
-  if (report.kind === "events") { streamedEvents = report; return; }
+  if (report.kind === "events") { remember(streamedEvents, report); return; }
   // A response body that grew while it loaded, which is how a site answering
   // over XHR rather than a server-sent stream delivers its reply.
-  if (report.kind === "body") { streamedBody = report; return; }
+  if (report.kind === "body") { remember(streamedBody, report); return; }
   pageHookReports.push(report);
   // Only the recent ones: this is a diagnostic, not a log.
   if (pageHookReports.length > 8) pageHookReports.shift();
@@ -129,8 +144,8 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       diagnostics: {
         ...(result?.diagnostics ?? {}),
         pageHook: pageHookReports.slice(),
-        stream: streamedEvents,
-        streamBody: streamedBody,
+        streams: streamedEvents.slice(),
+        streamBodies: streamedBody.slice(),
         pageHookWorld: hookLandedInTheWrongWorld() ? "isolated" : "page",
       },
     }))

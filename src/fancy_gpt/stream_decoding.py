@@ -22,8 +22,9 @@ than one that is obviously missing.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 
 @dataclass
@@ -323,18 +324,51 @@ BODY_DECODERS = {
     "gemini": decode_gemini_body,
 }
 
+# Which request carries the reply, measured per site. The extension hands over
+# everything it captured and the choosing happens here, because a page makes
+# many requests and only the runtime knows which of them is an answer -- and
+# because getting it wrong should be a fix in this repository rather than a
+# reload in everyone's browser.
+REPLY_PATHS = {
+    "chatgpt": re.compile(r"/backend-api/[^/]*/?conversation$"),
+    "gemini": re.compile(r"StreamGenerate"),
+}
+
+
+def _pick(site: str, captures: Sequence[dict] | None, field: str) -> Any:
+    """The capture that looks like this site's reply, else the largest.
+
+    Size is the fallback rather than the rule: a reply is usually the biggest
+    thing a page received, but "usually" is how a telemetry call of a few
+    hundred characters came to stand in for an answer of eleven thousand.
+    """
+    if not captures:
+        return None
+    pattern = REPLY_PATHS.get(site)
+    if pattern is not None:
+        matching = [c for c in captures if pattern.search(str(c.get("path") or ""))]
+        if matching:
+            captures = matching
+    return max(captures, key=lambda c: len(c.get(field) or "")).get(field)
+
 
 def decode_stream(
     site: str,
     *,
     events: Iterable[str] | None = None,
     body: str | None = None,
+    captures: Sequence[dict] | None = None,
+    bodies: Sequence[dict] | None = None,
 ) -> DecodedReply | None:
     """Decode whatever this site's capture is, or None if it has no decoder.
 
     A site absent from both tables is not broken. It has not been measured,
     and its turn reads the rendered page exactly as before.
     """
+    if captures is not None:
+        events = _pick(site, captures, "events") or None
+    if bodies is not None:
+        body = _pick(site, bodies, "text") or None
     if events is not None:
         decoder = EVENT_DECODERS.get(site)
         return decoder(list(events)) if decoder else None
