@@ -151,6 +151,34 @@ def test_a_real_adapter_change_still_changes_the_build_id() -> None:
     assert _normalised_for_build_id(base) != _normalised_for_build_id(real_change)
 
 
+def test_the_exporter_and_the_runtime_agree_on_the_build_id(tmp_path: Path) -> None:
+    """The build script must not carry its own copy of this calculation.
+
+    It did, and they drifted: the runtime learned to normalise the per-browser
+    defaults out of the id while the script did not, so every exported bundle
+    was stamped with a value the runtime would reject. The drift guard would
+    have done exactly its job and refused every browser, pointing the user at
+    an extension that was in fact current.
+    """
+    import subprocess
+    import sys
+
+    from fancy_gpt.extension_utils import adapter_build_id
+
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts" / "build_extension.py"
+    if not script.exists():  # pragma: no cover - source checkout only
+        pytest.skip("build script is not part of the installed package")
+    printed = subprocess.run(
+        [sys.executable, "-c",
+         "import runpy,sys;sys.argv=['x'];"
+         f"m=runpy.run_path(r'{script}');print(m['adapter_build_id']())"],
+        capture_output=True, text=True, cwd=root,
+    )
+    assert printed.returncode == 0, printed.stderr
+    assert printed.stdout.strip() == adapter_build_id(), "exporter and runtime must compute one id"
+
+
 def test_build_id_covers_every_adapter_source() -> None:
     # Adding or changing any site adapter must produce a new id, or a browser
     # left on the previous build would still claim to be current.

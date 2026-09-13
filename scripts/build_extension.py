@@ -43,13 +43,24 @@ def adapter_source_names() -> list[str]:
 
 
 def adapter_build_id() -> str:
-    """Every script that shapes how a page is driven defines the build."""
+    """Every script that shapes how a page is driven defines the build.
+
+    Computed by the runtime's own function rather than a copy of it. A copy is
+    how this drifted: the runtime learned to normalise the per-browser defaults
+    out of the id and this script did not, so exported bundles were stamped
+    785c065469d9 while the runtime expected 3bcc03a526d0 -- and the drift guard,
+    doing exactly its job, would have refused every browser.
+    """
+    import sys
+
+    sys.path.insert(0, str(ROOT / "src"))
+    from fancy_gpt.extension_utils import _normalised_for_build_id
     import hashlib
 
     digest = hashlib.sha256()
     for name in adapter_source_names():
         digest.update(name.encode("utf-8"))
-        digest.update((COMMON / name).read_text(encoding="utf-8").replace(PLACEHOLDER, "").encode("utf-8"))
+        digest.update(_normalised_for_build_id((COMMON / name).read_text(encoding="utf-8")).encode("utf-8"))
     return digest.hexdigest()[:12]
 
 
