@@ -140,5 +140,60 @@ def test_malformed_events_do_not_stop_the_decode() -> None:
 
 
 def test_an_unmeasured_site_has_no_decoder_rather_than_a_guessed_one() -> None:
-    assert decode_stream("gemini", ["{}"]) is None
-    assert decode_stream("chatgpt", ["[DONE]"]) is not None
+    # Each site is decoded from the shape it actually produces, and a site with
+    # no entry reads the page exactly as before.
+    assert decode_stream("grok", events=["{}"]) is None
+    assert decode_stream("grok", body="anything") is None
+    assert decode_stream("chatgpt", events=["[DONE]"]) is not None
+
+
+# -- Gemini ------------------------------------------------------------------
+#
+# Captured from a live turn. The framing was measured rather than assumed:
+# a )]}' guard, then length-prefixed chunks of [["wrb.fr", null, "<json>"]],
+# with the reply at [4][0][1][0] of the inner payload.
+
+import pathlib
+
+from fancy_gpt.response_parser import parse_json_object
+from fancy_gpt.stream_decoding import decode_gemini_body
+
+GEMINI_BODY = (pathlib.Path(__file__).parent / "fixtures" / "gemini_streamgenerate.txt").read_text(encoding="utf-8")
+
+
+def test_gemini_reply_is_recovered_from_its_own_response() -> None:
+    reply = decode_gemini_body(GEMINI_BODY)
+    assert reply.trustworthy
+    assert reply.conversation_id and reply.message_id
+    assert parse_json_object(reply.text)["answer"].startswith("A hash collision occurs")
+
+
+def test_gemini_chunks_are_snapshots_not_fragments() -> None:
+    """Each chunk carries the answer as it stands.
+
+    Concatenating them would repeat the reply several times over, which is a
+    plausible-looking result and the reason this was measured rather than
+    guessed at.
+    """
+    reply = decode_gemini_body(GEMINI_BODY)
+    assert reply.text.count('"request_id"') == 1
+
+
+def test_gemini_needs_no_sentinel_to_know_it_finished() -> None:
+    # Unlike ChatGPT there is no [DONE]; the request ending is the turn ending,
+    # so a body that arrived at all is a reply that completed.
+    assert decode_gemini_body(GEMINI_BODY).saw_done is True
+
+
+def test_gemini_framing_it_does_not_recognise_is_refused() -> None:
+    reply = decode_gemini_body(")]}'\n\nnot a length line\n[[1]]\n")
+    assert not reply.text
+    assert not reply.trustworthy, "an unfamiliar body must not be improvised over"
+
+
+def test_gemini_is_registered_for_the_site() -> None:
+    from fancy_gpt.stream_decoding import decode_stream
+
+    assert decode_stream("gemini", body=GEMINI_BODY) is not None
+    # And not by the shape the other site produces.
+    assert decode_stream("gemini", events=[GEMINI_BODY]) is None

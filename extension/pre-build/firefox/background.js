@@ -354,7 +354,7 @@ async function executeJob(job) {
         ...(result.diagnostics ?? {}),
         // Everything watched since the last turn, including sites this one did
         // not touch. Cleared as it leaves, so each turn carries what is new.
-        otherSites: siteObservations.splice(0, siteObservations.length),
+        otherSites: await takeObservations(),
       }
     });
   } catch (error) {
@@ -375,11 +375,38 @@ async function executeJob(job) {
  *
  * Bounded, and shapes only. This is a notebook, not a log.
  */
-const siteObservations = [];
+const OBSERVATION_KEY = "fancyGptSiteObservations";
 
-function rememberObservation(origin, report) {
-  siteObservations.push({origin, at: new Date().toISOString(), ...report});
-  while (siteObservations.length > 24) siteObservations.shift();
+async function rememberObservation(origin, report) {
+  /* Stored, not held in a variable.
+   *
+   * A Manifest V3 service worker is torn down when it goes idle and started
+   * again on demand, so anything it keeps in memory is gone by the time the
+   * next turn asks for it. That is exactly what happened: observations from
+   * Grok and Copilot were recorded correctly and had evaporated before any
+   * turn could carry them out, which read as "the hook saw nothing" -- the
+   * same silence as a hook that never ran.
+   */
+  try {
+    const stored = await ext.storage.local.get(OBSERVATION_KEY);
+    const kept = Array.isArray(stored?.[OBSERVATION_KEY]) ? stored[OBSERVATION_KEY] : [];
+    kept.push({origin, at: new Date().toISOString(), ...report});
+    while (kept.length > 24) kept.shift();
+    await ext.storage.local.set({[OBSERVATION_KEY]: kept});
+  } catch (_) {
+    // Losing an observation costs a measurement, never a turn.
+  }
+}
+
+async function takeObservations() {
+  try {
+    const stored = await ext.storage.local.get(OBSERVATION_KEY);
+    const kept = Array.isArray(stored?.[OBSERVATION_KEY]) ? stored[OBSERVATION_KEY] : [];
+    if (kept.length) await ext.storage.local.set({[OBSERVATION_KEY]: []});
+    return kept;
+  } catch (_) {
+    return [];
+  }
 }
 
 globalThis.FancyGPTTransport.setHandler(async message => {

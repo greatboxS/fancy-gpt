@@ -219,15 +219,126 @@ def decode_chatgpt_stream(events: Iterable[str]) -> DecodedReply:
     return reply
 
 
-DECODERS = {
-    # One entry per site, added once that site's stream has been measured on a
-    # live turn. A site with no entry is still observed; it simply has no
-    # decoder yet, which is the honest state rather than a pattern widened
-    # until it matches something.
+def decode_gemini_body(body: str) -> DecodedReply:
+    """Decode Gemini's StreamGenerate response into the reply it carries.
+
+    Measured on live turns rather than taken from documentation. The body is
+    Google's batchexecute framing: a `)]}'` anti-hijacking guard, then pairs of
+    a length line and a chunk. Each chunk is `[["wrb.fr", null, "<json>"]]`
+    whose third element is itself a JSON string, and inside that the reply sits
+    at `[4][0][1][0]`.
+
+    The chunks are cumulative snapshots, not fragments: each carries the answer
+    as it stands, so the last one that has it wins and concatenating them would
+    repeat the reply several times over.
+
+    Unlike ChatGPT's stream there is no sentinel, and none is needed. This is
+    read from a completed response, so arriving at all means the reply
+    finished -- the request ending is the turn ending.
+    """
+    reply = DecodedReply(saw_done=True)
+    text = body.lstrip()
+    if text.startswith(")]}'"):
+        text = text[4:]
+    lines = text.split("\n")
+
+    chunks: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index].strip()
+        index += 1
+        if not line:
+            continue
+        if not line.isdigit():
+            # Not a length line: either the framing changed or this is a body
+            # we were not built for. Either way, do not improvise.
+            reply.skipped += 1
+            reply.skipped_paths.add("<unframed>")
+            continue
+        if index < len(lines):
+            chunks.append(lines[index])
+            index += 1
+
+    for chunk in chunks:
+        try:
+            outer = json.loads(chunk)
+        except ValueError:
+            reply.skipped += 1
+            reply.skipped_paths.add("<chunk>")
+            continue
+        for entry in outer if isinstance(outer, list) else []:
+            if not (isinstance(entry, list) and len(entry) > 2 and entry[0] == "wrb.fr"):
+                continue
+            try:
+                payload = json.loads(entry[2]) if isinstance(entry[2], str) else None
+            except ValueError:
+                reply.skipped += 1
+                reply.skipped_paths.add("<payload>")
+                continue
+            if not isinstance(payload, list):
+                continue
+            identity = payload[1] if len(payload) > 1 else None
+            if isinstance(identity, list) and identity:
+                reply.conversation_id = identity[0] or reply.conversation_id
+                if len(identity) > 1:
+                    reply.message_id = identity[1] or reply.message_id
+            candidate = _gemini_candidate_text(payload)
+            if candidate is not None:
+                # Cumulative: the latest snapshot replaces the one before it.
+                reply.text = candidate
+                reply.applied += 1
+
+    reply.end_turn = bool(reply.text)
+    reply.status = "finished" if reply.text else None
+    return reply
+
+
+def _gemini_candidate_text(payload: list) -> str | None:
+    """The reply, at the one place it was measured to be: [4][0][1][0].
+
+    Returned as None rather than searched for elsewhere when it is absent. A
+    decoder that goes looking finds something eventually, and what it finds is
+    not necessarily the answer.
+    """
+    candidates = payload[4] if len(payload) > 4 else None
+    if not isinstance(candidates, list) or not candidates:
+        return None
+    first = candidates[0]
+    if not isinstance(first, list) or len(first) < 2:
+        return None
+    parts = first[1]
+    if not isinstance(parts, list) or not parts:
+        return None
+    return parts[0] if isinstance(parts[0], str) else None
+
+
+# What each site's capture looks like, because they genuinely differ: ChatGPT
+# streams server-sent events and Gemini returns one response body that grew
+# while it loaded. Naming the shape here keeps the difference visible instead
+# of hiding it behind a decoder that quietly accepts either.
+EVENT_DECODERS = {
     "chatgpt": decode_chatgpt_stream,
+}
+BODY_DECODERS = {
+    "gemini": decode_gemini_body,
 }
 
 
-def decode_stream(site: str, events: Iterable[str]) -> DecodedReply | None:
-    decoder = DECODERS.get(site)
-    return decoder(list(events)) if decoder else None
+def decode_stream(
+    site: str,
+    *,
+    events: Iterable[str] | None = None,
+    body: str | None = None,
+) -> DecodedReply | None:
+    """Decode whatever this site's capture is, or None if it has no decoder.
+
+    A site absent from both tables is not broken. It has not been measured,
+    and its turn reads the rendered page exactly as before.
+    """
+    if events is not None:
+        decoder = EVENT_DECODERS.get(site)
+        return decoder(list(events)) if decoder else None
+    if body is not None:
+        decoder = BODY_DECODERS.get(site)
+        return decoder(body) if decoder else None
+    return None
