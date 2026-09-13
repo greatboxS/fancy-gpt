@@ -150,12 +150,15 @@
           await new Promise(resolve => setTimeout(resolve, 500));
           continue;
         }
-        if (onProgress && stopObserving === null) {
+        if (onProgress && stopObserving === null && boundTurns.length === 1) {
           const observedId = boundId;
-          stopObserving = observeText(() => assistantText(observedId), text => {
-            lastReported = text;
-            onProgress(text);
-          });
+          // Scoped to this reply: observing the whole document would re-scan it
+          // on every unrelated mutation the page makes.
+          stopObserving = observeText(
+            () => assistantText(observedId),
+            text => { lastReported = text; onProgress(text); },
+            {target: boundTurns[0]},
+          );
         }
         const text = assistantText(boundId);
         const streaming = Boolean(firstVisible(SELECTORS.stop));

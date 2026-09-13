@@ -148,19 +148,42 @@
    *
    * Returns a stop function. Never let a reporting error break the turn.
    */
-  function observeText(getText, onChange) {
+  function observeText(getText, onChange, options = {}) {
+    const target = options.target ?? document.body;
+    // A streaming page mutates hundreds of times a second, and reading the
+    // reply forces layout. Re-reading on every mutation saturates the main
+    // thread and starves the very loop that detects completion - which hung
+    // real turns until they timed out. Reads are therefore rate limited, and
+    // skipping a mutation is safe because each read returns the whole reply so
+    // far, not a delta.
+    const baseIntervalMs = options.minIntervalMs ?? 150;
+    // If reading turns out to be expensive on this page, back off rather than
+    // keep paying that cost: correctness of the turn matters more than the
+    // granularity of progress.
+    const maxIntervalMs = options.maxIntervalMs ?? 2000;
+    const slowReadMs = options.slowReadMs ?? 50;
+    let interval = baseIntervalMs;
     let last = null;
-    const report = () => {
+    let lastReadAt = 0;
+    const report = force => {
+      const now = Date.now();
+      if (!force && now - lastReadAt < interval) return;
+      lastReadAt = now;
       let text = null;
+      const started = Date.now();
       try { text = getText(); } catch (_) { return; }
+      const cost = Date.now() - started;
+      interval = cost > slowReadMs
+        ? Math.min(maxIntervalMs, Math.max(interval * 2, cost * 4))
+        : baseIntervalMs;
       if (text && text !== last) {
         last = text;
         try { onChange(text); } catch (_) {}
       }
     };
-    const observer = new MutationObserver(report);
-    observer.observe(document.body, {childList: true, subtree: true, characterData: true});
-    report();
+    const observer = new MutationObserver(() => report(false));
+    observer.observe(target, {childList: true, subtree: true, characterData: true});
+    report(true);
     return () => { try { observer.disconnect(); } catch (_) {} };
   }
 

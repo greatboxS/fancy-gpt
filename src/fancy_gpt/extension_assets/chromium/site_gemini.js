@@ -144,7 +144,10 @@
     // Driven by DOM mutations, because this loop's timer is throttled while the
     // automation window is hidden.
     const stopObserving = onProgress
-      ? observeText(() => latestResponseText(baselineCount), text => { lastReported = text; onProgress(text); })
+      ? observeText(
+          () => latestResponseText(baselineCount),
+          text => { lastReported = text; onProgress(text); },
+        )
       : null;
     while (Date.now() < deadline) {
       if (options?.isCancelled?.()) {

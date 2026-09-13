@@ -46,7 +46,7 @@ async function main() {
     const node = new StubElement("div", {id: "reply", text: "one"});
     document.body.append(node);
     const seen = [];
-    const stop = kit2.observeText(() => node.innerText, text => seen.push(text));
+    const stop = kit2.observeText(() => node.innerText, text => seen.push(text), {minIntervalMs: 0});
     node.setText("one two");
     node.setText("one two three");
     stop();
@@ -62,7 +62,7 @@ async function main() {
     const node = new StubElement("div", {text: "same"});
     document.body.append(node);
     const seen = [];
-    const stop = kit2.observeText(() => node.innerText, text => seen.push(text));
+    const stop = kit2.observeText(() => node.innerText, text => seen.push(text), {minIntervalMs: 0});
     node.setText("same");
     node.setText("same");
     stop();
@@ -75,7 +75,11 @@ async function main() {
     const node = new StubElement("div", {text: "a"});
     document.body.append(node);
     let calls = 0;
-    const stop = kit2.observeText(() => node.innerText, () => { calls += 1; throw new Error("consumer blew up"); });
+    const stop = kit2.observeText(
+      () => node.innerText,
+      () => { calls += 1; throw new Error("consumer blew up"); },
+      {minIntervalMs: 0},
+    );
     node.setText("b");
     stop();
     // Progress is a monitoring aid; a bad consumer must not break the turn.
@@ -91,6 +95,74 @@ async function main() {
     assertEqual(document.observers.length, 1, "observer registered");
     stop();
     assertEqual(document.observers.length, 0, "observer must not leak");
+  });
+
+  await test("observeText rate limits reads under a mutation storm", () => {
+    loadAdapters([]);
+    const kit2 = globalThis.FancyGPTSiteKit;
+    const node = new StubElement("div", {text: "x"});
+    document.body.append(node);
+    let reads = 0;
+    const stop = kit2.observeText(
+      () => { reads += 1; return node.innerText; },
+      () => {},
+      {minIntervalMs: 10000},
+    );
+    // A streaming page mutates hundreds of times a second and each read forces
+    // layout. Re-reading on every mutation starved the completion loop and hung
+    // the turn, so reads must be bounded rather than driven one-per-mutation.
+    for (let i = 0; i < 500; ++i) node.setText("x".repeat(i + 2));
+    stop();
+    assertEqual(reads, 1, "reads must be rate limited, not one per mutation");
+  });
+
+  await test("observeText scopes its observation to the node it is given", () => {
+    loadAdapters([]);
+    const kit2 = globalThis.FancyGPTSiteKit;
+    const watched = new StubElement("div", {text: "watched"});
+    document.body.append(watched);
+    const stop = kit2.observeText(() => watched.innerText, () => {}, {target: watched, minIntervalMs: 0});
+    // The observer is attached to the given node, not the whole document.
+    assertEqual(document.observers.length, 1, "exactly one observer");
+    stop();
+    assertEqual(document.observers.length, 0, "disconnected");
+  });
+
+  await test("observeText backs off when reading the page is expensive", () => {
+    loadAdapters([]);
+    const kit2 = globalThis.FancyGPTSiteKit;
+    const node = new StubElement("div", {text: "x"});
+    document.body.append(node);
+    let reads = 0;
+    const stop = kit2.observeText(
+      () => {
+        reads += 1;
+        // Simulate a read that forces an expensive layout.
+        const until = Date.now() + 60;
+        while (Date.now() < until) { /* spin */ }
+        return node.innerText;
+      },
+      () => {},
+      {minIntervalMs: 0, slowReadMs: 10, maxIntervalMs: 5000},
+    );
+    for (let i = 0; i < 50; ++i) node.setText("x".repeat(i + 2));
+    stop();
+    // Without back-off this would read once per mutation and starve the turn.
+    assert(reads <= 3, `expected back-off to bound reads, got ${reads}`);
+  });
+
+  await test("observeText returns to its base interval once reads are cheap", () => {
+    loadAdapters([]);
+    const kit2 = globalThis.FancyGPTSiteKit;
+    const node = new StubElement("div", {text: "a"});
+    document.body.append(node);
+    const seen = [];
+    const stop = kit2.observeText(() => node.innerText, text => seen.push(text), {minIntervalMs: 0, slowReadMs: 10});
+    node.setText("b");
+    node.setText("c");
+    stop();
+    // Cheap reads must not be penalised by the back-off machinery.
+    assertEqual(seen, ["a", "b", "c"], "cheap reads keep reporting every change");
   });
 
   await test("looksLikeCompleteJson distinguishes finished envelopes", () => {

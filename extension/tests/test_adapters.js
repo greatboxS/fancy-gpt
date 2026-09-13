@@ -70,11 +70,15 @@ async function main() {
     // The observer is attached once the adapter binds the reply, so wait for
     // the first report before simulating further rendering.
     while (seen.length === 0) await new Promise(resolve => setTimeout(resolve, 20));
+    // Reads are rate limited, so renders are spaced past that interval; a page
+    // that mutates faster is conflated on purpose.
+    await new Promise(resolve => setTimeout(resolve, 200));
     turn.setText('{"type":"message","text":"partial');
+    await new Promise(resolve => setTimeout(resolve, 200));
     turn.setText(ENVELOPE);
 
     await running;
-    // Every intermediate render reached the consumer, in order, without repeats.
+    // Every observed render reached the consumer, in order, without repeats.
     assert(seen.length >= 3, `expected several progress reports, got ${seen.length}`);
     assertEqual(seen[seen.length - 1], ENVELOPE, "last report is the final text");
     assertEqual(new Set(seen).size, seen.length, "no duplicate reports");
