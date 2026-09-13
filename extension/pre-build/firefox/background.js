@@ -23,7 +23,12 @@ async function taskWindowFor(url) {
   if (taskWindowId != null) {
     try {
       await ext.windows.get(taskWindowId);
-      return ext.tabs.create({url, windowId: taskWindowId, active: false});
+      // Active, and the window brought back up. Creating the tab inactive was
+      // why reuse kept failing after the very first turn: the window may be
+      // fine, but a tab that is not the active one in it is hidden just the
+      // same, and the page reported visibilityState "hidden" throughout.
+      try { await ext.windows.update(taskWindowId, {focused: true, state: "normal"}); } catch (_) {}
+      return ext.tabs.create({url, windowId: taskWindowId, active: true});
     } catch (_) {
       taskWindowId = null;
     }
@@ -246,7 +251,11 @@ async function executeJob(job) {
     if (taskWindowIdleTimer != null) { clearTimeout(taskWindowIdleTimer); taskWindowIdleTimer = null; }
     tab = config.separateTaskWindow
       ? await taskWindowFor(taskUrl)
-      : await ext.tabs.create({url: taskUrl, active: false});
+      // Active for the same reason: a background tab is a hidden document, and
+      // a hidden document stops being drawn part-way through the reply. Sharing
+      // the user's window therefore cannot stay out of their way -- which is an
+      // argument for the separate window, not for reading a frozen page.
+      : await ext.tabs.create({url: taskUrl, active: true});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
     entry.tabId = tab.id;
     if (entry.cancelled) {
