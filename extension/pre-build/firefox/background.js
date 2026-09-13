@@ -27,33 +27,26 @@ async function taskWindowFor(url) {
       // Active, and the window brought back up. A tab that is not the active
       // one in its window is a hidden document however visible the window is,
       // and a hidden document stops being painted mid-reply.
-      try { await ext.windows.update(taskWindowId, {focused: true, state: "normal"}); } catch (_) {}
+      // Left alone. Reading the reply no longer depends on the page being
+      // painted, so there is nothing to gain by taking the window back.
       return ext.tabs.create({url, windowId: taskWindowId, active: true});
     } catch (_) {
       taskWindowId = null;
     }
   }
-  /* Unfocused, but never minimized.
+  /* Out of the way, and it can stay there.
    *
-   * This used to minimize the window on the assumption that a minimized window
-   * still renders. It does not: Chromium reports a minimized or fully occluded
-   * window as hidden, which stops the rendering ChatGPT's UI is driven by. The
-   * reply then freezes in the DOM part-written -- measured at 30 characters of
-   * a 1294 character answer, with the stop control frozen alongside it, so the
-   * turn looked finished and stalled until its deadline. Bringing the same tab
-   * to the front let the identical prompt complete.
+   * This window was focused because a hidden document stops being painted and
+   * the reply froze part-written in the DOM. That is no longer how a reply is
+   * read: the turn ends when the response that carried it ends, and its text
+   * comes from that response. So the automation no longer needs the screen,
+   * and taking it was the last thing making this intrusive.
    *
-   * So the window stays a real, rendered window. It is small and unfocused and
-   * keeps out of the way, but it is not hidden, because a hidden document
-   * cannot be automated through its UI.
+   * Minimized rather than merely unfocused, because an unfocused window still
+   * sits somewhere in the way.
    */
-  // Focused, for now, because an unfocused window is still occluded behind
-  // whatever the user is working in, and an occluded window is hidden: a
-  // non-minimized window measured no better than a minimized one, freezing at
-  // 21 characters of the same answer. Whether this has to cost the user their
-  // focus is the next question; that it must not be hidden is settled.
   const created = await ext.windows.create({
-    url, focused: true, state: "normal", width: 900, height: 700, top: 0, left: 0,
+    url, focused: false, state: "minimized", width: 900, height: 700, top: 0, left: 0,
   });
   taskWindowId = created.id;
   return created.tabs?.[0] ?? null;

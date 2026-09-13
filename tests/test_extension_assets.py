@@ -315,16 +315,19 @@ def test_composer_writes_through_the_editor_input_path(tmp_path: Path) -> None:
     assert "selectAll(composer)" in kit, "a retry must replace the text, not append to it"
 
 
-def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
-    """The page being automated must be one the browser is still drawing.
+def test_automation_stays_out_of_the_way(tmp_path: Path) -> None:
+    """The automation gets its own window and no longer needs the screen.
 
-    This test used to require the opposite -- a minimized window -- on the
-    assumption that a minimized window keeps rendering. It does not. Chromium
-    reports a minimized, fully occluded, or merely-not-active document as
-    hidden, and a hidden document stops being painted part-way through a
-    streamed reply: measured live at 21 to 61 characters of a 1294 character
-    answer, with the stop control frozen alongside it, so the turn looked
-    finished while holding a fragment and stalled until its deadline.
+    This assertion has been both ways round, and the history is the point. It
+    first required a minimized window, on the assumption that a minimized
+    window keeps rendering. It does not, and a reply read from a page that is
+    not being painted froze part-written -- measured at 21 to 61 characters of
+    a 1294 character answer. So it was changed to require a drawn document,
+    which worked and cost the user their screen on every turn.
+
+    Neither is needed now. The reply is read from the response that carried it
+    and the turn ends when that response ends, so the page may go back to being
+    out of the way -- this time because nothing depends on it being seen.
     """
     background = (export_extension("edge", tmp_path / "edge-background") / "background.js").read_text(encoding="utf-8")
     # The automation always gets its own window: a tab in the user's window
@@ -332,13 +335,12 @@ def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
     # that is not active is a hidden document that stops being drawn.
     assert "separateTaskWindow" not in background
     assert "tab = await taskWindowFor(taskUrl)" in background
-    # Its own window, still out of the way -- but never minimized.
-    assert 'state: "minimized"' not in background
-    assert 'state: "normal"' in background
-    # And never a background tab. There is one path that opens one now, since
-    # the shared-window mode is gone, and it opens it active.
-    assert "active: false" not in background
-    assert "active: true" in background
+    # Its own window, and it may stay out of the way now: reading the reply no
+    # longer depends on the page being painted, so the automation has no reason
+    # to take the screen. The turn ends when the response that carried the
+    # reply ends, which is why this assertion is the opposite of what it was.
+    assert 'state: "minimized"' in background
+    assert "focused: false" in background
 
 
 def test_the_task_window_survives_the_job_that_created_it(tmp_path: Path) -> None:
