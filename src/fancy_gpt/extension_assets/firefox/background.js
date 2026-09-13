@@ -42,8 +42,13 @@ async function taskWindowFor(url) {
    * keeps out of the way, but it is not hidden, because a hidden document
    * cannot be automated through its UI.
    */
+  // Focused, for now, because an unfocused window is still occluded behind
+  // whatever the user is working in, and an occluded window is hidden: a
+  // non-minimized window measured no better than a minimized one, freezing at
+  // 21 characters of the same answer. Whether this has to cost the user their
+  // focus is the next question; that it must not be hidden is settled.
   const created = await ext.windows.create({
-    url, focused: false, state: "normal", width: 900, height: 700, top: 0, left: 0,
+    url, focused: true, state: "normal", width: 900, height: 700, top: 0, left: 0,
   });
   taskWindowId = created.id;
   return created.tabs?.[0] ?? null;

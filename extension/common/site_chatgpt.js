@@ -440,6 +440,16 @@
      * difference decides everything about the fix. Only a short text is
      * sampled, and only the assistant's own: a real answer runs to thousands
      * of characters and is never reported. */
+    /* What the page believes its own state to be.
+     *
+     * Every measurement so far is consistent with the document being hidden
+     * while it streams, but that has been inferred from the outside. These are
+     * the browser's own answers, which is what the fix has to be aimed at. */
+    const pageState = {
+      visibility: document.visibilityState,
+      hidden: document.hidden,
+      hasFocus: typeof document.hasFocus === "function" ? document.hasFocus() : null,
+    };
     const SAMPLE_LIMIT = 200;
     const shortAssistantSample = boundText != null && boundText.length <= SAMPLE_LIMIT
       ? boundText
@@ -456,6 +466,7 @@
       boundTextChars: boundText == null ? null : boundText.length,
       extraction,
       domShape,
+      pageState,
       shortAssistantSample,
       boundTextComplete: boundText != null && looksLikeCompleteJson(boundText),
       newTurnCount: newTurns.length,
