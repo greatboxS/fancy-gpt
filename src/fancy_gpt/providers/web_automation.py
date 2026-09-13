@@ -14,24 +14,38 @@ from fancy_gpt.models import AutomatedModelResponse, ModelRequest
 
 
 def _stale_side_hint() -> str:
+    """Name both remedies, and never assert which side is stale.
+
+    An earlier version concluded from "this process started before the package
+    was last written" that the process must be running old code. It does not
+    follow, and the first time it fired it was wrong: the build id is computed
+    from files on disk at the moment it is asked, so a process holding older
+    code still reports the current value whenever the id calculation itself has
+    not changed. The extension was the stale side and the message sent the user
+    to restart the runtime.
+
+    That is the very failure this hint exists to prevent, so it states the fact
+    it can establish and leaves the conclusion to whoever can see both sides.
+    """
+    hint = (
+        "Re-export with 'fancy-gpt extension export-all <dir>' and reload the extension if the "
+        "install is the newer side; restart this process (reconnect the MCP server, or restart "
+        "the bridge) if it has been running since before the last install."
+    )
     try:
         package = Path(str(files("fancy_gpt").joinpath("extension_utils.py")))
         installed_at = package.stat().st_mtime
         started_at = Path(f"/proc/{os.getpid()}").stat().st_mtime
     except Exception:
-        installed_at = started_at = None
-    if installed_at is not None and started_at is not None and installed_at > started_at:
+        return hint
+    if installed_at > started_at:
         age = int((installed_at - started_at) / 60)
-        return (
-            f"This process started about {age} minutes before the installed package was last "
-            "written, so it is running code from before the install: restart it (reconnect the "
-            "MCP server, or restart the bridge) rather than touching the extension."
+        return hint + (
+            f" For what it is worth, this process started about {age} minutes before the installed "
+            "package was last written, which makes a restart worth trying -- though a process can "
+            "still report the current build id from files it re-reads."
         )
-    return (
-        "If the install is the newer side, re-export with 'fancy-gpt extension export-all <dir>' "
-        "and reload the extension; if this process has been running since before the last "
-        "install, restart it instead."
-    )
+    return hint
 
 
 class ChatGPTWebAutomationProvider:

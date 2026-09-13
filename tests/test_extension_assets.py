@@ -231,13 +231,23 @@ def test_drift_points_at_the_side_that_is_actually_stale(monkeypatch, tmp_path: 
     assert "restart" in message
 
 
-def test_a_process_older_than_its_package_says_so(monkeypatch) -> None:
-    import fancy_gpt.providers.web_automation as module
+def test_the_hint_never_asserts_which_side_is_stale() -> None:
+    """It guessed once and guessed wrong.
 
-    monkeypatch.setattr(module, "_stale_side_hint", lambda: "RESTART THIS PROCESS")
-    # The hint is consulted rather than hard-coded, so the runtime can tell the
-    # one case it is able to establish as fact.
-    assert module._stale_side_hint() == "RESTART THIS PROCESS"
+    A build id is computed from files on disk when it is asked, so a process
+    holding older code still reports the current value whenever the calculation
+    itself has not changed. "This process is older than its package" therefore
+    does not establish that the process is the stale side -- and the first time
+    that conclusion fired, the extension was the stale one and the message sent
+    the user to restart the runtime instead.
+    """
+    from fancy_gpt.providers.web_automation import _stale_side_hint
+
+    hint = _stale_side_hint()
+    assert "reload the extension" in hint
+    assert "restart this process" in hint.lower()
+    # Stated as a reason to try something, never as a finding.
+    assert "must be" not in hint
 
 
 def test_adapter_drift_can_be_overridden_deliberately(monkeypatch) -> None:

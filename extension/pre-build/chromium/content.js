@@ -48,58 +48,25 @@ function installPageHook() {
   }
 }
 
-/* The reply as the stream carried it, kept apart from the shape reports.
+/* The events a site streamed, forwarded unread.
  *
- * Only the most recent, because a turn compares against the reply for the turn
- * it just ran. It is not returned as the answer: the page is still the source
- * of truth, and this is here to be checked against it on real turns until
- * there is evidence that it agrees.
+ * Only the most recent stream, because a turn is interested in the one it just
+ * ran. Nothing here interprets them: what a reply looks like is knowledge that
+ * changes when a site changes, and knowledge kept in an extension can only be
+ * corrected by asking someone to reload their browser.
  */
-let streamedReply = null;
+let streamedEvents = null;
 
 window.addEventListener("message", event => {
   if (event.source !== window) return;
   const data = event.data;
   if (!data || data.source !== "fancygpt-page-hook") return;
   const {source, ...report} = data;
-  if (report.kind === "reply") { streamedReply = report; return; }
+  if (report.kind === "events") { streamedEvents = report; return; }
   pageHookReports.push(report);
   // Only the recent ones: this is a diagnostic, not a log.
   if (pageHookReports.length > 8) pageHookReports.shift();
 });
-
-/* How the two readings compare, in shapes.
- *
- * Never the text of either, and never a diff of them: what matters is whether
- * they agree, and if not, how far in they first part company and by how much.
- * Two readings that always agree are what would justify trusting the stream;
- * one disagreement is what would stop it.
- */
-function compareReadings(fromPage) {
-  if (streamedReply == null) return {streamed: false};
-  const streamed = String(streamedReply.text ?? "");
-  const page = String(fromPage ?? "");
-  let divergesAt = null;
-  if (streamed !== page) {
-    const limit = Math.min(streamed.length, page.length);
-    divergesAt = limit;
-    for (let i = 0; i < limit; ++i) {
-      if (streamed[i] !== page[i]) { divergesAt = i; break; }
-    }
-  }
-  return {
-    streamed: true,
-    agree: streamed === page,
-    streamedChars: streamed.length,
-    pageChars: page.length,
-    divergesAt,
-    stats: streamedReply.stats ?? null,
-    hasConversationId: Boolean(streamedReply.conversationId),
-    hasMessageId: Boolean(streamedReply.messageId),
-  };
-}
-
-installPageHook();
 
 ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "fancy_cancel_turn") {
@@ -135,7 +102,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       diagnostics: {
         ...(result?.diagnostics ?? {}),
         pageHook: pageHookReports.slice(),
-        streamComparison: compareReadings(result?.text),
+        stream: streamedEvents,
       },
     }))
     .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}))
