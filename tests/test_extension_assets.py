@@ -341,6 +341,15 @@ def test_automation_stays_out_of_the_way(tmp_path: Path) -> None:
     # reply ends, which is why this assertion is the opposite of what it was.
     assert 'state: "minimized"' in background
     assert "focused: false" in background
+    # Chrome refuses the whole call when geometry is combined with a state of
+    # minimized, maximized or fullscreen: "Invalid value for state", and every
+    # turn fails before it opens a tab. Found live, sixteen turns at once.
+    import re as _re
+
+    for call in _re.findall(r"windows\.create\(\{[^}]*\}\)", background):
+        if '"minimized"' in call or '"maximized"' in call or '"fullscreen"' in call:
+            for geometry in ("width:", "height:", "top:", "left:"):
+                assert geometry not in call, f"geometry cannot accompany a window state: {call}"
 
 
 def test_the_task_window_survives_the_job_that_created_it(tmp_path: Path) -> None:

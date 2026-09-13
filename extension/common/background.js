@@ -45,9 +45,11 @@ async function taskWindowFor(url) {
    * Minimized rather than merely unfocused, because an unfocused window still
    * sits somewhere in the way.
    */
-  const created = await ext.windows.create({
-    url, focused: false, state: "minimized", width: 900, height: 700, top: 0, left: 0,
-  });
+  // No geometry alongside the state: Chrome rejects the whole call with
+  // "Invalid value for state" when left, top, width or height are combined
+  // with minimized, and every turn then fails before it opens a tab. A
+  // minimized window has no geometry worth asking for anyway.
+  const created = await ext.windows.create({url, focused: false, state: "minimized"});
   taskWindowId = created.id;
   return created.tabs?.[0] ?? null;
 }
