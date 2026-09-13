@@ -40,6 +40,8 @@ class BrowserWorker:
     send_lock: threading.Lock = field(default_factory=threading.Lock)
     request_lock: threading.Lock = field(default_factory=threading.Lock)
     pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
+    queued: dict[str, threading.Event] = field(default_factory=dict)
+    cancel_reasons: dict[str, str] = field(default_factory=dict)
     job_tunnels: dict[str, str] = field(default_factory=dict)
     #: Replies to control messages (cancel), kept apart from job replies so
     #: a control round trip can never consume a turn's own response.
@@ -71,15 +73,33 @@ class BrowserWorker:
         """
         job_id = str(message["job_id"])
         started_waiting = time.monotonic()
-        if not self.capacity_slots.acquire(timeout=timeout_s):
-            raise TimeoutError(f"browser worker capacity wait timed out for job {job_id}")
         response_queue: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
+        cancelled = threading.Event()
+        acquired = False
+        with self.request_lock:
+            if job_id in self.pending or job_id in self.queued:
+                raise ValueError(f"job {job_id} is already in flight or queued")
+            self.queued[job_id] = cancelled
+            self.job_tunnels[job_id] = str(message.get("tunnel_id", ""))
         try:
+            deadline = started_waiting + timeout_s
+            while not cancelled.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"browser worker capacity wait timed out for job {job_id}")
+                acquired = self.capacity_slots.acquire(timeout=min(0.05, remaining))
+                if acquired:
+                    break
+            if cancelled.is_set():
+                with self.request_lock:
+                    reason = self.cancel_reasons.get(job_id, "cancelled before browser submission")
+                return {"type": "job_cancelled", "job_id": job_id, "reason": reason}
             with self.request_lock:
-                if job_id in self.pending:
-                    raise ValueError(f"job {job_id} is already in flight")
+                if cancelled.is_set():
+                    reason = self.cancel_reasons.get(job_id, "cancelled before browser submission")
+                    return {"type": "job_cancelled", "job_id": job_id, "reason": reason}
+                self.queued.pop(job_id, None)
                 self.pending[job_id] = response_queue
-                self.job_tunnels[job_id] = str(message.get("tunnel_id", ""))
                 self.jobs_started += 1
             self.send(message)
             remaining = max(0.0, timeout_s - (time.monotonic() - started_waiting))
@@ -101,9 +121,28 @@ class BrowserWorker:
             return response
         finally:
             with self.request_lock:
+                self.queued.pop(job_id, None)
                 self.pending.pop(job_id, None)
                 self.job_tunnels.pop(job_id, None)
-            self.capacity_slots.release()
+                self.cancel_reasons.pop(job_id, None)
+            if acquired:
+                self.capacity_slots.release()
+
+    def cancel_queued(self, job_id: str, reason: str) -> bool:
+        """Cancel a capacity waiter locally; it has not reached the browser."""
+        with self.request_lock:
+            target = self.queued.get(job_id)
+            if target is None:
+                return False
+            self.cancel_reasons[job_id] = reason
+            target.set()
+            return True
+
+    def owns_job(self, tunnel_id: str, job_id: str) -> bool:
+        with self.request_lock:
+            return self.job_tunnels.get(job_id) == tunnel_id and (
+                job_id in self.queued or job_id in self.pending
+            )
 
     def send_control(self, message: dict[str, Any]) -> None:
         """Fire-and-forget message to the worker, outside any job's reply path."""
@@ -340,6 +379,16 @@ class BridgeHub:
             )
         return None
 
+    def worker_for_job(self, tunnel_id: str, job_id: str) -> BrowserWorker | None:
+        """Resolve the exact browser generation owning a queued or active job."""
+        with self._lock:
+            self._expire_stale_unlocked()
+            candidates = [
+                worker for worker in self._workers
+                if self._fresh(worker) and tunnel_id in worker.tunnel_ids
+            ]
+        return next((worker for worker in candidates if worker.owns_job(tunnel_id, job_id)), None)
+
     def snapshot(self) -> list[dict[str, Any]]:
         now = time.monotonic()
         with self._lock:
@@ -544,11 +593,18 @@ class BridgeServer:
                 # must not consume that pending slot.
                 tunnel_id = str(message.get("tunnel_id", ""))
                 job_id = str(message.get("job_id", ""))
-                worker = self.hub.worker_for(tunnel_id)
+                worker = self.hub.worker_for_job(tunnel_id, job_id) if job_id else None
                 if worker is None or not job_id:
                     connection.send(dumps({
                         "type": "cancel_result", "job_id": job_id, "accepted": False,
-                        "reason": "no browser worker connected" if worker is None else "job_id is required",
+                        "reason": "job_id is required" if not job_id else "job is not queued or active",
+                    }))
+                    continue
+                reason = str(message.get("reason", "cancelled"))
+                if worker.cancel_queued(job_id, reason):
+                    connection.send(dumps({
+                        "type": "cancel_result", "job_id": job_id, "accepted": True,
+                        "reason": reason,
                     }))
                     continue
                 answer = worker.request_control({
@@ -556,7 +612,7 @@ class BridgeServer:
                     "job_id": job_id,
                     "control_id": uuid.uuid4().hex,
                     "generation_epoch": message.get("generation_epoch", 0),
-                    "reason": str(message.get("reason", "cancelled")),
+                    "reason": reason,
                 })
                 if answer is None:
                     connection.send(dumps({

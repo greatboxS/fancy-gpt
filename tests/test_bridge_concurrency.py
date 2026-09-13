@@ -65,6 +65,40 @@ def test_worker_capacity_queues_without_rejecting_or_overcommitting() -> None:
     assert peak == 2
 
 
+def test_cancelled_capacity_waiter_is_never_sent_to_browser() -> None:
+    worker = BrowserWorker(
+        connection=FakeConnection(), tunnel_ids={"edge-remote"}, browser="edge", max_turns=1,
+    )
+    results: dict[str, dict] = {}
+
+    first = threading.Thread(target=lambda: results.setdefault(
+        "first", worker.request({"type": "job", "job_id": "first", "tunnel_id": "edge-remote"}, timeout_s=3)
+    ))
+    second = threading.Thread(target=lambda: results.setdefault(
+        "second", worker.request({"type": "job", "job_id": "second", "tunnel_id": "edge-remote"}, timeout_s=3)
+    ))
+    first.start()
+    deadline = time.monotonic() + 1
+    while "first" not in worker.pending and time.monotonic() < deadline:
+        time.sleep(0.005)
+    second.start()
+    deadline = time.monotonic() + 1
+    while "second" not in worker.queued and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    assert worker.owns_job("edge-remote", "second")
+    assert worker.cancel_queued("second", "caller stopped")
+    second.join(1)
+    assert results["second"] == {
+        "type": "job_cancelled", "job_id": "second", "reason": "caller stopped",
+    }
+    assert all('"job_id":"second"' not in raw for raw in worker.connection.sent)
+
+    worker.dispatch({"type": "job_result", "job_id": "first", "text": "ok"})
+    first.join(1)
+    assert results["first"]["text"] == "ok"
+
+
 def test_worker_disconnect_wakes_all_pending_jobs_immediately() -> None:
     worker = make_worker()
     failures: list[dict] = []
