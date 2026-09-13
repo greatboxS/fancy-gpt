@@ -43,6 +43,29 @@ Update this table only with evidence from a test or a recorded live run. The
 extension manifests already admit Grok and Copilot origins; that fact alone is
 the `observed` state.
 
+### Copilot protocol evidence to preserve
+
+The independent [webllm-proxy Copilot implementation](https://github.com/SamuelHaidu/webllm-proxy/tree/main/webllm_proxy/providers/copilot)
+is useful prior art, but is not evidence that FancyGPT's own browser path works.
+It confirms two editions that must not be merged into one heuristic decoder:
+
+- M365 BizChat uses SignalR JSON records separated by `0x1e`; answer updates are
+  cumulative and progress/search message types are interleaved;
+- consumer `copilot.microsoft.com` uses event JSON frames with incremental
+  `appendText` payloads and different completion signals.
+
+For either edition, the extension must first capture bounded per-lease frames
+from the exact known socket path and retain a request/message identity that can
+be correlated to the submitted turn. A socket closing is not a required turn
+boundary because the page can reuse a long-lived connection. Until those local
+fixtures and live correlation evidence exist, raw frames stay inside the page,
+the runtime decoder remains disabled, and Copilot remains `observed` only.
+
+This distinction follows Chrome's requirement to treat an MV3 service worker as
+ephemeral and persist needed state rather than relying on globals; see the
+[extension service-worker lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
+and [`chrome.storage` reference](https://developer.chrome.com/docs/extensions/reference/api/storage).
+
 ## End-to-end contract
 
 ```text
