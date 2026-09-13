@@ -3,6 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
+const EXTENSION_BUILD = "__FANCYGPT_ADAPTER_BUILD__";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -205,6 +206,26 @@ async function cancelJob(message) {
   }
 }
 
+function reloadExtension(message) {
+  if (activeJobs.size > 0) {
+    globalThis.FancyGPTTransport.send({
+      type: "reload_result", control_id: message.control_id, accepted: false,
+      reason: `${activeJobs.size} browser turn(s) are still active`,
+    });
+    return;
+  }
+  try {
+    globalThis.FancyGPTTransport.send({
+      type: "reload_result", control_id: message.control_id, accepted: true,
+      reason: "extension reload scheduled",
+    });
+  } catch (_) {
+    return;
+  }
+  // Let the acknowledgement leave the socket before replacing this worker.
+  setTimeout(() => ext.runtime.reload(), 100);
+}
+
 async function executeJob(job) {
   let lease = null;
   try {
@@ -364,6 +385,7 @@ async function takeObservationsUnlocked() {
 globalThis.FancyGPTTransport.setHandler(async message => {
   if (message.type === "job") await executeJob(message);
   else if (message.type === "cancel") await cancelJob(message);
+  else if (message.type === "extension.reload") reloadExtension(message);
 });
 
 async function connectBridge() {
@@ -375,6 +397,7 @@ async function connectBridge() {
       max_render_slots: Math.max(1, Math.min(16, Number(config.maxConcurrentTurns) || 4)),
       sites: Object.keys(SITES),
       surface_mode: "dedicated-window",
+      build: EXTENSION_BUILD,
     },
   });
 }

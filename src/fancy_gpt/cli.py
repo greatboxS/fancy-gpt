@@ -25,7 +25,7 @@ from .relevance import ResponseIntent
 from .providers import ChatGPTWebAutomationProvider
 from .skills import export_packaged_skills, packaged_skills_root, validate_skill_bundle
 from .runtime_paths import default_browser_profile, user_data_dir, default_bridge_token_file, default_bridge_native_config
-from .bridge import BridgeServer, load_or_create_token
+from .bridge import BridgeServer, load_or_create_token, send_extension_reload
 from .bridge.native_manifest import install_manifest, native_host_manifest
 from .extension_utils import adapter_build_id, export_extension
 from .tunnels import TunnelManager, TunnelRegistry, TunnelLayerInspector
@@ -933,6 +933,19 @@ def extension_export_all(
         "adapter_build": adapter_build_id(),
         "exported": exported,
     }, indent=2))
+
+
+@extension_app.command("reload")
+def extension_reload(
+    tunnel_id: Annotated[str, typer.Argument()],
+    endpoint: Annotated[str, typer.Option("--endpoint")] = "ws://127.0.0.1:8765",
+) -> None:
+    """Reload a connected unpacked extension after its files are updated."""
+    token = load_or_create_token(default_bridge_token_file())
+    result = send_extension_reload(endpoint, token, tunnel_id, expected_build=adapter_build_id())
+    typer.echo(json.dumps({"tunnel_id": tunnel_id, **result}, indent=2))
+    if not result.get("accepted"):
+        raise typer.Exit(1)
 
 
 @extension_app.command("native-config")

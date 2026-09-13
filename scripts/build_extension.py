@@ -73,7 +73,7 @@ def expected_files(family: str, browser: str, stamp_build: bool) -> dict[str, by
         text = (COMMON / name).read_text(encoding="utf-8")
         if browser != "chrome" and name in {"background.js", "popup.html"}:
             text = patch_defaults(text, browser)
-        if name == "site_kit.js" and stamp_build:
+        if name in {"background.js", "site_kit.js"} and stamp_build:
             # A pre-built bundle is loaded straight into a browser, so it has to
             # carry a real build id; the packaged assets keep the placeholder
             # because `extension export` stamps them on the way out.

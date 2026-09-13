@@ -175,6 +175,19 @@ On service-worker restart, a lease in `submitting` or `accepted` is never blindl
 resubmitted. The bridge/gateway receives an uncertain terminal state unless the
 extension can reattach and prove the provider outcome.
 
+### Development reload without operator intervention
+
+An unpacked extension can reload itself from its existing local directory via
+`fancy-gpt extension reload <tunnel-id>`. Reload is accepted only with zero
+active leases. The initial acknowledgement means only that reload was scheduled;
+CLI success requires the old worker generation to disappear and a new worker to
+reconnect while advertising the expected adapter build id. A timeout, unchanged
+worker id, or wrong build is a failed reload and blocks live testing.
+
+This mechanism reloads files already present on the browser workstation. It does
+not download or execute remote code, which Manifest V3 forbids and FancyGPT does
+not need.
+
 ## Implementation slices
 
 ### Slice 1: ownership correctness
@@ -231,4 +244,3 @@ Minimum acceptance scenarios:
 The release gate for parallelism is zero cross-turn response, progress,
 cancellation, capture, or cleanup leakage under repeated randomized completion
 order.
-

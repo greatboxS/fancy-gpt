@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from websockets.sync.client import connect
 
 from .protocol import dumps, hello, loads
@@ -78,6 +80,52 @@ def send_job_cancel(
         if result.get("type") != "cancel_result":
             raise RuntimeError(f"unexpected bridge cancel response: {result}")
         return bool(result.get("accepted"))
+
+
+def send_extension_reload(
+    endpoint: str, token: str, tunnel_id: str, *, expected_build: str,
+    open_timeout_s: float = 5.0, reconnect_timeout_s: float = 15.0,
+) -> dict:
+    """Reload, then prove a new worker with the expected build reconnected."""
+    before = [
+        worker for worker in probe_bridge_workers(endpoint, token, open_timeout_s=open_timeout_s)
+        if tunnel_id in worker.get("tunnel_ids", []) and worker.get("alive", True)
+    ]
+    old_ids = {str(worker.get("worker_id")) for worker in before}
+    with connect(endpoint, open_timeout=open_timeout_s, max_size=1 << 20) as connection:
+        connection.send(dumps(hello(role="controller", token=token)))
+        ack = loads(connection.recv(timeout=open_timeout_s))
+        if ack.get("type") != "hello_ack":
+            raise RuntimeError(f"bridge refused reload controller: {ack}")
+        connection.send(dumps({"type": "extension.reload", "tunnel_id": tunnel_id}))
+        result = loads(connection.recv(timeout=open_timeout_s))
+        if result.get("type") != "reload_result":
+            raise RuntimeError(f"unexpected extension reload response: {result}")
+        if not result.get("accepted"):
+            return result
+    deadline = time.monotonic() + reconnect_timeout_s
+    while time.monotonic() < deadline:
+        try:
+            workers = probe_bridge_workers(endpoint, token, open_timeout_s=1.0)
+        except Exception:
+            time.sleep(0.2)
+            continue
+        replacement = next((
+            worker for worker in workers
+            if tunnel_id in worker.get("tunnel_ids", [])
+            and str(worker.get("worker_id")) not in old_ids
+            and worker.get("build") == expected_build
+        ), None)
+        if replacement is not None:
+            return {
+                "type": "reload_result", "accepted": True, "verified": True,
+                "worker_id": replacement.get("worker_id"), "build": replacement.get("build"),
+            }
+        time.sleep(0.2)
+    return {
+        "type": "reload_result", "accepted": False, "verified": False,
+        "reason": f"no new worker reconnected with build {expected_build}",
+    }
 
 
 def fetch_job_progress(

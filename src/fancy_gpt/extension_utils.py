@@ -71,7 +71,10 @@ def export_extension(browser: str, destination: Path) -> Path:
         if not item.is_file():
             continue
         target = destination / item.name
-        if item.name in {"background.js", "popup.html"}:
+        if item.name == "background.js":
+            patched = _patch_browser_defaults(item.read_text(encoding="utf-8"), browser)
+            target.write_text(_stamp_adapter_build(patched, family), encoding="utf-8")
+        elif item.name == "popup.html":
             target.write_text(_patch_browser_defaults(item.read_text(encoding="utf-8"), browser), encoding="utf-8")
         elif item.name == "site_kit.js":
             # Stamped once, in the one file every adapter loads, so each site

@@ -24,6 +24,7 @@ async function main() {
   const stored = {};
   const removed = event();
   let handler;
+  let reloads = 0;
 
   const browser = {
     windows: {
@@ -54,6 +55,7 @@ async function main() {
     }},
     runtime: {
       onConnect: event(), onInstalled: event(), onStartup: event(), onMessage: event(),
+      reload() { reloads += 1; },
     },
   };
   const transport = {
@@ -99,6 +101,10 @@ async function main() {
   await handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "overflow", prompt: "x"});
   assert.strictEqual(windows.size, 4, "configured capacity must bound rendered surfaces");
   assert(sent.some(item => item.type === "job_error" && item.job_id === "overflow" && /capacity/.test(item.error)));
+  await handler({type: "extension.reload", control_id: "busy-reload"});
+  assert(sent.some(item => item.type === "reload_result" && item.control_id === "busy-reload" && !item.accepted));
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.strictEqual(reloads, 0, "an active turn must fence extension reload");
   for (const jobId of ["c", "d", "e", "f"]) {
     const tabId = context.FancyGPTBackgroundTest.activeJobs.get(jobId).tabId;
     pending.get(tabId).resolve({ok: true, text: jobId, responseIdentity: `${jobId}1`});
@@ -123,6 +129,10 @@ async function main() {
   const observations = await context.FancyGPTBackgroundTest.takeObservations();
   assert.strictEqual(JSON.stringify(observations.map(item => item.sequence)), JSON.stringify(Array.from({length: 12}, (_, i) => i)));
   assert.strictEqual((await context.FancyGPTBackgroundTest.takeObservations()).length, 0);
+  await handler({type: "extension.reload", control_id: "reload-1"});
+  assert(sent.some(item => item.type === "reload_result" && item.control_id === "reload-1" && item.accepted));
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.strictEqual(reloads, 1, "reload happens only after its acknowledgement is sent");
   console.log("background lifecycle: 1 passed");
 }
 

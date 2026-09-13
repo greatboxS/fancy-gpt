@@ -31,6 +31,7 @@ class BrowserWorker:
     max_render_slots: int = 1
     sites: tuple[str, ...] = ()
     surface_mode: str = "legacy"
+    build: str | None = None
     worker_id: str = field(default_factory=lambda: f"worker-{uuid.uuid4().hex[:10]}")
     connected_at: float = field(default_factory=time.monotonic)
     connected_at_wall: float = field(default_factory=time.time)
@@ -314,6 +315,7 @@ class BridgeHub:
                     "max_render_slots": worker.max_render_slots,
                     "sites": list(worker.sites),
                     "surface_mode": worker.surface_mode,
+                    "build": worker.build,
                 }
                 for worker in self._workers
             ]
@@ -383,6 +385,7 @@ class BridgeServer:
             max_render_slots=max_render_slots,
             sites=tuple(sorted(str(item) for item in capabilities.get("sites", []) if item)),
             surface_mode=str(capabilities.get("surface_mode") or "legacy"),
+            build=str(capabilities.get("build")) if capabilities.get("build") else None,
         )
         if "*" in worker.tunnel_ids:
             raise ValueError("browser worker must register exact tunnel ids; wildcard is forbidden")
@@ -399,7 +402,7 @@ class BridgeServer:
                 # stopped turn produced no reply at all, so the controller
                 # waited out its whole timeout for a turn that had already
                 # ended in the browser.
-                if message.get("type") == "cancel_result":
+                if message.get("type") in {"cancel_result", "reload_result"}:
                     worker.dispatch_control(message)
                 elif message.get("type") in {"job_result", "job_error", "job_cancelled"}:
                     worker.dispatch(message)
@@ -514,6 +517,22 @@ class BridgeServer:
                         "accepted": bool(answer.get("accepted")),
                         "reason": str(answer.get("reason", "")),
                     }))
+            elif msg_type == "extension.reload":
+                tunnel_id = str(message.get("tunnel_id", ""))
+                worker = self.hub.worker_for(tunnel_id)
+                if worker is None:
+                    connection.send(dumps({
+                        "type": "reload_result", "accepted": False,
+                        "reason": "no browser worker connected",
+                    }))
+                    continue
+                answer = worker.request_control({
+                    "type": "extension.reload", "control_id": uuid.uuid4().hex,
+                })
+                connection.send(dumps(answer or {
+                    "type": "reload_result", "accepted": False,
+                    "reason": "the browser did not acknowledge reload",
+                }))
             elif msg_type == "progress":
                 tunnel_id = str(message.get("tunnel_id", ""))
                 job_id = str(message.get("job_id", ""))
