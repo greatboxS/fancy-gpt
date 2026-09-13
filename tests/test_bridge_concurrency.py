@@ -155,6 +155,17 @@ def test_worker_disconnect_wakes_capacity_waiters_without_submitting() -> None:
     assert all('"job_id":"waiting"' not in raw for raw in worker.connection.sent)
 
 
+def test_closed_worker_rejects_new_job_without_registering_or_sending() -> None:
+    worker = make_worker()
+    worker.fail_pending("generation closed")
+
+    with pytest.raises(ConnectionError, match="generation is closed"):
+        worker.request({"type": "job", "job_id": "too-late"}, timeout_s=1)
+
+    assert worker.load() == (0, 0)
+    assert worker.connection.sent == []
+
+
 def test_same_conversation_serializes_while_different_conversation_overlaps() -> None:
     hub = BridgeHub("token")
     inside: list[str] = []

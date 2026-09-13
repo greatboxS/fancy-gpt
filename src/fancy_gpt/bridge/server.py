@@ -82,6 +82,8 @@ class BrowserWorker:
         cancelled = threading.Event()
         acquired = False
         with self.request_lock:
+            if not self.alive:
+                raise ConnectionError(f"browser worker generation is closed for job {job_id}")
             if job_id in self.pending or job_id in self.queued:
                 raise ValueError(f"job {job_id} is already in flight or queued")
             self.queued[job_id] = cancelled
@@ -109,6 +111,11 @@ class BrowserWorker:
                     if failure is not None:
                         return {"type": "job_error", "job_id": job_id, "error": failure}
                     return {"type": "job_cancelled", "job_id": job_id, "reason": reason}
+                if not self.alive:
+                    return {
+                        "type": "job_error", "job_id": job_id,
+                        "error": "browser worker disconnected before submission",
+                    }
                 self.queued.pop(job_id, None)
                 self.pending[job_id] = response_queue
                 self.jobs_started += 1
@@ -213,6 +220,10 @@ class BrowserWorker:
     def fail_pending(self, reason: str) -> None:
         """Wake every waiter when this browser generation disappears."""
         with self.request_lock:
+            # Close admission atomically with taking the waiter snapshot. A job
+            # can therefore be in this snapshot or rejected as new, never fall
+            # into the gap between fail_pending() and hub.unregister().
+            self.alive = False
             jobs = list(self.pending.items())
             controls = list(self.control_pending.items())
             queued = list(self.queued.items())
