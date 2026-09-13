@@ -116,8 +116,8 @@ async function main() {
 
     const result = await running;
     const lines = result.text.split("\n");
-    assert(lines.some(line => line === "fancygpt:E1-OLD"),
-      "a block label must stay on its own line or the contract cannot find it");
+    assert(lines.some(line => line === "```fancygpt:E1-OLD"),
+      "a block label must open a fence the contract can find");
     assert(lines.some(line => line === "        return 1"),
       "verbatim indentation must survive extraction: " + JSON.stringify(result.text));
     assert(!/Good response/.test(result.text), "turn action labels must not leak in");

@@ -320,8 +320,8 @@ async function main() {
     // no idea what is chrome and what is the answer, and a stray label on its
     // own line costs nothing, while dropping a subtree can cost the reply.
     assertEqual(text,
-      "Here is the change.\nfancygpt:E1-OLD\nCopy\n    def run(self):\n        return 1",
-      "label and indentation survive; no subtree is guessed away");
+      "Here is the change.\n```fancygpt:E1-OLD\n    def run(self):\n        return 1\n```",
+      "the fence is restored around the block, with its label as the info string");
   });
 
   await test("readLiveText keeps a highlighted code line intact", () => {
@@ -351,8 +351,8 @@ async function main() {
     pre.append(new StubElement("code", {text: "    def run(self):\n        return 1"}));
     // A trailing trim on the joined output would silently eat the first line's
     // indentation, and the contract matches the OLD block character for character.
-    assertEqual(readLiveText(pre), "    def run(self):\n        return 1",
-      "leading indentation of the first line survives");
+    assertEqual(readLiveText(pre), "```\n    def run(self):\n        return 1\n```",
+      "leading indentation survives, inside the fence the model originally wrote");
   });
 
   await test("readLiveText keeps inline code inside its sentence", () => {
@@ -393,6 +393,46 @@ async function main() {
     watcher.stop();
     document.setVisibility("hidden");
     assertEqual(watcher.state.hiddenDuringTurn, true, "stop detaches without losing what it saw");
+  });
+
+  await test("readLiveText puts the fence back around a rendered code block", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const md = new StubElement("div", {class: "markdown"});
+    const block = (label, body) => {
+      const pre = new StubElement("pre");
+      const header = new StubElement("div");
+      header.append(new StubElement("div", {text: label}));
+      header.append(new StubElement("button"));   // the Copy control: an icon, no text
+      pre.append(header);
+      pre.append(new StubElement("code", {text: body}));
+      md.append(pre);
+    };
+    block("json", '{"edit":{"new_ref":"E1-NEW"}}');
+    block("fancygpt:E1-NEW", "    def alpha():\n        return 2");
+    md.append(new StubElement("p", {text: "Let me know if you want tests added."}));
+
+    // Markdown renders the fence away, leaving the info string as a bare line
+    // above the code and nothing at all below it. Read back like that, the last
+    // block has no end: it swallows the closing sentence, and that text is then
+    // written into the repository as source.
+    assertEqual(readLiveText(md), [
+      "```json",
+      '{"edit":{"new_ref":"E1-NEW"}}',
+      "```",
+      "```fancygpt:E1-NEW",
+      "    def alpha():",
+      "        return 2",
+      "```",
+      "Let me know if you want tests added.",
+    ].join("\n"), "every rendered block comes back delimited");
+  });
+
+  await test("a bare pre without code is still read verbatim", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const pre = new StubElement("pre", {text: "    two spaces kept"});
+    assertEqual(readLiveText(pre), "    two spaces kept", "no fence to restore, nothing invented");
   });
 
   report();

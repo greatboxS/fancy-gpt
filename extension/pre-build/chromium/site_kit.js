@@ -71,7 +71,9 @@
     composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
   }
 
-  const BLOCK_LABEL = /^[ \t]*fancygpt[:\s]+([A-Za-z0-9._-]+)[ \t]*$/i;
+  // The fence is restored when a rendered code block is read, so the label may
+  // arrive as the info string of a fence or, from an older reply, as a bare line.
+  const BLOCK_LABEL = /^[ \t]*(?:```)?[ \t]*fancygpt[:\s]+([A-Za-z0-9._-]+)[ \t]*$/i;
 
   // The JSON document ends where the first verbatim code block begins. Braces
   // inside those blocks belong to source code and must not be counted.
@@ -160,7 +162,7 @@
     const refs = json.match(/"(?:old_ref|new_ref|content_ref)"\s*:\s*"([^"]+)"/g) || [];
     return refs.every(ref => {
       const id = ref.match(/:\s*"([^"]+)"/)[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      return new RegExp("^[ \\t]*fancygpt[:\\s]+" + id + "[ \\t]*$", "im").test(text);
+      return new RegExp("^[ \\t]*(?:```)?[ \\t]*fancygpt[:\\s]+" + id + "[ \\t]*$", "im").test(text);
     });
   }
 
@@ -181,6 +183,25 @@
     const skip = options.skip instanceof Set ? options.skip : new Set(options.skip ?? []);
     // Chunks, not a growing string: trimming the tail of a 30KB accumulator on
     // every block boundary turns reading one long reply into quadratic work.
+    // The first thing a code block's header says, which is where the fence's
+    // info string ends up once markdown has rendered the fence away.
+    const headerTextOf = (preNode, codeNode) => {
+      let found = "";
+      const visit = node => {
+        if (found || !node || node === codeNode) return;
+        if (node.nodeType === 3) {
+          const text = (node.nodeValue ?? "").trim();
+          if (text) found = text;
+          return;
+        }
+        const tag = String(node.tagName ?? "").toUpperCase();
+        if (UNRENDERED_TAGS.has(tag)) return;
+        for (const child of node.childNodes ?? node.children ?? []) visit(child);
+      };
+      visit(preNode);
+      return found;
+    };
+
     const chunks = [];
     let lastChar = "";
     const push = text => { if (text) { chunks.push(text); lastChar = text[text.length - 1]; } };
@@ -220,6 +241,39 @@
       // one line into a span per token, and there is no block boundary inside
       // code worth reconstructing.
       if (tag === "CODE") { push(node.textContent ?? ""); return; }
+      /* Put the ``` back around a rendered code block.
+       *
+       * The model writes fences; markdown renders them away, leaving the info
+       * string as a bare line above the code and no delimiter at all below it.
+       * Read back like that, a `fancygpt:<id>` block has no end: it runs to the
+       * next label or off the end of the reply, swallowing whatever the model
+       * said afterwards -- and that text is then written into the repository as
+       * if it were source. A closing sentence after the last block corrupts the
+       * file. The same missing fence makes a reply the model chose to wrap in
+       * ```json arrive as `JSON` followed by the document, which parses as
+       * neither.
+       *
+       * The boundary is not ambiguous in the DOM, only in the text, so it is
+       * restored here where it is still known.
+       */
+      if (tag === "PRE") {
+        const code = node.querySelector?.("code");
+        if (code) {
+          // Whatever the block's header says, minus the code itself. The site
+          // draws the info string there; its Copy control is an icon and
+          // contributes no text. Collected directly rather than by re-reading
+          // the <pre>, which would re-enter this branch forever.
+          const info = headerTextOf(node, code);
+          breakLine();
+          push("```" + info);
+          push("\n");
+          push((code.textContent ?? "").replace(/^\n/, "").replace(/\n$/, ""));
+          breakLine();
+          push("```");
+          breakLine();
+          return;
+        }
+      }
       const pre = inPre || tag === "PRE";
       const block = LINE_BREAKING_TAGS.has(tag);
       if (block) breakLine();
@@ -449,7 +503,7 @@
   }
 
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "3bcc03a526d0";
+  const BUILD = "09e36ba031a2";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,
