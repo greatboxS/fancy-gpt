@@ -175,6 +175,7 @@ class BridgeBrowserDriver:
             conversation_id=conversation_id,
             conversation_mode=conversation_mode,
             site=site,
+            generation_epoch=generation_epoch,
         )
 
     def submit(self, turn: BrowserTurn, prompt: str) -> None:
@@ -279,7 +280,9 @@ class BridgeBrowserDriver:
         this is a monitoring aid, never allowed to affect the actual turn.
         """
         try:
-            progress = fetch_job_progress(self.endpoint, self.token, turn_id, open_timeout_s=1.0)
+            progress = fetch_job_progress(
+                self.endpoint, self.token, self.tunnel_id, turn_id, open_timeout_s=1.0
+            )
         except Exception:
             return None
         return progress.get("text") if progress else None

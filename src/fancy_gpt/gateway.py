@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -987,6 +988,10 @@ class GatewayService:
                 "site": site,
                 "conversation_id": conversation_id,
                 "conversation_mode": "persistent",
+                # Each browser job gets a non-zero fencing value. Today task tabs
+                # are not reused, but carrying a real value keeps cancellation
+                # correct if pooling is introduced later.
+                "generation_epoch": time.time_ns(),
             },
         )
 
@@ -1190,7 +1195,11 @@ class GatewayService:
                 turn_id = getattr(provider, "active_turn_id", None)
                 if turn_id:
                     try:
-                        cancel(turn_id, reason=token.reason)
+                        cancel(
+                            turn_id,
+                            generation_epoch=int(getattr(provider, "active_generation_epoch", 0)),
+                            reason=token.reason,
+                        )
                     except Exception:
                         pass
                 return

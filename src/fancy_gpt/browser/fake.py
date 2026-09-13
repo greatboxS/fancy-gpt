@@ -62,6 +62,7 @@ class FakeBrowserDriver:
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
         site: str | None = None,
+        generation_epoch: int = 0,
     ) -> BrowserTurn:
         self.health_check()
         if len(self._active) >= self.max_concurrent_turns:

@@ -30,7 +30,7 @@ class SessionDriver:
     def submit(self, turn, prompt): pass
     def close_turn(self, turn): pass
 
-    def begin_turn(self, *, request_id, stage, conversation_id=None, conversation_mode="temporary", site=None):
+    def begin_turn(self, *, request_id, stage, conversation_id=None, conversation_mode="temporary", site=None, generation_epoch=0):
         self.counter += 1
         self.begin_inputs.append({"stage": stage, "conversation_id": conversation_id, "mode": conversation_mode})
         turn = BrowserTurn(

@@ -34,14 +34,14 @@ def hub_with_subscriber() -> tuple[BridgeHub, FakeConnection]:
 
 def test_progress_is_pushed_to_subscribers(tmp_path=None) -> None:
     hub, connection = hub_with_subscriber()
-    hub.record_progress("job-1", "Hello")
-    hub.record_progress("job-1", "Hello world")
+    hub.record_progress("job-1", "Hello", "edge-remote")
+    hub.record_progress("job-1", "Hello world", "edge-remote")
 
     pushed = [json.loads(raw) for raw in connection.sent]
     assert [item["text"] for item in pushed] == ["Hello", "Hello world"]
     assert all(item["job_id"] == "job-1" for item in pushed)
     # The stored snapshot is still available for anything still polling.
-    assert hub.get_progress("job-1")["text"] == "Hello world"
+    assert hub.get_progress("edge-remote", "job-1")["text"] == "Hello world"
 
 
 def test_a_dead_subscriber_is_dropped_not_retried() -> None:
@@ -49,14 +49,14 @@ def test_a_dead_subscriber_is_dropped_not_retried() -> None:
     connection = FakeConnection(fail_after=1)
     hub.add_subscriber(connection, "edge-remote")
 
-    hub.record_progress("job-1", "first")
+    hub.record_progress("job-1", "first", "edge-remote")
     assert hub.subscriber_count() == 1
     # The second push fails; the subscriber is removed rather than retried.
-    hub.record_progress("job-1", "second")
+    hub.record_progress("job-1", "second", "edge-remote")
     assert hub.subscriber_count() == 0
     # Recording still works with no subscribers at all.
-    hub.record_progress("job-1", "third")
-    assert hub.get_progress("job-1")["text"] == "third"
+    hub.record_progress("job-1", "third", "edge-remote")
+    assert hub.get_progress("edge-remote", "job-1")["text"] == "third"
 
 
 def test_a_slow_subscriber_never_blocks_the_producer() -> None:
@@ -78,7 +78,7 @@ def test_a_slow_subscriber_never_blocks_the_producer() -> None:
     _conn, lock, _tunnel = hub._subscribers[key]
     lock.acquire()
     started = time.monotonic()
-    hub.record_progress("job-1", "snapshot")
+    hub.record_progress("job-1", "snapshot", "edge-remote")
     elapsed = time.monotonic() - started
     lock.release()
 
@@ -92,7 +92,7 @@ def test_subscribers_are_removed_on_unsubscribe() -> None:
     assert hub.subscriber_count() == 1
     hub.remove_subscriber(id(connection))
     assert hub.subscriber_count() == 0
-    hub.record_progress("job-1", "ignored")
+    hub.record_progress("job-1", "ignored", "edge-remote")
     assert connection.sent == []
 
 

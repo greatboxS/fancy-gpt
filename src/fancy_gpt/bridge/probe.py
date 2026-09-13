@@ -80,7 +80,9 @@ def send_job_cancel(
         return bool(result.get("accepted"))
 
 
-def fetch_job_progress(endpoint: str, token: str, job_id: str, *, open_timeout_s: float = 1.0) -> dict | None:
+def fetch_job_progress(
+    endpoint: str, token: str, tunnel_id: str, job_id: str, *, open_timeout_s: float = 1.0
+) -> dict | None:
     """Return the latest in-flight text for `job_id`, or None if no progress recorded yet.
 
     Uses its own short-lived connection so it never contends with the
@@ -93,7 +95,7 @@ def fetch_job_progress(endpoint: str, token: str, job_id: str, *, open_timeout_s
         ack = loads(connection.recv(timeout=open_timeout_s))
         if ack.get("type") != "hello_ack":
             raise RuntimeError(f"bridge refused progress controller: {ack}")
-        connection.send(dumps({"type": "progress", "job_id": job_id}))
+        connection.send(dumps({"type": "progress", "tunnel_id": tunnel_id, "job_id": job_id}))
         result = loads(connection.recv(timeout=open_timeout_s))
         if result.get("type") != "progress_result":
             raise RuntimeError(f"unexpected bridge progress response: {result}")

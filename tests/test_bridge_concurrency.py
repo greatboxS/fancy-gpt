@@ -250,7 +250,26 @@ def test_progress_never_crosses_tunnels() -> None:
     assert len(edge.sent) == 1, "the owning tunnel's subscriber receives it"
     assert chrome.sent == [], "another tunnel's subscriber must never see it"
     # It is still stored for whoever polls for it.
-    assert hub.get_progress("job-1")["text"] == "partial answer"
+    assert hub.get_progress("edge-remote", "job-1")["text"] == "partial answer"
+    assert hub.get_progress("chrome-remote", "job-1") is None
+
+
+def test_empty_tunnel_cannot_subscribe_to_every_progress_feed() -> None:
+    from fancy_gpt.bridge.server import BridgeHub
+
+    hub = BridgeHub(token="t")
+    with pytest.raises(ValueError, match="exact tunnel id"):
+        hub.add_subscriber(FakeConnection(), "")
+
+
+def test_same_job_id_is_isolated_in_polled_progress() -> None:
+    from fancy_gpt.bridge.server import BridgeHub
+
+    hub = BridgeHub(token="t")
+    hub.record_progress("same-job", "edge secret", "edge-remote")
+    hub.record_progress("same-job", "chrome secret", "chrome-remote")
+    assert hub.get_progress("edge-remote", "same-job")["text"] == "edge secret"
+    assert hub.get_progress("chrome-remote", "same-job")["text"] == "chrome secret"
 
 
 def test_a_cancel_is_answered_by_the_browser_not_acknowledged_blind() -> None:
@@ -261,9 +280,10 @@ def test_a_cancel_is_answered_by_the_browser_not_acknowledged_blind() -> None:
     def responder() -> None:
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
-            if "job-x" in worker.control_pending:
+            if worker.control_pending:
+                control_id = next(iter(worker.control_pending))
                 worker.dispatch_control(
-                    {"type": "cancel_result", "job_id": "job-x", "accepted": False,
+                    {"type": "cancel_result", "job_id": "job-x", "control_id": control_id, "accepted": False,
                      "reason": "no such job is running"}
                 )
                 return

@@ -192,7 +192,9 @@ ext.runtime.onConnect.addListener(port => {
 async function cancelJob(message) {
   const jobId = String(message.job_id ?? "");
   const reply = (accepted, reason) => {
-    try { globalThis.FancyGPTTransport.send({type: "cancel_result", job_id: jobId, accepted, reason}); }
+    try { globalThis.FancyGPTTransport.send({
+      type: "cancel_result", job_id: jobId, control_id: message.control_id, accepted, reason
+    }); }
     catch (_) {}
   };
   const entry = activeJobs.get(jobId);
@@ -222,12 +224,21 @@ async function executeJob(job) {
     const config = await getConfig();
     // Claimed before the tab exists: otherwise another job finishing in this
     // moment sees an idle window and closes it while this tab is being created.
-    activeJobs.set(job.job_id, {tabId: null, epoch: Number(job.generation_epoch ?? 0), cancelled: false});
+    const entry = {tabId: null, epoch: Number(job.generation_epoch ?? 0), cancelled: false};
+    activeJobs.set(job.job_id, entry);
     if (taskWindowIdleTimer != null) { clearTimeout(taskWindowIdleTimer); taskWindowIdleTimer = null; }
     tab = config.separateTaskWindow
       ? await taskWindowFor(taskUrl)
       : await ext.tabs.create({url: taskUrl, active: false});
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
+    entry.tabId = tab.id;
+    if (entry.cancelled) {
+      globalThis.FancyGPTTransport.send({
+        type: "job_cancelled", job_id: job.job_id, text: "", stopped_generation: false,
+        conversation_id: null, reason: "cancelled before the tab was ready"
+      });
+      return;
+    }
     if (job.operation === "site.health") {
       const health = await sendToContentOrTabClose(tab.id, {type: "fancy_site_health", site});
       const payload = health ?? {ok: false, reason: "site-health-no-response"};
@@ -237,7 +248,6 @@ async function executeJob(job) {
       });
       return;
     }
-    activeJobs.set(job.job_id, {tabId: tab.id, epoch: Number(job.generation_epoch ?? 0), cancelled: false});
     const result = await sendToContentOrTabClose(tab.id, {
       type: "fancy_execute_turn",
       site,

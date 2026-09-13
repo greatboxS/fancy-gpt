@@ -216,6 +216,11 @@
      * ends at all.
      */
     const idleLimitMs = Math.max(15000, Number(options?.idleTimeoutMs ?? 90000));
+    // Counted so a stall can say whether the unthrottled clock was reaching us
+    // at all. If a turn stalls with zero ticks, the clock is the fault; if it
+    // stalls despite ticks, the fault is in what we do when we wake.
+    let tickCount = 0;
+    let wakeCount = 0;
     const hardDeadline = Date.now() + timeoutMs;
     let lastActivityAt = Date.now();
     let lastSeenText = null;
@@ -241,7 +246,7 @@
     const activity = createActivityWaiter();
     // A tick pushed from the background worker is an unthrottled clock: a reply
     // that has finished produces no more mutations to wake us with.
-    if (options?.onTick) options.onTick(activity.notify);
+    if (options?.onTick) options.onTick(() => { tickCount += 1; activity.notify(); });
     const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const candidates = [];
@@ -321,6 +326,7 @@
         }
       }
       // Woken by a mutation or a background tick; the delay is only a floor.
+      wakeCount += 1;
       await activity.wait(500);
     }
     release();
@@ -348,6 +354,9 @@
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
       generating: isGenerating(),
       candidatePending: gate.pending,
+      ticksReceived: tickCount,
+      loopIterations: wakeCount,
+      idleSeconds: idleFor,
     }));
   }
 

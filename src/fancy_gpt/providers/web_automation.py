@@ -42,6 +42,7 @@ class ChatGPTWebAutomationProvider:
         #: Bridge turn id of the turn currently in flight, so an out-of-band
         #: cancel can name it while execute() is still blocked.
         self.active_turn_id: str | None = None
+        self.active_generation_epoch: int = 0
         self._pushed_progress_turn: str | None = None
         #: How partial output is being obtained, and why if it degraded.
         self.progress_mode: str = "none"
@@ -112,8 +113,10 @@ class ChatGPTWebAutomationProvider:
             conversation_id=request.metadata.get("conversation_id"),
             conversation_mode=request.metadata.get("conversation_mode", "temporary"),
             site=site,
+            generation_epoch=int(request.metadata.get("generation_epoch", 0)),
         )
         self.active_turn_id = turn.turn_id
+        self.active_generation_epoch = turn.generation_epoch
         poller = self._start_progress_poller(turn.turn_id, on_progress)
         try:
             self.driver.submit(turn, request.prompt)
@@ -130,6 +133,7 @@ class ChatGPTWebAutomationProvider:
             )
         finally:
             self.active_turn_id = None
+            self.active_generation_epoch = 0
             if poller is not None:
                 poller.stop()
             if self._pushed_progress_turn is not None:

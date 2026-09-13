@@ -131,7 +131,7 @@ class _DistinctConversationDriver:
     def health_check(self) -> None:
         return None
 
-    def begin_turn(self, *, request_id, stage, conversation_id=None, conversation_mode="temporary", site=None):
+    def begin_turn(self, *, request_id, stage, conversation_id=None, conversation_mode="temporary", site=None, generation_epoch=0):
         self._counter += 1
         self.begin_turn_calls.append({"stage": stage, "conversation_id": conversation_id, "mode": conversation_mode})
         resolved = conversation_id or f"auto-conv-{self._counter}"

@@ -31,6 +31,7 @@ class _DriverWithProgress:
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
         site=None,
+        generation_epoch: int = 0,
     ) -> BrowserTurn:
         return BrowserTurn(turn_id=f"t-{stage}", request_id=request_id, stage=stage)
 

@@ -189,6 +189,17 @@ def test_cancellation_is_wired_through_the_exported_extension(tmp_path: Path) ->
     assert "cancel names a different generation" in background
     # Cancellation is reported distinctly from a normal answer.
     assert '"job_cancelled"' in background
+    # Cancelling while tabs.create() is awaiting must survive setup. Replacing
+    # the map entry after that await used to erase the cancellation after it had
+    # already been acknowledged.
+    assert "const entry = {tabId: null" in background
+    assert "entry.tabId = tab.id" in background
+    after_tab_creation = background.index("entry.tabId = tab.id")
+    assert background.index("if (entry.cancelled)", after_tab_creation) < background.index(
+        'type: "fancy_execute_turn"', after_tab_creation
+    )
+    # Control replies are correlated independently from the job's terminal reply.
+    assert "control_id: message.control_id" in background
 
     assert '"fancy_cancel_turn"' in content
     assert "isCancelled:" in content

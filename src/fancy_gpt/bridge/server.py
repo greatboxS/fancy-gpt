@@ -34,6 +34,7 @@ class BrowserWorker:
     send_lock: threading.Lock = field(default_factory=threading.Lock)
     request_lock: threading.Lock = field(default_factory=threading.Lock)
     pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
+    job_tunnels: dict[str, str] = field(default_factory=dict)
     #: Replies to control messages (cancel), kept apart from job replies so
     #: a control round trip can never consume a turn's own response.
     control_pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
@@ -62,6 +63,7 @@ class BrowserWorker:
             if job_id in self.pending:
                 raise ValueError(f"job {job_id} is already in flight")
             self.pending[job_id] = response_queue
+            self.job_tunnels[job_id] = str(message.get("tunnel_id", ""))
             self.jobs_started += 1
         try:
             self.send(message)
@@ -84,6 +86,7 @@ class BrowserWorker:
         finally:
             with self.request_lock:
                 self.pending.pop(job_id, None)
+                self.job_tunnels.pop(job_id, None)
 
     def send_control(self, message: dict[str, Any]) -> None:
         """Fire-and-forget message to the worker, outside any job's reply path."""
@@ -98,9 +101,12 @@ class BrowserWorker:
 
         Returns None if the worker does not answer in time.
         """
-        control_id = str(message.get("job_id", ""))
+        control_id = str(message.get("control_id") or uuid.uuid4().hex)
+        message = {**message, "control_id": control_id}
         reply: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
         with self.request_lock:
+            if control_id in self.control_pending:
+                raise ValueError(f"control request {control_id} is already in flight")
             self.control_pending[control_id] = reply
         try:
             self.send(message)
@@ -112,7 +118,7 @@ class BrowserWorker:
                 self.control_pending.pop(control_id, None)
 
     def dispatch_control(self, message: dict[str, Any]) -> None:
-        control_id = str(message.get("job_id", ""))
+        control_id = str(message.get("control_id", ""))
         with self.request_lock:
             target = self.control_pending.get(control_id)
         if target is not None:
@@ -146,7 +152,7 @@ class BridgeHub:
         self._total_jobs_succeeded = 0
         self._total_jobs_failed = 0
         self._total_probes = 0
-        self._progress: dict[str, tuple[float, str]] = {}
+        self._progress: dict[tuple[str, str], tuple[float, str]] = {}
         self._progress_cap = 200
         # Controllers that asked to be pushed progress instead of polling
         # for it. Each carries its own send lock, because a push happens on
@@ -169,7 +175,7 @@ class BridgeHub:
                 worker.alive = False
 
     def register(self, worker: BrowserWorker) -> None:
-        if not worker.tunnel_ids:
+        if not worker.tunnel_ids or any(not item for item in worker.tunnel_ids):
             raise ValueError("browser worker must register at least one exact tunnel id")
         if "*" in worker.tunnel_ids:
             raise ValueError("wildcard tunnel registration is forbidden")
@@ -193,6 +199,8 @@ class BridgeHub:
                 self._total_jobs_failed += 1
 
     def add_subscriber(self, connection: Any, tunnel_id: str) -> int:
+        if not tunnel_id:
+            raise ValueError("progress subscription requires an exact tunnel id")
         key = id(connection)
         with self._lock:
             self._subscribers[key] = (connection, threading.Lock(), tunnel_id)
@@ -206,9 +214,12 @@ class BridgeHub:
         with self._lock:
             return len(self._subscribers)
 
-    def record_progress(self, job_id: str, text: str, tunnel_id: str = "") -> None:
+    def record_progress(self, job_id: str, text: str, tunnel_id: str) -> None:
+        if not tunnel_id:
+            return
+        progress_key = (tunnel_id, job_id)
         with self._lock:
-            self._progress[job_id] = (time.time(), text)
+            self._progress[progress_key] = (time.time(), text)
             if len(self._progress) > self._progress_cap:
                 oldest = min(self._progress, key=lambda key: self._progress[key][0])
                 self._progress.pop(oldest, None)
@@ -224,7 +235,7 @@ class BridgeHub:
             # the client to discard messages for other jobs is not
             # confidentiality: it leaves the server handing one caller another
             # caller's partial output.
-            if tunnel_id and subscriber_tunnel and subscriber_tunnel != tunnel_id:
+            if subscriber_tunnel != tunnel_id:
                 continue
             try:
                 if lock.acquire(timeout=0.05):
@@ -235,17 +246,17 @@ class BridgeHub:
             except Exception:
                 self.remove_subscriber(key)
 
-    def get_progress(self, job_id: str) -> dict[str, Any] | None:
+    def get_progress(self, tunnel_id: str, job_id: str) -> dict[str, Any] | None:
         with self._lock:
-            entry = self._progress.get(job_id)
+            entry = self._progress.get((tunnel_id, job_id))
         if entry is None:
             return None
         updated_at, text = entry
         return {"job_id": job_id, "text": text, "updated_at": updated_at}
 
-    def clear_progress(self, job_id: str) -> None:
+    def clear_progress(self, tunnel_id: str, job_id: str) -> None:
         with self._lock:
-            self._progress.pop(job_id, None)
+            self._progress.pop((tunnel_id, job_id), None)
 
     def unregister(self, worker: BrowserWorker) -> None:
         worker.alive = False
@@ -367,7 +378,8 @@ class BridgeServer:
                     if job_id:
                         # Attribute progress to the tunnel it came from, so it
                         # is only ever delivered to subscribers of that tunnel.
-                        origin = next(iter(sorted(worker.tunnel_ids)), "")
+                        with worker.request_lock:
+                            origin = worker.job_tunnels.get(job_id, "")
                         self.hub.record_progress(job_id, str(message.get("text", "")), origin)
         except Exception:
             pass
@@ -425,7 +437,7 @@ class BridgeServer:
                     response = {"type": "job_error", "job_id": message.get("job_id"), "error": str(exc)}
                     self.hub.record_job_result(False)
                 finally:
-                    self.hub.clear_progress(str(message.get("job_id", "")))
+                    self.hub.clear_progress(tunnel_id, str(message.get("job_id", "")))
                 connection.send(dumps(response))
             elif msg_type == "workers":
                 connection.send(dumps({"type": "workers_result", "workers": self.hub.snapshot()}))
@@ -436,6 +448,9 @@ class BridgeServer:
                 # blocking; pushes are written from the worker's thread under
                 # this subscriber's own lock.
                 tunnel_id = str(message.get("tunnel_id", ""))
+                if not tunnel_id:
+                    connection.send(dumps({"type": "subscribe_result", "accepted": False, "reason": "tunnel_id is required"}))
+                    continue
                 subscriber_key = self.hub.add_subscriber(connection, tunnel_id)
                 connection.send(dumps({"type": "subscribe_result", "accepted": True}))
             elif msg_type == "cancel":
@@ -454,6 +469,7 @@ class BridgeServer:
                 answer = worker.request_control({
                     "type": "cancel",
                     "job_id": job_id,
+                    "control_id": uuid.uuid4().hex,
                     "generation_epoch": message.get("generation_epoch", 0),
                     "reason": str(message.get("reason", "cancelled")),
                 })
@@ -469,8 +485,9 @@ class BridgeServer:
                         "reason": str(answer.get("reason", "")),
                     }))
             elif msg_type == "progress":
+                tunnel_id = str(message.get("tunnel_id", ""))
                 job_id = str(message.get("job_id", ""))
-                progress = self.hub.get_progress(job_id)
+                progress = self.hub.get_progress(tunnel_id, job_id) if tunnel_id else None
                 connection.send(dumps({"type": "progress_result", "job_id": job_id, "progress": progress}))
             else:
                 connection.send(dumps({"type": "error", "error": f"unsupported controller message: {msg_type}"}))

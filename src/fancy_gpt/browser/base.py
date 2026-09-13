@@ -20,6 +20,7 @@ class BrowserTurn:
     # Which site should answer this turn. A driver that reaches only one site
     # ignores it; the bridge driver routes on it.
     site: str | None = None
+    generation_epoch: int = 0
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class BrowserDriver(Protocol):
         conversation_id: str | None = None,
         conversation_mode: str = "temporary",
         site: str | None = None,
+        generation_epoch: int = 0,
     ) -> BrowserTurn:
         """Create/lease a task-bound browser surface for a turn.
 
