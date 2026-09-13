@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+
 import hashlib
 import inspect
 import json
@@ -632,7 +634,12 @@ class GatewayService:
         self._cancel_guard = threading.Lock()
         self._cancel_tokens: dict[str, CancelToken] = {}
         self._delta_streams: dict[str, TextDeltaStream] = {}
-        self._traces: dict[str, TurnTrace] = {}
+        # Bounded, and ordered so the oldest goes first. A gateway is a
+        # long-lived server: an unbounded dict of traces, each holding up to
+        # 500 events, grows for as long as the process runs. Every trace is
+        # also appended to its file as it happens, so what is evicted here is
+        # still on disk for anyone diagnosing a past turn.
+        self._traces: OrderedDict[str, TurnTrace] = OrderedDict()
 
     # -- routing -------------------------------------------------------------
 
@@ -742,6 +749,16 @@ class GatewayService:
 
     # -- main entry ----------------------------------------------------------
 
+    # Traces kept in memory for turns that may still be asked about. Older ones
+    # are read back from their files instead.
+    TRACE_CACHE_SIZE = 256
+
+    def _remember_trace(self, response_id: str, trace: TurnTrace) -> None:
+        self._traces[response_id] = trace
+        self._traces.move_to_end(response_id)
+        while len(self._traces) > self.TRACE_CACHE_SIZE:
+            self._traces.popitem(last=False)
+
     def execute(
         self,
         turn: NormalizedTurn,
@@ -768,7 +785,7 @@ class GatewayService:
         attempt = 1
         retry_of: str | None = None
         trace = TurnTrace(response_id, self.requests.request_dir(response_id) / "trace.jsonl")
-        self._traces[response_id] = trace
+        self._remember_trace(response_id, trace)
         trace.event(
             TraceStage.ROUTE, "resolved", f"{turn.protocol} -> {site}",
             protocol=turn.protocol, model=turn.model, site=site,
@@ -865,19 +882,27 @@ class GatewayService:
             with self._cancellation(response_id, token), self._admit(client_key):
                 if on_start is not None:
                     on_start(response_id)
-                return self._run_turn(
-                    turn=turn,
-                    site=site,
-                    session_id=session_id,
-                    response_id=response_id,
-                    previous=previous,
-                    record=record,
-                    token=token,
-                    tunnel_id=tunnel_id,
-                    key=key,
-                    client_key=client_key,
-                    on_delta=on_delta,
-                )
+                try:
+                    return self._run_turn(
+                        turn=turn,
+                        site=site,
+                        session_id=session_id,
+                        response_id=response_id,
+                        previous=previous,
+                        record=record,
+                        token=token,
+                        tunnel_id=tunnel_id,
+                        key=key,
+                        client_key=client_key,
+                        on_delta=on_delta,
+                    )
+                finally:
+                    # However the turn ended. It used to be released only on the
+                    # way out of a successful one, so every cancelled, failed,
+                    # rejected or malformed turn left its stream -- holding the
+                    # whole text emitted so far -- in the dict for the life of
+                    # the server.
+                    self._delta_streams.pop(response_id, None)
         except GatewayCancelled as exc:
             trace.event(TraceStage.TERMINAL, "cancelled", exc.reason)
             self.metrics.record("cancelled")
@@ -1105,8 +1130,6 @@ class GatewayService:
                 remainder = ""
             if remainder:
                 on_delta(remainder)
-        self._delta_streams.pop(response_id, None)
-
         result = GatewayResult(
             response_id=response_id,
             session_id=session_id,

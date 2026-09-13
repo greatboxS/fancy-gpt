@@ -12,9 +12,6 @@ const DEFAULTS = {
   nativeHost: "com.fancygpt.bridge",
   autoConnect: true,
   reconnectIntervalMs: 2000,
-  // Run task tabs in their own minimized window instead of the window you are
-  // working in, so automation never appears in your tab strip.
-  separateTaskWindow: true
 };
 
 let taskWindowId = null;
@@ -288,13 +285,16 @@ async function executeJob(job) {
     const entry = {tabId: null, epoch: Number(job.generation_epoch ?? 0), cancelled: false};
     activeJobs.set(job.job_id, entry);
     if (taskWindowIdleTimer != null) { clearTimeout(taskWindowIdleTimer); taskWindowIdleTimer = null; }
-    tab = config.separateTaskWindow
-      ? await taskWindowFor(taskUrl)
-      // Active for the same reason: a background tab is a hidden document, and
-      // a hidden document stops being drawn part-way through the reply. Sharing
-      // the user's window therefore cannot stay out of their way -- which is an
-      // argument for the separate window, not for reading a frozen page.
-      : await ext.tabs.create({url: taskUrl, active: true});
+    /* Always the extension's own window, never the one you are working in.
+     *
+     * Driving a page means the page has to be drawn, and a tab that is not the
+     * active one in its window is a hidden document that stops being drawn
+     * mid-reply. Sharing the user's window therefore cannot be done quietly:
+     * it would have to keep taking over the tab in front of them. The separate
+     * window is what makes that cost affordable -- it is the automation's own
+     * space, reused for as long as work keeps arriving.
+     */
+    tab = await taskWindowFor(taskUrl);
     if (!tab || tab.id == null) throw new Error("failed to create site task tab");
     entry.tabId = tab.id;
     if (entry.cancelled) {

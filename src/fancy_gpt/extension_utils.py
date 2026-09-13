@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from importlib.resources import files
 from pathlib import Path
 
@@ -22,6 +23,32 @@ _BUILD_PLACEHOLDER = "__FANCYGPT_ADAPTER_BUILD__"
 # The scripts that together decide how a page is driven. A change to any of them
 # changes how the browser behaves, so all of them define the build.
 ADAPTER_SOURCES = ("background.js", "bridge_transport.js", "site_kit.js", "content.js")
+
+
+# The two values `export_extension` patches per browser. They say which browser
+# a bundle was built for, never how a page is driven, so they are normalised
+# out of the build id.
+_PER_BROWSER_DEFAULTS = (
+    re.compile(r'tunnelId:\s*"[^"]*"'),
+    re.compile(r'browserName:\s*"[^"]*"'),
+)
+
+
+def _normalised_for_build_id(source: str) -> str:
+    """Strip everything that identifies the bundle rather than the adapter.
+
+    The id exists to answer one question: is the browser running this build of
+    the code that drives the page? Hashing the per-browser defaults answered a
+    different one -- was this bundle exported for Chrome -- and the runtime
+    compared every browser against the Chromium value. Firefox reports its own
+    id, could never match, and every Firefox turn was refused with a message
+    telling the user to reload an extension that was already current. The only
+    way past it was to disable the check.
+    """
+    text = source.replace(_BUILD_PLACEHOLDER, "")
+    for pattern in _PER_BROWSER_DEFAULTS:
+        text = pattern.sub("<per-browser-default>", text)
+    return text
 
 
 def _adapter_source_names(family: str = "chromium") -> list[str]:
@@ -67,7 +94,8 @@ def adapter_build_id(family: str = "chromium") -> str:
     root = files("fancy_gpt").joinpath(f"extension_assets/{family}")
     for name in _adapter_source_names(family):
         digest.update(name.encode("utf-8"))
-        digest.update(root.joinpath(name).read_text(encoding="utf-8").replace(_BUILD_PLACEHOLDER, "").encode("utf-8"))
+        source = root.joinpath(name).read_text(encoding="utf-8")
+        digest.update(_normalised_for_build_id(source).encode("utf-8"))
     return digest.hexdigest()[:12]
 
 

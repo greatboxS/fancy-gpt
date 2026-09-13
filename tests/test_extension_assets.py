@@ -118,6 +118,39 @@ def test_export_stamps_a_build_id_the_adapter_can_report(tmp_path: Path) -> None
         assert "kit.build" in source
 
 
+def test_the_build_id_is_the_same_for_every_browser(tmp_path: Path) -> None:
+    """Otherwise the drift check locks out every browser but Chromium.
+
+    The runtime compares whatever the browser reports against one expected id.
+    While that id was computed per family, Firefox reported its own, could
+    never match, and every Firefox turn was refused with a message telling the
+    user to reload an extension that was already current -- with disabling the
+    check as the only way past it.
+    """
+    from fancy_gpt.extension_utils import adapter_build_id
+
+    ids = {family: adapter_build_id(family) for family in ("chromium", "firefox")}
+    assert len(set(ids.values())) == 1, f"one adapter surface, one id: {ids}"
+    # And what each browser actually ships says the same.
+    stamped = {
+        browser: (export_extension(browser, tmp_path / browser) / "site_kit.js").read_text(encoding="utf-8")
+        for browser in ("chrome", "edge", "firefox")
+    }
+    for browser, text in stamped.items():
+        assert f'BUILD = "{adapter_build_id()}"' in text, f"{browser} stamps a different build"
+
+
+def test_a_real_adapter_change_still_changes_the_build_id() -> None:
+    # Normalising the per-browser defaults must not blunt the check itself.
+    from fancy_gpt.extension_utils import _normalised_for_build_id
+
+    base = 'tunnelId: "chrome-remote",\nbrowserName: "chrome",\nconst SELECTORS = {a: 1};'
+    other_browser = 'tunnelId: "firefox-remote",\nbrowserName: "firefox",\nconst SELECTORS = {a: 1};'
+    real_change = 'tunnelId: "chrome-remote",\nbrowserName: "chrome",\nconst SELECTORS = {a: 2};'
+    assert _normalised_for_build_id(base) == _normalised_for_build_id(other_browser)
+    assert _normalised_for_build_id(base) != _normalised_for_build_id(real_change)
+
+
 def test_build_id_covers_every_adapter_source() -> None:
     # Adding or changing any site adapter must produce a new id, or a browser
     # left on the previous build would still claim to be current.
@@ -179,13 +212,18 @@ def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
     finished while holding a fragment and stalled until its deadline.
     """
     background = (export_extension("edge", tmp_path / "edge-background") / "background.js").read_text(encoding="utf-8")
-    assert "separateTaskWindow: true" in background
+    # The automation always gets its own window: a tab in the user's window
+    # would have to keep taking over the one in front of them, because a tab
+    # that is not active is a hidden document that stops being drawn.
+    assert "separateTaskWindow" not in background
+    assert "tab = await taskWindowFor(taskUrl)" in background
     # Its own window, still out of the way -- but never minimized.
     assert 'state: "minimized"' not in background
     assert 'state: "normal"' in background
-    # And never a background tab, on any of the paths that can open one.
+    # And never a background tab. There is one path that opens one now, since
+    # the shared-window mode is gone, and it opens it active.
     assert "active: false" not in background
-    assert background.count("active: true") >= 2
+    assert "active: true" in background
 
 
 def test_the_task_window_survives_the_job_that_created_it(tmp_path: Path) -> None:
