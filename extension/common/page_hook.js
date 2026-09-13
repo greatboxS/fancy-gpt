@@ -180,6 +180,52 @@
     return result;
   };
 
+  /* Sites that answer over XMLHttpRequest rather than fetch.
+   *
+   * Gemini reported nothing at all while ChatGPT reported eight requests on
+   * the same turn, which is the signature of watching the wrong transport
+   * rather than of a quiet site. Google's batchexecute endpoints -- Gemini's
+   * StreamGenerate among them -- are driven through XHR, and a hook that
+   * wraps only fetch cannot see them.
+   *
+   * Shapes only, as with sockets: how much arrived, how long it took, what it
+   * was. Nothing is carried out of the page until this site has been measured
+   * and given a decoder.
+   */
+  const NativeXhrOpen = window.XMLHttpRequest?.prototype?.open;
+  const NativeXhrSend = window.XMLHttpRequest?.prototype?.send;
+  if (typeof NativeXhrOpen === "function" && typeof NativeXhrSend === "function") {
+    window.XMLHttpRequest.prototype.open = function fancyGptObservedOpen(method, url) {
+      try {
+        this.__fancyGpt = {method: String(method || "GET").toUpperCase(), url: String(url || "")};
+      } catch (_) {}
+      return NativeXhrOpen.apply(this, arguments);
+    };
+    window.XMLHttpRequest.prototype.send = function fancyGptObservedSend() {
+      try {
+        const watched = this.__fancyGpt;
+        if (watched && watched.method === "POST") {
+          const startedAt = Date.now();
+          this.addEventListener("loadend", () => {
+            let length = 0;
+            try { length = (this.responseText ?? "").length; } catch (_) {}
+            report({
+              kind: "xhr",
+              path: shapeOfPath(watched.url),
+              status: this.status,
+              contentType: (this.getResponseHeader?.("content-type")) || "",
+              chars: length,
+              totalMs: Date.now() - startedAt,
+            });
+          });
+        }
+      } catch (_) {
+        // Observation must never change what the page gets back.
+      }
+      return NativeXhrSend.apply(this, arguments);
+    };
+  }
+
   /* Sites that stream over a socket rather than a response body.
    *
    * Not every site answers through fetch. Microsoft Copilot carries its reply

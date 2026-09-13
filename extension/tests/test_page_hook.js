@@ -42,6 +42,15 @@ function runHook({response}) {
     JSON,
     Promise,
     location: {href: "https://chatgpt.com/", origin: "https://chatgpt.com"},
+    XMLHttpRequest: class FakeXhr {
+      constructor() { this.status = 200; this.responseText = ""; this.listeners = {}; }
+      open(method, url) { this.method = method; this.url = url; }
+      send() { FakeXhr.sent.push(this); }
+      addEventListener(type, handler) { (this.listeners[type] ??= []).push(handler); }
+      getResponseHeader() { return "application/json"; }
+      finish(text) { this.responseText = text; for (const h of this.listeners.loadend ?? []) h(); }
+      static sent = [];
+    },
     WebSocket: class FakeSocket {
       constructor(url) { this.url = url; this.listeners = {}; FakeSocket.made.push(this); }
       addEventListener(type, handler) { (this.listeners[type] ??= []).push(handler); }
@@ -129,6 +138,23 @@ async function main() {
     assertEqual(seen.frames, 2, "frames are counted");
     assert(!seen.path.includes("abc123def456"), "and identifiers still never leave the page");
     assert(!JSON.stringify(seen).includes("frame one"), "frames are measured, not carried out");
+  });
+
+  await test("a site that answers over XHR is not invisible", async () => {
+    // Gemini reported nothing while ChatGPT reported eight requests on the same
+    // turn: the signature of watching the wrong transport, not of a quiet site.
+    // Google's batchexecute endpoints are driven through XHR.
+    const {context, posted} = runHook({response: sseResponse(["{}"])});
+    const request = new context.window.XMLHttpRequest();
+    request.open("POST", "https://gemini.google.com/_/BardChatUi/data/assistant/StreamGenerate?rt=c");
+    request.send("f.req=...");
+    request.finish(")]}'\n\n[[\"wrb.fr\",null,\"payload\"]]");
+
+    const seen = posted.find(item => item.kind === "xhr");
+    assert(seen, "its traffic must show up as something");
+    assert(seen.path.includes("StreamGenerate"), "and be identifiable by endpoint");
+    assert(seen.chars > 0, "with the size that arrived");
+    assert(!JSON.stringify(seen).includes("wrb.fr"), "measured, not carried out of the page");
   });
 
   report();

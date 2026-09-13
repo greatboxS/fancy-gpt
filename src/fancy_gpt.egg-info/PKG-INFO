@@ -95,6 +95,40 @@ Evidence/research validation
 
 The planner researches **what must be investigated, which online/local tools are needed, which sources should be preferred, and what evidence the final answer must contain**. It is explicitly forbidden from deciding the final technical answer.
 
+## How a reply is read
+
+A browser stops painting a document it is not showing. A reply read from the
+rendered page therefore freezes part-written whenever the automation window is
+not in front — measured on live turns at 21 to 61 characters of a 1294
+character answer, with the site's own stop control frozen alongside it, so the
+turn looked finished while holding a fragment.
+
+So a turn is read two ways at once.
+
+- **From the page.** The adapter reads the rendered reply, reinstating the line
+  structure a layout pass would have produced and keeping a fenced block's
+  indentation byte for byte, because the code-change contract matches it
+  literally. This is the source of truth today.
+- **From the stream.** A content script running in the page's own world
+  captures the events the site streamed and forwards them unread; the runtime
+  decodes them. The network does not stop in a hidden tab, only the painting
+  does.
+
+Both run on every turn and the two readings are compared, so the page path
+stays a fallback that is known to work rather than one discovered to be
+unreachable later. A decoder that meets an operation it does not recognise, or
+a fragment it cannot place, marks its result untrusted and the page answers
+instead: refusing costs a fallback, guessing costs a wrong answer that nothing
+catches.
+
+Decoding lives in `src/fancy_gpt/stream_decoding.py`, never in the extension.
+It is the part that changes when a site changes, and a decoder inside an
+extension can only be corrected by asking every user to reload their browser.
+
+Adding a site follows [docs/ADDING_A_SITE.md](docs/ADDING_A_SITE.md), which is
+a loop of measure-then-write for the same reason: a reply format written from
+assumption yields text that reads correctly and is wrong.
+
 ## Tunnel architecture
 
 A tunnel is a validated composition:
