@@ -136,12 +136,29 @@ class StubDocument extends StubElement {
     super("document");
     this._document = this;
     this.observers = [];
+    this._listeners = {};
     this.body = new StubElement("body");
     this.body.parent = this;
     this.children.push(this.body);
   }
   _notifyObservers() { for (const observer of [...this.observers]) observer._fire(); }
   createRange() { return {selectNodeContents() {}}; }
+
+  /* Page visibility, because it decides whether a reply renders at all.
+   *
+   * A hidden document stops being painted, so a site that streams its reply
+   * into the DOM freezes it part-written. An adapter has to be able to see
+   * that, and a stub without it cannot test the difference. */
+  get visibilityState() { return this.hidden ? "hidden" : "visible"; }
+  hasFocus() { return !this.hidden; }
+  addEventListener(type, handler) { (this._listeners[type] ??= []).push(handler); }
+  removeEventListener(type, handler) {
+    this._listeners[type] = (this._listeners[type] ?? []).filter(item => item !== handler);
+  }
+  setVisibility(state) {
+    this.hidden = state === "hidden";
+    for (const handler of [...(this._listeners.visibilitychange ?? [])]) handler();
+  }
 }
 
 class StubMutationObserver {

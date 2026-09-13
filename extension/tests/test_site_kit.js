@@ -370,6 +370,22 @@ async function main() {
       "an unrecognised wrapper must not hide the answer: " + JSON.stringify(text));
   });
 
+  await test("visibility watcher remembers a document that went hidden", () => {
+    loadAdapters([]);
+    const watcher = globalThis.FancyGPTSiteKit.watchVisibility();
+    assertEqual(watcher.state.hiddenDuringTurn, false, "starts visible");
+    document.setVisibility("hidden");
+    document.setVisibility("visible");
+    // Visible again by the time anyone asks, but the turn still ran through a
+    // stretch where the page was not being painted -- which is the thing worth
+    // knowing when a reply comes back truncated.
+    assertEqual(watcher.state.visibility, "visible", "reports the current state");
+    assertEqual(watcher.state.hiddenDuringTurn, true, "and that it was hidden at some point");
+    watcher.stop();
+    document.setVisibility("hidden");
+    assertEqual(watcher.state.hiddenDuringTurn, true, "stop detaches without losing what it saw");
+  });
+
   report();
 }
 

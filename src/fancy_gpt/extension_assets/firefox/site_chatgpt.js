@@ -4,7 +4,7 @@
   // so a second adapter starts from what already works rather than repeating it.
   const kit = globalThis.FancyGPTSiteKit;
   const {firstVisible, waitFor, findButtonByText, setComposer, looksLikeCompleteJson, stopGeneration,
-         observeText, createCompletionGate, createActivityWaiter} = kit;
+         observeText, createCompletionGate, createActivityWaiter, watchVisibility} = kit;
 
   const SELECTORS = {
     composer: ["#prompt-textarea", "textarea", '[contenteditable="true"]'],
@@ -73,36 +73,12 @@
       .filter(Boolean);
   }
 
-  /* TEMPORARY PROBE -- remove once the stall is understood.
-   *
-   * Four live stalls reported a 25-45 character prefix while the finished
-   * reply stood on screen. Two causes remain and they need opposite fixes:
-   * the turn element holds the whole reply and our extraction loses it, or
-   * the element holds the prefix too. Reading the turn's raw textContent
-   * settles that, because it is the least clever thing that can be read: no
-   * selector, no walk, no judgement about what any subtree means.
-   *
-   * It is not the end state. Raw textContent has no line breaks, so a fenced
-   * `fancygpt:<id>` block would be unreadable -- which is exactly why the walk
-   * exists. Once the numbers say which cause is real, this goes away. */
-  // Tests set this to false to keep exercising the real extraction path.
-  const RAW_TEXT_PROBE = globalThis.FANCY_GPT_RAW_TEXT_PROBE === true;
-
   function assistantText(turnId) {
     const turns = [...document.querySelectorAll(SELECTORS.turns)].filter(el => el.getAttribute("data-turn-id") === turnId);
     if (turns.length !== 1) return null;
     const turn = turns[0];
     const {readLiveText} = globalThis.FancyGPTSiteKit;
     const role = turn.getAttribute("data-message-author-role");
-    if (RAW_TEXT_PROBE) {
-      // Still only assistant turns. Answering for the user's own turn as well
-      // makes the prompt look like a second new reply, and the turn is refused
-      // as ambiguous before it ever reads an answer.
-      const isAssistant = role === "assistant"
-        || SELECTORS.assistant.some(selector => turn.matches?.(selector) || turn.querySelector(selector));
-      if (!isAssistant) return null;
-      return (turn.textContent ?? "").trim() || null;
-    }
     if (role === "assistant") {
       for (const selector of SELECTORS.assistantContent) {
         // Every matching part, not just the first: ChatGPT splits one assistant
@@ -288,11 +264,14 @@
     let lastReported = null;
     const gate = createCompletionGate({stabilityMs: 1200});
     const activity = createActivityWaiter();
+    // A document that goes hidden stops being painted, and this site renders
+    // its reply progressively, so the turn has to be able to say that happened.
+    const visibility = watchVisibility();
     let maxEvaluateMs = 0;
     // A tick pushed from the background worker is an unthrottled clock: a reply
     // that has finished produces no more mutations to wake us with.
     if (options?.onTick) options.onTick(() => { tickCount += 1; activity.notify(); });
-    const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
+    const release = () => { activity.stop(); visibility.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const evaluateStartedAt = Date.now();
       /* A turn this job created, or an old one that only just finished drawing.
@@ -384,6 +363,7 @@
           const diagnostics = {
             ticksReceived: tickCount, loopIterations: wakeCount,
             maxEvaluateMs, waiter: activity.stats(), completionCandidateAgeMs: gate.candidateAgeMs,
+            pageState: visibility.state,
           };
           release();
           return {
@@ -408,65 +388,6 @@
       return Boolean(text) && (!baseline.has(id) || baseline.get(id) !== text);
     });
     const boundText = boundId != null ? assistantText(boundId) : null;
-    /* Where the text went, in shapes only.
-     *
-     * A stall whose bound turn holds far more text than the adapter extracted
-     * is an extraction bug, not a site that went quiet, and the two are
-     * indistinguishable from a character count alone. Selector strings are our
-     * own constants and the numbers are lengths, so no page content is
-     * reported. */
-    const boundTurnElement = boundId == null ? null
-      : [...document.querySelectorAll(SELECTORS.turns)]
-          .find(el => el.getAttribute("data-turn-id") === boundId) ?? null;
-    const extraction = boundTurnElement == null ? null : {
-      turnChars: (boundTurnElement.textContent ?? "").length,
-      bySelector: SELECTORS.assistantContent.map(selector => ({
-        selector,
-        matches: boundTurnElement.querySelectorAll(selector).length,
-        chars: [...boundTurnElement.querySelectorAll(selector)]
-          .map(node => (node.textContent ?? "").length),
-      })),
-    };
-    /* Where the reply actually lives.
-     *
-     * The bound turn held 15 characters of the 1155 on screen and no other
-     * turn counted as new, so the answer is not inside any [data-turn-id] at
-     * all and the turn selector is looking in the wrong place. Roles are the
-     * site's own constants ("user"/"assistant") and everything else is a
-     * length, so no page text is reported. */
-    const domShape = {
-      turns: document.querySelectorAll(SELECTORS.turns).length,
-      turnChars: [...document.querySelectorAll(SELECTORS.turns)].map(el => (el.textContent ?? "").length),
-      roles: [...document.querySelectorAll("[data-message-author-role]")].map(el => ({
-        role: el.getAttribute("data-message-author-role"),
-        chars: (el.textContent ?? "").length,
-        insideTurn: Boolean(el.closest?.(SELECTORS.turns)),
-      })),
-      articleChars: [...document.querySelectorAll("article")].map(el => (el.textContent ?? "").length),
-      markdownChars: [...document.querySelectorAll(".markdown")].map(el => (el.textContent ?? "").length),
-      mainChars: (document.querySelector("main")?.textContent ?? "").length,
-    };
-    /* What the site put there instead of an answer.
-     *
-     * The assistant turn holds 25 characters and generation has stopped, so
-     * whatever is in it is a status or a refusal, not a reply -- and the
-     * difference decides everything about the fix. Only a short text is
-     * sampled, and only the assistant's own: a real answer runs to thousands
-     * of characters and is never reported. */
-    /* What the page believes its own state to be.
-     *
-     * Every measurement so far is consistent with the document being hidden
-     * while it streams, but that has been inferred from the outside. These are
-     * the browser's own answers, which is what the fix has to be aimed at. */
-    const pageState = {
-      visibility: document.visibilityState,
-      hidden: document.hidden,
-      hasFocus: typeof document.hasFocus === "function" ? document.hasFocus() : null,
-    };
-    const SAMPLE_LIMIT = 200;
-    const shortAssistantSample = boundText != null && boundText.length <= SAMPLE_LIMIT
-      ? boundText
-      : null;
     const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
     const stallReason = Date.now() >= hardDeadline ? "absolute limit" : `no activity for ${idleFor}s`;
     throw new Error(`ChatGPT response stalled (${stallReason}); ` + JSON.stringify({
@@ -477,10 +398,7 @@
             .some(el => el.getAttribute("data-turn-id") === boundId)
         : null,
       boundTextChars: boundText == null ? null : boundText.length,
-      extraction,
-      domShape,
-      pageState,
-      shortAssistantSample,
+      pageState: visibility.state,
       boundTextComplete: boundText != null && looksLikeCompleteJson(boundText),
       newTurnCount: newTurns.length,
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,

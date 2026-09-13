@@ -232,6 +232,34 @@
     return chunks.join("").replace(/^\n+/, "").replace(/\s+$/, "");
   }
 
+  /* Watch whether the document stays visible for the whole turn.
+   *
+   * A hidden document stops being painted, and a site that renders its reply
+   * progressively then freezes it part-written -- the reply stops growing, the
+   * stop control stops disappearing, and the turn looks finished while holding
+   * a fragment. Creating the tab visible is not enough on its own, because a
+   * turn runs for a minute or more and the user will click elsewhere in it.
+   *
+   * This records the fact rather than fighting for focus, so a turn that went
+   * wrong this way says so instead of looking like a site that went quiet.
+   */
+  function watchVisibility() {
+    let everHidden = document.visibilityState === "hidden";
+    const onChange = () => { if (document.visibilityState === "hidden") everHidden = true; };
+    document.addEventListener("visibilitychange", onChange);
+    return {
+      stop() { try { document.removeEventListener("visibilitychange", onChange); } catch (_) {} },
+      get state() {
+        return {
+          visibility: document.visibilityState,
+          hiddenNow: document.hidden === true,
+          hiddenDuringTurn: everHidden,
+          hasFocus: typeof document.hasFocus === "function" ? document.hasFocus() : null,
+        };
+      },
+    };
+  }
+
   /* Decide when a streamed reply has settled.
    *
    * A site tells us it is streaming through its own stop control, so that signal
@@ -419,7 +447,7 @@
   }
 
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "8fd7f9a73c16";
+  const BUILD = "f1db47778170";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,
@@ -431,6 +459,7 @@
     setComposer,
     jsonSegment,
     readLiveText,
+    watchVisibility,
     looksLikeCompleteJson,
     createSettleTracker,
     stopGeneration,
