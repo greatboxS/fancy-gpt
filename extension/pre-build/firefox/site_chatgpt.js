@@ -114,8 +114,30 @@
       return turnIds().some(id => !baseline.has(id));
     };
 
+    /* Never submit a composer the user has typed into since we wrote to it.
+     *
+     * The automation window is meant to be untouched, but it is a real browser
+     * window and the user can reach it. Sending then would put their keystrokes
+     * into an automated turn, and put our prompt into their conversation.
+     * Trusted events are user input; synthetic ones are ours.
+     */
+    let userTouchedComposer = false;
+    const noteUserInput = event => { if (event && event.isTrusted) userTouchedComposer = true; };
+    for (const name of ["keydown", "paste", "input"]) {
+      try { target.addEventListener(name, noteUserInput, true); } catch (_) {}
+    }
+    const releaseComposerWatch = () => {
+      for (const name of ["keydown", "paste", "input"]) {
+        try { target.removeEventListener(name, noteUserInput, true); } catch (_) {}
+      }
+    };
+
     let accepted = false;
     for (let attempt = 0; attempt < 3 && !accepted; ++attempt) {
+      if (userTouchedComposer) {
+        releaseComposerWatch();
+        throw new Error("ChatGPT composer was edited by the user after the prompt was written; refusing to submit");
+      }
       // Cancelling while the page has not taken the prompt is the cleanest
       // possible cancellation: nothing was submitted, so there is nothing
       // uncertain about it.
@@ -138,13 +160,28 @@
         accepted = true;
       } catch (_) { /* try again */ }
     }
+    releaseComposerWatch();
     if (!accepted) {
       throw new Error(
         "ChatGPT did not accept the submitted prompt (composer still holds it): " + describeControls(target)
       );
     }
 
-    const deadline = Date.now() + timeoutMs;
+    /* Give up on inactivity, not on elapsed time.
+     *
+     * A fixed deadline is the wrong signal: a long reasoning turn can
+     * legitimately run past any constant, and killing it while the page is
+     * visibly still working reports a failure that did not happen. What
+     * actually indicates a stuck turn is the page doing nothing - no new text
+     * and no generating indicator - for a while.
+     *
+     * The absolute cap remains only as a backstop against a turn that never
+     * ends at all.
+     */
+    const idleLimitMs = Math.max(15000, Number(options?.idleTimeoutMs ?? 90000));
+    const hardDeadline = Date.now() + timeoutMs;
+    let lastActivityAt = Date.now();
+    let lastSeenText = null;
     let boundId = null;
     // Progress is reported by a DOM observer rather than by this loop, because
     // the loop's timer is throttled while the automation window is hidden.
@@ -169,7 +206,7 @@
     // that has finished produces no more mutations to wake us with.
     if (options?.onTick) options.onTick(activity.notify);
     const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
-    while (Date.now() < deadline) {
+    while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const candidates = [];
       for (const id of turnIds()) {
         if (baseline.has(id)) continue;
@@ -231,6 +268,12 @@
         // a tool phase and the text that follows. Treat any generating
         // indicator as still active.
         const active = Boolean(firstVisible(SELECTORS.stop));
+        // Either the reply growing or the site saying it is working counts as
+        // the turn being alive, and resets the idle clock.
+        if (active || text !== lastSeenText) {
+          lastActivityAt = Date.now();
+          lastSeenText = text;
+        }
         const complete = text != null && looksLikeCompleteJson(text);
         const settled = gate.observe({text, active, complete});
         if (settled) {
@@ -248,7 +291,9 @@
      * carries the user's content. */
     const newTurns = turnIds().filter(id => !baseline.has(id));
     const boundText = boundId != null ? assistantText(boundId) : null;
-    throw new Error("ChatGPT response timed out; " + JSON.stringify({
+    const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
+    const stallReason = Date.now() >= hardDeadline ? "absolute limit" : `no activity for ${idleFor}s`;
+    throw new Error(`ChatGPT response stalled (${stallReason}); ` + JSON.stringify({
       boundId: boundId != null ? "bound" : "unbound",
       boundTurnStillPresent: boundId != null
         ? document.querySelectorAll(SELECTORS.turns).length > 0 &&

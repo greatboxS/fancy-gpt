@@ -344,6 +344,45 @@ async function main() {
     assertEqual(result.responseIdentity, "turn-1", "a turn that is still there must keep its binding");
   });
 
+  // -- stalling is inactivity, not elapsed time ------------------------------
+  await test("a turn that is still generating is not killed by elapsed time", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const stop = stopControl();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+
+    // A long reasoning turn: the site keeps saying it is working, and produces
+    // no new text for longer than the idle limit would allow on its own.
+    const running = adapter.executeTurn("PROMPT-O", 20000, null, {idleTimeoutMs: 15000});
+    await replyAfterSend("turn-1", "Thinking");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    // Still generating, so the turn must still be alive.
+    let finished = false;
+    running.then(() => { finished = true; }, () => { finished = true; });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert(finished === false, "a turn the site says is still working must not be killed");
+
+    stop.remove();
+    const turn = document.querySelectorAll("[data-turn-id]")[0];
+    turn.setText(ENVELOPE);
+    const result = await running;
+    assertEqual(result.text, ENVELOPE, "it completes when the page actually finishes");
+  });
+
+  await test("a stalled turn reports how long it was inactive", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    // Nothing ever appears and nothing claims to be generating.
+    await rejects(
+      adapter.executeTurn("PROMPT-P", 30000, null, {idleTimeoutMs: 15000}),
+      /stalled|no activity/i,
+      "a stall must be reported as inactivity, with its diagnostic",
+    );
+  });
+
   report();
 }
 

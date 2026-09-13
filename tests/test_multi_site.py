@@ -309,3 +309,38 @@ def test_gemini_strips_site_chrome_from_the_reply(tmp_path: Path) -> None:
     assert "function readWithoutChrome(" in source
     for selector in ("button", "model-thoughts", "sources-list"):
         assert selector in source, f"{selector} must be excluded from the reply text"
+
+
+def test_a_turn_stalls_on_inactivity_not_on_elapsed_time(tmp_path: Path) -> None:
+    """A long reasoning turn can legitimately outrun any fixed deadline.
+
+    Killing it while the page is visibly still working reports a failure that
+    did not happen.
+    """
+    exported = export_extension("edge", tmp_path / "edge-idle")
+    for adapter in ("site_chatgpt.js", "site_gemini.js"):
+        source = (exported / adapter).read_text(encoding="utf-8")
+        assert "idleLimitMs" in source, f"{adapter} must bound inactivity, not elapsed time"
+        assert "lastActivityAt" in source
+        # The site saying it is working must count as being alive.
+        assert "if (active || text !== lastSeenText)" in source
+        # The absolute cap survives only as a backstop.
+        assert "hardDeadline" in source
+
+
+def test_the_adapter_reports_a_stall_before_the_bridge_gives_up(tmp_path: Path) -> None:
+    """Otherwise the bridge wins the race and reports a generic timeout."""
+    exported = export_extension("edge", tmp_path / "edge-margin")
+    background = (exported / "background.js").read_text(encoding="utf-8")
+    assert "- 5) * 1000" in background
+    assert "the bridge wins the race" in background
+
+
+def test_the_composer_is_not_submitted_after_a_user_edits_it(tmp_path: Path) -> None:
+    """The automation window is a real window the user can reach."""
+    exported = export_extension("edge", tmp_path / "edge-composer")
+    source = (exported / "site_chatgpt.js").read_text(encoding="utf-8")
+    assert "userTouchedComposer" in source
+    # Only real user input counts; our own writes are synthetic.
+    assert "event.isTrusted" in source
+    assert "refusing to submit" in source

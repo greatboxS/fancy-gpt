@@ -123,7 +123,7 @@
     let lastCount = -1;
     let stableSince = Date.now();
     const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
+    while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const count = responseNodes().length;
       if (count !== lastCount) {
         lastCount = count;
@@ -186,7 +186,13 @@
     }
     send.click();
 
-    const deadline = Date.now() + timeoutMs;
+    // Give up on inactivity rather than elapsed time: a long reasoning turn
+    // can legitimately outrun any fixed deadline, and the page is the thing
+    // that knows whether it is still working.
+    const idleLimitMs = Math.max(15000, Number(options?.idleTimeoutMs ?? 90000));
+    const hardDeadline = Date.now() + timeoutMs;
+    let lastActivityAt = Date.now();
+    let lastSeenText = null;
     let lastReported = null;
     const gate = createCompletionGate({stabilityMs: 1200});
     const activity = createActivityWaiter();
@@ -202,7 +208,7 @@
         )
       : null;
     const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
-    while (Date.now() < deadline) {
+    while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       if (options?.isCancelled?.()) {
         const stopped = stopGeneration(SELECTORS.stop);
         release();
@@ -218,6 +224,10 @@
       // The stop control also vanishes between a search or tool phase and the
       // text that follows, so its absence alone must not end the turn.
       const active = Boolean(firstVisible(SELECTORS.stop));
+      if (active || text !== lastSeenText) {
+        lastActivityAt = Date.now();
+        lastSeenText = text;
+      }
       const complete = text != null && looksLikeCompleteJson(text);
       if (gate.observe({text, active, complete})) {
         release();
@@ -231,7 +241,12 @@
       await activity.wait(500);
     }
     release();
-    throw new Error("Gemini response timed out");
+    const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
+    throw new Error(
+      Date.now() >= hardDeadline
+        ? "Gemini response exceeded the absolute limit"
+        : `Gemini response stalled: no activity for ${idleFor}s`
+    );
   }
 
   globalThis.FancyGPTSites = globalThis.FancyGPTSites ?? {};

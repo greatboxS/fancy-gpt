@@ -69,7 +69,9 @@ class BridgeBrowserDriver:
         token: str,
         tunnel_id: str,
         *,
-        job_timeout_s: float = 300.0,
+        # Backstop only; the adapter stalls a turn on inactivity long before
+        # this, and a legitimate long reasoning turn must not be cut off.
+        job_timeout_s: float = 1800.0,
     ) -> None:
         self.endpoint = endpoint
         self.token = token

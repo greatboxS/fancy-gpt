@@ -612,7 +612,13 @@ class GatewayService:
         self.store = GatewayStore(root)
         self.state = GatewayStateStore(root)
         self.requests = RequestStore(Path(root))
-        self.manager = manager or TunnelManager(timeout_s=float(os.getenv("FANCY_GPT_BROWSER_TIMEOUT", "300")))
+        # An absolute backstop, not the real limit. A long reasoning turn can
+        # legitimately outrun any constant, so the adapter gives up on the
+        # page being *inactive* instead; this only catches a turn that never
+        # ends at all.
+        self.manager = manager or TunnelManager(
+            timeout_s=float(os.getenv("FANCY_GPT_BROWSER_TIMEOUT", "1800"))
+        )
         self.limits = limits or GatewayLimits.from_env()
         self.metrics = GatewayMetrics()
         self.locks = ConversationLocks()

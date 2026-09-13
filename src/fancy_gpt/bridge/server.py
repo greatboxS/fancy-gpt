@@ -273,7 +273,10 @@ class BridgeServer:
         port: int,
         token: str,
         *,
-        job_timeout_s: float = 360.0,
+        # Slightly above the controller's own backstop, so a turn that does
+        # end is reported by the component that knows why rather than being
+        # cut off here with a generic message.
+        job_timeout_s: float = 1860.0,
         worker_stale_after_s: float = 45.0,
         allow_non_loopback: bool = False,
     ) -> None:

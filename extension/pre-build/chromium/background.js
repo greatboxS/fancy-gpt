@@ -225,7 +225,12 @@ async function executeJob(job) {
       prompt: job.prompt,
       jobId: job.job_id,
       continuing: job.conversation?.mode === "continue",
-      timeoutMs: Math.max(1000, Math.floor((job.timeout_s ?? 300) * 1000))
+      // Deliberately short of the job's own deadline. If the adapter and the
+      // bridge time out together, the bridge wins the race and reports a
+      // generic "worker timed out", throwing away the adapter's account of what
+      // it could actually see - which is the only thing that makes an
+      // intermittent hang diagnosable.
+      timeoutMs: Math.max(1000, Math.floor(((job.timeout_s ?? 300) - 5) * 1000))
     });
     if (!result || !result.ok) throw new Error(result?.error ?? "site content adapter failed");
     if (result.cancelled) {
