@@ -242,7 +242,26 @@
       await activity.wait(500);
     }
     release();
-    throw new Error("ChatGPT response timed out");
+    /* A timeout that only says "timed out" cannot be diagnosed without
+     * reproducing it, and this one is intermittent. Report what the adapter
+     * could actually see. Shapes and counts only - never page text, which
+     * carries the user's content. */
+    const newTurns = turnIds().filter(id => !baseline.has(id));
+    const boundText = boundId != null ? assistantText(boundId) : null;
+    throw new Error("ChatGPT response timed out; " + JSON.stringify({
+      boundId: boundId != null ? "bound" : "unbound",
+      boundTurnStillPresent: boundId != null
+        ? document.querySelectorAll(SELECTORS.turns).length > 0 &&
+          [...document.querySelectorAll(SELECTORS.turns)]
+            .some(el => el.getAttribute("data-turn-id") === boundId)
+        : null,
+      boundTextChars: boundText == null ? null : boundText.length,
+      boundTextComplete: boundText != null && looksLikeCompleteJson(boundText),
+      newTurnCount: newTurns.length,
+      newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
+      stopVisible: Boolean(firstVisible(SELECTORS.stop)),
+      candidatePending: gate.pending,
+    }));
   }
 
   globalThis.FancyGPTSites = globalThis.FancyGPTSites ?? {};
