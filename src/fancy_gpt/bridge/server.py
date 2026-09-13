@@ -46,6 +46,7 @@ class BrowserWorker:
     pending: dict[str, queue.Queue[dict[str, Any]]] = field(default_factory=dict)
     queued: dict[str, threading.Event] = field(default_factory=dict)
     cancel_reasons: dict[str, str] = field(default_factory=dict)
+    queue_failures: dict[str, str] = field(default_factory=dict)
     job_tunnels: dict[str, str] = field(default_factory=dict)
     #: Replies to control messages (cancel), kept apart from job replies so
     #: a control round trip can never consume a turn's own response.
@@ -96,11 +97,17 @@ class BrowserWorker:
                     break
             if cancelled.is_set():
                 with self.request_lock:
+                    failure = self.queue_failures.get(job_id)
                     reason = self.cancel_reasons.get(job_id, "cancelled before browser submission")
+                if failure is not None:
+                    return {"type": "job_error", "job_id": job_id, "error": failure}
                 return {"type": "job_cancelled", "job_id": job_id, "reason": reason}
             with self.request_lock:
                 if cancelled.is_set():
+                    failure = self.queue_failures.get(job_id)
                     reason = self.cancel_reasons.get(job_id, "cancelled before browser submission")
+                    if failure is not None:
+                        return {"type": "job_error", "job_id": job_id, "error": failure}
                     return {"type": "job_cancelled", "job_id": job_id, "reason": reason}
                 self.queued.pop(job_id, None)
                 self.pending[job_id] = response_queue
@@ -129,6 +136,7 @@ class BrowserWorker:
                 self.pending.pop(job_id, None)
                 self.job_tunnels.pop(job_id, None)
                 self.cancel_reasons.pop(job_id, None)
+                self.queue_failures.pop(job_id, None)
             if acquired:
                 self.capacity_slots.release()
 
@@ -136,7 +144,7 @@ class BrowserWorker:
         """Cancel a capacity waiter locally; it has not reached the browser."""
         with self.request_lock:
             target = self.queued.get(job_id)
-            if target is None:
+            if target is None or job_id in self.queue_failures:
                 return False
             self.cancel_reasons[job_id] = reason
             target.set()
@@ -207,6 +215,10 @@ class BrowserWorker:
         with self.request_lock:
             jobs = list(self.pending.items())
             controls = list(self.control_pending.items())
+            queued = list(self.queued.items())
+            for job_id, _target in queued:
+                if job_id not in self.cancel_reasons:
+                    self.queue_failures[job_id] = reason
         for job_id, target in jobs:
             try:
                 target.put_nowait({"type": "job_error", "job_id": job_id, "error": reason})
@@ -220,6 +232,8 @@ class BrowserWorker:
                 })
             except queue.Full:
                 pass
+        for _job_id, target in queued:
+            target.set()
 
 
 class BridgeHub:

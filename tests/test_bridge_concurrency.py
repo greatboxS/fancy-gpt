@@ -122,6 +122,39 @@ def test_worker_disconnect_wakes_all_pending_jobs_immediately() -> None:
     assert all(item["type"] == "job_error" and "generation lost" in item["error"] for item in failures)
 
 
+def test_worker_disconnect_wakes_capacity_waiters_without_submitting() -> None:
+    worker = BrowserWorker(
+        connection=FakeConnection(), tunnel_ids={"edge-remote"}, browser="edge", max_turns=1,
+    )
+    results: dict[str, dict] = {}
+    first = threading.Thread(target=lambda: results.setdefault(
+        "first", worker.request({"type": "job", "job_id": "active"}, timeout_s=30)
+    ))
+    queued = threading.Thread(target=lambda: results.setdefault(
+        "queued", worker.request({"type": "job", "job_id": "waiting"}, timeout_s=30)
+    ))
+    first.start()
+    deadline = time.monotonic() + 1
+    while "active" not in worker.pending and time.monotonic() < deadline:
+        time.sleep(0.005)
+    queued.start()
+    deadline = time.monotonic() + 1
+    while "waiting" not in worker.queued and time.monotonic() < deadline:
+        time.sleep(0.005)
+
+    started = time.monotonic()
+    worker.fail_pending("worker generation lost")
+    first.join(1)
+    queued.join(1)
+
+    assert time.monotonic() - started < 1
+    assert results["first"]["type"] == "job_error"
+    assert results["queued"] == {
+        "type": "job_error", "job_id": "waiting", "error": "worker generation lost",
+    }
+    assert all('"job_id":"waiting"' not in raw for raw in worker.connection.sent)
+
+
 def test_same_conversation_serializes_while_different_conversation_overlaps() -> None:
     hub = BridgeHub("token")
     inside: list[str] = []
