@@ -136,6 +136,9 @@
        * it can be fixed and tested without leaving the repository.
        */
       report({kind: "events", path: summary.path, contentType: summary.contentType, events: captured});
+      // The network has said the reply is over. A hidden document stops being
+      // painted, so the page may never say so.
+      report({kind: "finished", path: summary.path, sawDone: summary.sawDone});
     }
     report({
       kind: "stream",
@@ -246,6 +249,10 @@
                   contentType: (this.getResponseHeader?.("content-type")) || "",
                   text: body,
                 });
+                // The request ending is the reply ending, for a site that
+                // answers this way. Nothing in the page has to be drawn for
+                // that to be true.
+                report({kind: "finished", path: shapeOfPath(watched.url), sawDone: true});
               }
             }
             report({

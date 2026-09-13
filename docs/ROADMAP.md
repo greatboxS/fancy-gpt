@@ -176,7 +176,9 @@ Remaining:
 
 - End-to-end conformance runs driven by the real Codex, Claude Code and Gemini
   CLI binaries rather than protocol-level tests.
-- Browser tab-lease ownership and composer-edit detection.
+- Parallel browser execution surfaces as specified in
+  `BROWSER_PARALLELISM.md`: per-turn leases, capacity negotiation, focus/render
+  arbitration, capture ownership, restart recovery, and composer-edit detection.
 - Join Grok and Copilot browser/decoder slices to the site registry, gateway
   model catalog, capabilities, CLI/MCP discovery, and cross-protocol tests.
 - Keep the per-layer readiness matrix and live compatibility evidence current.
@@ -195,3 +197,5 @@ Release gate:
   unbounded tool loop.
 - Sustained end-to-end runs meet documented success/latency targets.
 - Experimental browser-web limitations are stated separately from protocol support.
+- Parallel turns complete with randomized ordering and zero cross-turn response,
+  progress, cancellation, capture, or cleanup leakage.

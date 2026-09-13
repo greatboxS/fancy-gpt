@@ -357,13 +357,33 @@
           lastSeenText = text;
         }
         const complete = text != null && looksLikeCompleteJson(text);
-        const settled = gate.observe({text, active, complete});
+        /* The network already said this reply was over.
+         *
+         * A hidden document stops being painted, so the page can sit frozen
+         * part-written while the response that carried the answer has long
+         * since ended -- measured repeatedly today, and the reason a turn in a
+         * window that lost focus waits out its whole deadline. The stream is
+         * the same fact from the one place that does not depend on rendering.
+         *
+         * A short grace period after it, because the page is usually a moment
+         * behind the network and its text is still preferred when it arrives.
+         * What is returned is whatever was read; the runtime decides between
+         * that and the decoded stream, and refuses the stream if it could not
+         * place all of it.
+         */
+        const finishedAt = options?.streamFinishedAt?.();
+        const streamSaysDone = finishedAt != null && Date.now() - finishedAt >= 1200;
+        const settled = gate.observe({text, active, complete})
+          ?? (streamSaysDone && text != null ? {text} : null);
         if (settled) {
           maxEvaluateMs = Math.max(maxEvaluateMs, Date.now() - evaluateStartedAt);
           const diagnostics = {
             ticksReceived: tickCount, loopIterations: wakeCount,
             maxEvaluateMs, waiter: activity.stats(), completionCandidateAgeMs: gate.candidateAgeMs,
             pageState: visibility.state,
+            // Which of the two said the turn was over, so a page that is never
+            // painted shows up as the norm it is rather than as a mystery.
+            settledBy: gate.pending || complete ? "page" : "stream",
           };
           release();
           return {

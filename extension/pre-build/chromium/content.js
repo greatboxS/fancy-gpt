@@ -75,13 +75,28 @@ function installPageHook() {
  * about a site, and that belongs in the runtime, so all of them are handed
  * over and it chooses.
  */
-const CAPTURES = 4;
+const CAPTURES = 6;
 let streamedEvents = [];
 let streamedBody = [];
+let streamFinishedAt = null;
+
+function sizeOf(report) {
+  if (Array.isArray(report.events)) return report.events.join("").length;
+  return String(report.text ?? "").length;
+}
 
 function remember(list, report) {
   list.push(report);
-  while (list.length > CAPTURES) list.shift();
+  // When it is full, the smallest goes -- not the oldest. Gemini makes eight
+  // requests a turn and its reply is not the last of them, so dropping by age
+  // pushed an eleven thousand character answer out behind telemetry.
+  while (list.length > CAPTURES) {
+    let smallest = 0;
+    for (let i = 1; i < list.length; ++i) {
+      if (sizeOf(list[i]) < sizeOf(list[smallest])) smallest = i;
+    }
+    list.splice(smallest, 1);
+  }
 }
 
 window.addEventListener("message", event => {
@@ -93,6 +108,10 @@ window.addEventListener("message", event => {
   // A response body that grew while it loaded, which is how a site answering
   // over XHR rather than a server-sent stream delivers its reply.
   if (report.kind === "body") { remember(streamedBody, report); return; }
+  // A reply-shaped response has ended. Recorded rather than acted on here: the
+  // adapter decides what to do with it, and the runtime decides what the bytes
+  // meant.
+  if (report.kind === "finished") { streamFinishedAt = Date.now(); return; }
   pageHookReports.push(report);
   // Only the recent ones: this is a diagnostic, not a log.
   if (pageHookReports.length > 8) pageHookReports.shift();
@@ -125,6 +144,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   let closeTickPort = () => {};
+  if (message.type === "fancy_execute_turn") { streamFinishedAt = null; streamedEvents = []; streamedBody = []; }
   const task = message.type === "fancy_site_health"
     ? adapter.healthCheck()
     : adapter.executeTurn(
@@ -135,6 +155,14 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           continuing: Boolean(message.continuing),
           isCancelled: () => cancelledJobs.has(String(message.jobId ?? "")),
           onTick: handler => { closeTickPort = openTickPort(String(message.jobId ?? ""), handler); },
+          /* When the network said this turn's reply was over.
+           *
+           * A hidden document stops being painted, so waiting for the page to
+           * look finished can wait forever while the answer sits complete in a
+           * response that already ended. This is the same fact, from the one
+           * place that does not depend on rendering.
+           */
+          streamFinishedAt: () => streamFinishedAt,
         },
       );
   Promise.resolve(task)

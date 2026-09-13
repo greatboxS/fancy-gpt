@@ -248,7 +248,11 @@
         lastSeenText = text;
       }
       const complete = text != null && looksLikeCompleteJson(text);
-      if (gate.observe({text, active, complete})) {
+      // The same fact from the network: a hidden document stops being painted,
+      // so the page may never look finished however complete the reply is.
+      const finishedAt = options?.streamFinishedAt?.();
+      const streamSaysDone = finishedAt != null && Date.now() - finishedAt >= 1200;
+      if (gate.observe({text, active, complete}) || (streamSaysDone && text != null)) {
         maxEvaluateMs = Math.max(maxEvaluateMs, Date.now() - evaluateStartedAt);
         const diagnostics = {
           ticksReceived: tickCount, loopIterations,

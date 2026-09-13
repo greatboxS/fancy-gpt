@@ -233,3 +233,46 @@ def test_the_largest_capture_is_the_fallback_not_the_rule() -> None:
 def test_choosing_never_invents_a_decoder() -> None:
     captures = [{"path": "/whatever", "text": GEMINI_BODY}]
     assert decode_stream("grok", bodies=captures) is None
+
+
+# -- which reading a turn returns ---------------------------------------------
+
+
+class _Reply:
+    def __init__(self, text, diagnostics):
+        self.text = text
+        self.diagnostics = diagnostics
+
+
+def _captures(body: str) -> dict:
+    return {"streamBodies": [{"path": "StreamGenerate", "text": body}]}
+
+
+def test_a_page_reading_that_parses_keeps_the_turn() -> None:
+    """A reading that parses is a complete envelope by the contract's own
+    definition, and the page is the path with the longest history behind it."""
+    from fancy_gpt.providers.web_automation import _best_reading
+
+    page = '{"request_id": "x", "answer": "complete", "confidence": 1}'
+    assert _best_reading("gemini", _Reply(page, _captures(GEMINI_BODY))) == page
+
+
+def test_the_stream_takes_over_when_the_page_froze() -> None:
+    """What a hidden document leaves behind: a fragment that will not parse,
+    while the response that carried the answer finished long ago."""
+    from fancy_gpt.providers.web_automation import _best_reading
+
+    frozen = '{"request_id": "x", "ans'
+    recovered = _best_reading("gemini", _Reply(frozen, _captures(GEMINI_BODY)))
+    assert recovered != frozen
+    assert parse_json_object(recovered)["answer"].startswith("A hash collision occurs")
+
+
+def test_an_unsure_decoder_changes_nothing() -> None:
+    # Refusing costs a turn read from the page exactly as before; guessing
+    # would cost an answer that is quietly wrong.
+    from fancy_gpt.providers.web_automation import _best_reading
+
+    frozen = '{"request_id": "x", "ans'
+    assert _best_reading("gemini", _Reply(frozen, _captures(")]}'\n\ngarbage\n"))) == frozen
+    assert _best_reading("grok", _Reply(frozen, _captures(GEMINI_BODY))) == frozen

@@ -3,6 +3,8 @@
 Use [QUICKSTART.md](QUICKSTART.md) to choose among the three built-in browser tunnels.
 Detailed setup and verification for every connection type is in
 [docs/TUNNEL_SETUP.md](docs/TUNNEL_SETUP.md).
+Parallel tab/window ownership and browser-worker capacity are specified in
+[docs/BROWSER_PARALLELISM.md](docs/BROWSER_PARALLELISM.md).
 
 Install-once independent technical reasoning toolkit with MCP, an online pre-request planner, and **runtime-selectable browser tunnels** for web model sites without requiring their public model APIs. ChatGPT and Gemini are connected end to end; Grok and Microsoft Copilot are being integrated through the browser, decoder, and core layers.
 

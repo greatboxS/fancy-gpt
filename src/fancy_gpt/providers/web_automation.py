@@ -11,6 +11,8 @@ from fancy_gpt.bridge.client import SiteHealthUnsupported
 from fancy_gpt.extension_utils import adapter_build_id
 from fancy_gpt.browser import BrowserDriver, BrowserPromptTooLargeError, BrowserUiDriftError
 from fancy_gpt.models import AutomatedModelResponse, ModelRequest
+from fancy_gpt.response_parser import parse_json_object
+from fancy_gpt.stream_decoding import decode_stream
 
 
 def _stale_side_hint() -> str:
@@ -46,6 +48,48 @@ def _stale_side_hint() -> str:
             "still report the current build id from files it re-reads."
         )
     return hint
+
+
+def _best_reading(site: str, response) -> str:
+    """The reply as the stream carried it, when the page's reading fell short.
+
+    Both are read on every turn. The page is preferred while it is complete,
+    because it is the path with the longest history behind it. The stream takes
+    over only when it is trustworthy -- everything placed, nothing
+    unrecognised, the response seen through to its end -- and the page is
+    plainly worse: shorter, or not parseable at all.
+
+    That second condition is what a hidden document produces. It stops being
+    painted and the reply freezes part-written, so the page holds a fragment
+    while the response that carried the answer finished long ago.
+
+    A decoder that is unsure changes nothing here. Refusing costs a turn read
+    from the page exactly as before; guessing would cost an answer that is
+    quietly wrong, and nothing downstream could tell.
+    """
+    page_text = response.text or ""
+    diagnostics = response.diagnostics or {}
+    decoded = decode_stream(
+        site,
+        captures=diagnostics.get("streams") or None,
+        bodies=diagnostics.get("streamBodies") or None,
+    )
+    if decoded is None or not decoded.trustworthy:
+        return page_text
+    # A page reading that parses is a complete envelope by the contract's own
+    # definition, so it keeps the turn. Comparing lengths as well only blurred
+    # that: the two carry the same reply and differ by the fence the page lost.
+    if _parses(page_text):
+        return page_text
+    return decoded.text
+
+
+def _parses(text: str) -> bool:
+    try:
+        parse_json_object(text)
+        return True
+    except ValueError:
+        return False
 
 
 class ChatGPTWebAutomationProvider:
@@ -180,7 +224,7 @@ class ChatGPTWebAutomationProvider:
                 request_id=request.request_id,
                 stage=request.stage,
                 provider=self.name,
-                raw_text=response.text,
+                raw_text=_best_reading(site, response),
                 response_identity=response.response_identity,
                 conversation_id=response.conversation_id,
                 diagnostics=response.diagnostics,

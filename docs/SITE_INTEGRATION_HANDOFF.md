@@ -77,6 +77,10 @@ OpenAI Responses, Anthropic Messages, or Gemini generateContent. Conversely,
 the gateway must not know selectors, page event names, response paths, or
 browser tab details.
 
+Concurrent turns follow [BROWSER_PARALLELISM.md](BROWSER_PARALLELISM.md). The
+required model is one execution-surface lease per turn; shared current-window
+or current-tab variables are not a valid ownership boundary.
+
 ### Request contract
 
 Every automatic turn passed to a site carries:
@@ -146,6 +150,8 @@ order. Keeping the order makes intermediate commits truthful and testable.
 - malformed, truncated and unknown transport frames;
 - decoder/page agreement on recorded live fixtures;
 - adapter build-id drift.
+- parallel surface allocation with randomized completion order;
+- strict isolation of progress, capture, cancellation, and cleanup by lease.
 
 ### Core and client protocols
 
@@ -190,4 +196,3 @@ A site is supported end to end only when all of the following are true:
 - text and tool-call turns work through the three gateway protocols;
 - cancellation and timeout are terminal and inspectable;
 - the live matrix contains a recent passing record.
-

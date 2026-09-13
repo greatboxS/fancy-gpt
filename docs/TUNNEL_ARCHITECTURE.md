@@ -12,6 +12,12 @@ the chosen browser. The browser extension then selects the requested site
 adapter. Neither `TunnelSpec`, tunnel health, nor tunnel selection contains a
 site default.
 
+A tunnel may advertise capacity greater than one. Each concurrent turn owns a
+separate execution-surface lease, while turns that mutate the same provider
+conversation serialize. Window/tab ownership, focus arbitration, render slots,
+and capture correlation are specified in
+[BROWSER_PARALLELISM.md](BROWSER_PARALLELISM.md).
+
 ## Layers
 
 ```text

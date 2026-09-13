@@ -33,19 +33,17 @@ mutations notifying observers.
 
 ## Progress is observed, not polled
 
-Automation runs in a minimized window so it stays out of the user's way, and
-browsers throttle `setTimeout` hard in hidden windows - measured as 24-second
-gaps where the page had been streaming all along. Partial output is therefore
-reported by a `MutationObserver`, which is driven by the DOM changing rather
-than by a timer.
-
-The settle loop still uses a timer, so completion detection remains slower in a
-hidden window than a visible one.
+Automation must not rely on a minimized or hidden window: live measurements
+showed that a rendered reply can freeze there. Partial output therefore uses a
+`MutationObserver` plus a background-worker tick, while network capture can be
+the authoritative path for a site whose decoder proves response ownership and
+completion. Concurrent turns use separate execution-surface leases as specified
+in [BROWSER_PARALLELISM.md](BROWSER_PARALLELISM.md).
 
 ## The automation window is closed when idle
 
-The task window is reused across jobs, so it is not closed with each tab.
-Without an explicit idle close it accumulates: the tab goes away and an empty
-minimized window stays behind for the rest of the browser session. It is closed
-only when no job is active and no tabs remain in it, so a window holding a
-user's own tab is never taken away.
+An idle surface may be reused only after its previous lease reaches terminal
+cleanup. Stream-owned turns may use separate tabs in a shared worker window;
+DOM-bound turns use dedicated windows. Idle surfaces close after a grace period,
+and cleanup may remove only the exact tab/window owned by its lease. A window
+holding a user's own tab is never removed.

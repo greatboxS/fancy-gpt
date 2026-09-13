@@ -397,6 +397,54 @@ async function main() {
     });
   });
 
+  await test("a turn ends when the network says so, even if the page never does", async () => {
+    /* The failure this exists to end.
+     *
+     * A hidden document stops being painted, so a reply freezes part-written
+     * in the DOM while the response that carried it has long since finished.
+     * Measured repeatedly: a turn in a window that lost focus waits out its
+     * whole deadline holding a fragment, and reports a stall on a site that
+     * answered perfectly well.
+     */
+    globalThis.FANCY_GPT_RAW_TEXT_PROBE = false;
+    loadAdapters(["site_chatgpt.js"]);
+    chatgptPage();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    let finishedAt = null;
+
+    const running = adapter.executeTurn("PROMPT-S", 9000, null, {
+      streamFinishedAt: () => finishedAt,
+    });
+    setTimeout(() => {
+      // Frozen mid-reply, exactly as an unpainted page leaves it.
+      const turn = assistantTurn("turn-1", "");
+      turn.append(new StubElement("div", {class: "markdown", text: '{"type":"message","text":"par'}));
+      // And the network reports the reply is over.
+      finishedAt = Date.now();
+    }, 50);
+
+    const result = await running;
+    assert(result.text.startsWith('{"type":"message"'), "whatever the page holds is returned");
+    assertEqual(result.diagnostics.settledBy, "stream", "and the turn says which one ended it");
+  });
+
+  await test("the page still decides when it is the one that is ready", async () => {
+    globalThis.FANCY_GPT_RAW_TEXT_PROBE = false;
+    loadAdapters(["site_chatgpt.js"]);
+    chatgptPage();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    // No stream at all: nothing about this changes a site we cannot observe.
+    const running = adapter.executeTurn("PROMPT-T", 9000, null, {});
+    setTimeout(() => {
+      const turn = assistantTurn("turn-1", "");
+      turn.append(new StubElement("div", {class: "markdown", text: ENVELOPE}));
+    }, 50);
+
+    const result = await running;
+    assertEqual(result.text, ENVELOPE, "the complete reply is returned");
+    assertEqual(result.diagnostics.settledBy, "page", "settled by the page, as before");
+  });
+
   // -- gemini text extraction ------------------------------------------------
   await test("gemini strips the site's own chrome from the reply", async () => {
     loadAdapters(["site_gemini.js"], "gemini.google.com");
