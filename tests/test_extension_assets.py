@@ -167,7 +167,22 @@ def test_composer_writes_through_the_editor_input_path(tmp_path: Path) -> None:
     assert "selectAll(composer)" in kit, "a retry must replace the text, not append to it"
 
 
-def test_automation_uses_a_separate_minimized_window_by_default(tmp_path: Path) -> None:
+def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
+    """The page being automated must be one the browser is still drawing.
+
+    This test used to require the opposite -- a minimized window -- on the
+    assumption that a minimized window keeps rendering. It does not. Chromium
+    reports a minimized, fully occluded, or merely-not-active document as
+    hidden, and a hidden document stops being painted part-way through a
+    streamed reply: measured live at 21 to 61 characters of a 1294 character
+    answer, with the stop control frozen alongside it, so the turn looked
+    finished while holding a fragment and stalled until its deadline.
+    """
     background = (export_extension("edge", tmp_path / "edge-background") / "background.js").read_text(encoding="utf-8")
     assert "separateTaskWindow: true" in background
-    assert 'ext.windows.create({url, focused: false, state: "minimized"})' in background
+    # Its own window, still out of the way -- but never minimized.
+    assert 'state: "minimized"' not in background
+    assert 'state: "normal"' in background
+    # And never a background tab, on any of the paths that can open one.
+    assert "active: false" not in background
+    assert background.count("active: true") >= 2
