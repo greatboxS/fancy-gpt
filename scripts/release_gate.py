@@ -21,7 +21,10 @@ def run(command: list[str], *, cwd: Path = root, pythonpath: Path | None = root 
     env = os.environ.copy()
     if pythonpath is not None:
         env["PYTHONPATH"] = str(pythonpath)
-    completed = subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True)
+    try:
+        completed = subprocess.run(command, cwd=cwd, env=env, text=True, capture_output=True)
+    except OSError as exc:
+        return {"pass": False, "command": command, "stdout": "", "stderr": str(exc)}
     return {"pass": completed.returncode == 0, "command": command,
             "stdout": completed.stdout.strip(), "stderr": completed.stderr.strip()}
 
@@ -40,6 +43,11 @@ source_tests = run([sys.executable, "-m", "pytest", "-ra"])
 functional_review = run([sys.executable, "scripts/functional_review.py"])
 tunnel_review = run([sys.executable, "scripts/tunnel_review.py"])
 extension_check = run([sys.executable, "scripts/build_extension.py", "--check"], pythonpath=None)
+# Never certify whatever wheel happens to be left in dist/ from an older run.
+# Build the artifact from this checkout first, then compare every packaged byte
+# against source below. `uv` is already the project's documented build/install
+# prerequisite and keeps this step isolated and reproducible.
+wheel_build = run(["uv", "build", "--wheel"], pythonpath=None)
 profile_path = root / "profiles/session-management.json"
 session_profile_valid = False
 if profile_path.is_file():
@@ -87,6 +95,7 @@ checks = {
     "skill_bundle_errors": validate_skill_bundle(packaged_skills_root()),
     "source_tests": source_tests, "functional_review": functional_review,
     "tunnel_review": tunnel_review, "extension_build": extension_check,
+    "wheel_build": wheel_build,
     "wheel": str(wheel.relative_to(root)), "wheel_errors": wheel_errors,
     "wheel_self_test": wheel_self_test,
     "schemas_exist": all((root / "schemas" / name).exists() for name in [
@@ -109,7 +118,7 @@ checks["pass"] = (
     and not checks["tunnel_layer_errors"] and not checks["skill_bundle_errors"]
     and not source_tests["stderr"]
     and all(result["pass"] for result in [source_tests, functional_review, tunnel_review,
-                                          extension_check, wheel_self_test])
+                                          extension_check, wheel_build, wheel_self_test])
     and not wheel_errors and checks["schemas_exist"] and checks["example_files_exist"]
     and checks["tunnel_architecture_doc"] and checks["session_architecture_doc"]
     and checks["model_gateway_doc"] and checks["roadmap_doc"]
