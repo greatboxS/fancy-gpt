@@ -12,6 +12,7 @@ const DEFAULTS = {
   nativeHost: "com.fancygpt.bridge",
   autoConnect: true,
   reconnectIntervalMs: 2000,
+  maxConcurrentTurns: 4,
 };
 
 let nextLeaseId = 1;
@@ -214,6 +215,10 @@ async function executeJob(job) {
     if (!SITES[site]) throw new Error(`unsupported site: ${site}`);
     const taskUrl = taskUrlFor(site, job.conversation);
     const config = await getConfig();
+    const capacity = Math.max(1, Math.min(16, Number(config.maxConcurrentTurns) || 4));
+    if (activeJobs.size >= capacity) {
+      throw new Error(`browser worker is at capacity (${capacity} concurrent turns)`);
+    }
     // Claimed before the tab exists: otherwise another job finishing in this
     // moment sees an idle window and closes it while this tab is being created.
     const entry = {tabId: null, leaseId: null, epoch: Number(job.generation_epoch ?? 0), cancelled: false};
@@ -348,7 +353,15 @@ globalThis.FancyGPTTransport.setHandler(async message => {
 
 async function connectBridge() {
   const config = await getConfig();
-  await globalThis.FancyGPTTransport.connect(config);
+  await globalThis.FancyGPTTransport.connect({
+    ...config,
+    capabilities: {
+      max_turns: Math.max(1, Math.min(16, Number(config.maxConcurrentTurns) || 4)),
+      max_render_slots: Math.max(1, Math.min(16, Number(config.maxConcurrentTurns) || 4)),
+      sites: Object.keys(SITES),
+      surface_mode: "dedicated-window",
+    },
+  });
 }
 
 ext.runtime.onInstalled.addListener(() => connectBridge().catch(console.error));

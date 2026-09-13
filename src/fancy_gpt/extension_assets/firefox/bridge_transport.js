@@ -57,7 +57,8 @@
           role: "browser",
           token: config.token,
           tunnel_ids: [config.tunnelId],
-          browser: config.browserName
+          browser: config.browserName,
+          capabilities: config.capabilities ?? {}
         }));
       };
       ws.onmessage = event => {

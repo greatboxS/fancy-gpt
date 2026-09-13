@@ -76,8 +76,26 @@ def test_hub_snapshot_reports_connection_and_job_fields():
     assert entry["jobs_started"] == 3
     assert entry["jobs_succeeded"] == 2
     assert entry["jobs_failed"] == 1
+    assert entry["active_jobs"] == 0
+    assert entry["max_turns"] == 1
     assert "connected_at" in entry
     assert entry["connected_seconds"] >= 0
+
+
+def test_hub_snapshot_exposes_parallel_surface_capabilities():
+    hub = BridgeHub(token="t")
+    worker = BrowserWorker(
+        connection=FakeConnection(), tunnel_ids={"chrome-remote"}, browser="chrome",
+        max_turns=4, max_render_slots=4, sites=("chatgpt", "gemini"),
+        surface_mode="dedicated-window",
+    )
+    hub.register(worker)
+
+    [entry] = hub.snapshot()
+    assert entry["max_turns"] == 4
+    assert entry["max_render_slots"] == 4
+    assert entry["sites"] == ["chatgpt", "gemini"]
+    assert entry["surface_mode"] == "dedicated-window"
 
 
 def test_hub_stats_aggregates_across_worker_lifecycle():

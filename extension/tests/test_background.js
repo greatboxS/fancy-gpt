@@ -80,6 +80,20 @@ async function main() {
   assert.strictEqual(windows.size, 0);
   assert.strictEqual(removed.size, 0);
   assert.deepStrictEqual(sent.filter(item => item.type === "job_result").map(item => item.job_id).sort(), ["a", "b"]);
+
+  const jobs = ["c", "d", "e", "f"].map(job_id => handler({
+    type: "job", operation: "model.turn", site: "chatgpt", job_id, prompt: job_id, generation_epoch: 1,
+  }));
+  await new Promise(resolve => setImmediate(resolve));
+  await handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "overflow", prompt: "x"});
+  assert.strictEqual(windows.size, 4, "configured capacity must bound rendered surfaces");
+  assert(sent.some(item => item.type === "job_error" && item.job_id === "overflow" && /capacity/.test(item.error)));
+  for (const jobId of ["c", "d", "e", "f"]) {
+    const tabId = context.FancyGPTBackgroundTest.activeJobs.get(jobId).tabId;
+    pending.get(tabId).resolve({ok: true, text: jobId, responseIdentity: `${jobId}1`});
+  }
+  await Promise.all(jobs);
+  assert.strictEqual(windows.size, 0);
   console.log("background lifecycle: 1 passed");
 }
 

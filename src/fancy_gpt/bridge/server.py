@@ -27,6 +27,10 @@ class BrowserWorker:
     connection: ServerConnection
     tunnel_ids: set[str]
     browser: str
+    max_turns: int = 1
+    max_render_slots: int = 1
+    sites: tuple[str, ...] = ()
+    surface_mode: str = "legacy"
     worker_id: str = field(default_factory=lambda: f"worker-{uuid.uuid4().hex[:10]}")
     connected_at: float = field(default_factory=time.monotonic)
     connected_at_wall: float = field(default_factory=time.time)
@@ -291,6 +295,11 @@ class BridgeHub:
                     "jobs_started": worker.jobs_started,
                     "jobs_succeeded": worker.jobs_succeeded,
                     "jobs_failed": worker.jobs_failed,
+                    "active_jobs": len(worker.pending),
+                    "max_turns": worker.max_turns,
+                    "max_render_slots": worker.max_render_slots,
+                    "sites": list(worker.sites),
+                    "surface_mode": worker.surface_mode,
                 }
                 for worker in self._workers
             ]
@@ -349,10 +358,17 @@ class BridgeServer:
         return first
 
     def _browser_session(self, connection: ServerConnection, hello: dict[str, Any]) -> None:
+        capabilities = hello.get("capabilities") if isinstance(hello.get("capabilities"), dict) else {}
+        max_turns = max(1, min(16, int(capabilities.get("max_turns", 1))))
+        max_render_slots = max(1, min(max_turns, int(capabilities.get("max_render_slots", max_turns))))
         worker = BrowserWorker(
             connection=connection,
             tunnel_ids=set(str(item) for item in hello.get("tunnel_ids", [])),
             browser=str(hello.get("browser") or "unknown"),
+            max_turns=max_turns,
+            max_render_slots=max_render_slots,
+            sites=tuple(sorted(str(item) for item in capabilities.get("sites", []) if item)),
+            surface_mode=str(capabilities.get("surface_mode") or "legacy"),
         )
         if "*" in worker.tunnel_ids:
             raise ValueError("browser worker must register exact tunnel ids; wildcard is forbidden")
