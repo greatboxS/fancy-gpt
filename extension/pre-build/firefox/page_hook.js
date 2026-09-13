@@ -34,6 +34,21 @@
   // change, and it must not live behind a browser reload.
   const CAPTURE_BYTES = 4 * 1024 * 1024;
 
+  const shapeOfPath = url => {
+    try {
+      const {pathname} = new URL(url, location.href);
+      return pathname.split("/").map(part => (ID_LIKE.test(part) ? "<id>" : part)).join("/");
+    } catch (_) {
+      return "<unparseable>";
+    }
+  };
+
+  // Field names only, never values, and only from the top level.
+  const fieldNames = value => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    return Object.keys(value).slice(0, 40);
+  };
+
   /* The vocabulary of a delta, not its contents.
    *
    * The stream does not append text, it patches a document: each delta carries

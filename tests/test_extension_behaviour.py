@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SUITES = ("test_site_kit.js", "test_adapters.js")
+SUITES = ("test_site_kit.js", "test_adapters.js", "test_page_hook.js")
 
 node = shutil.which("node")
 requires_node = pytest.mark.skipif(node is None, reason="node is not installed")
