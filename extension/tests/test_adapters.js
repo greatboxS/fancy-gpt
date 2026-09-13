@@ -140,6 +140,26 @@ async function main() {
       "the later parts of a split reply must not be dropped: " + JSON.stringify(result.text));
   });
 
+  await test("chatgpt ignores an old turn that only finishes rendering late", async () => {
+    globalThis.FANCY_GPT_RAW_TEXT_PROBE = false;
+    loadAdapters(["site_chatgpt.js"]);
+    chatgptPage();
+    // A continued conversation: an earlier reply is present but still empty,
+    // so it is in the baseline with no text.
+    const older = assistantTurn("turn-old", "");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-A5", 8000, null, {});
+    setTimeout(() => {
+      // It draws itself in after we submitted. That is not a second reply.
+      older.setText('{"type":"message","text":"an earlier answer"}');
+      assistantTurn("turn-new", ENVELOPE);
+    }, 50);
+
+    const result = await running;
+    assertEqual(result.responseIdentity, "turn-new", "must bind to the turn this job created");
+    assertEqual(result.text, ENVELOPE, "and return its text");
+  });
+
   await test("chatgpt streams partial text through the observer", async () => {
     loadAdapters(["site_chatgpt.js"]);
     chatgptPage();

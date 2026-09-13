@@ -295,14 +295,27 @@
     const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const evaluateStartedAt = Date.now();
-      const candidates = [];
+      /* A turn this job created, or an old one that only just finished drawing.
+       *
+       * A continued conversation renders its earlier turns lazily, so a turn
+       * that was empty when the baseline was taken fills in afterwards and its
+       * text changes. Counted the same as a fresh reply, that reads as a second
+       * new answer and the turn is refused as ambiguous -- seen live on the
+       * first continued conversation that got this far.
+       *
+       * An id absent from the baseline did not exist when we submitted, so it
+       * is unambiguously ours. Only when there is no such turn does a changed
+       * existing turn count, which is what the "Thinking" placeholder swap
+       * needs. */
+      const fresh = [];
+      const changed = [];
       for (const id of turnIds()) {
         const text = assistantText(id);
         if (!text) continue;
-        // New, or an existing turn whose content changed after we submitted.
-        if (baseline.has(id) && baseline.get(id) === text) continue;
-        candidates.push({id, text});
+        if (!baseline.has(id)) { fresh.push({id, text}); continue; }
+        if (baseline.get(id) !== text) changed.push({id, text});
       }
+      const candidates = fresh.length ? fresh : changed;
       if (boundId != null && assistantText(boundId) === null) {
         /* The turn we bound to is gone.
          *
