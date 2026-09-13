@@ -59,21 +59,38 @@ def test_a_patch_batch_applies_each_member() -> None:
     assert reply.text == "ab"
 
 
-def test_a_bare_value_after_a_patch_is_refused_rather_than_placed_by_preference() -> None:
-    """Which path a bare value continues after a batch has not been measured.
+def test_a_bare_value_continues_the_operation_as_well_as_the_path() -> None:
+    """Measured on a live turn, and the half that is easy to miss.
 
-    Both answers are plausible and both are silent when wrong: append it to the
-    wrong field and the reply is short, append the wrong field's value into the
-    reply and it is polluted. So the one case we are sure of is honoured and
-    anything else marks the reply untrusted, which costs a fallback to the page
-    and cannot cost a wrong answer.
+    The stream opens with {"o":"add","p":"","v":<snapshot>} and then sends two
+    more snapshots as bare values -- same path, same operation, a counter
+    apart. Continuing only the path appends a whole snapshot object where a
+    string belongs; continuing neither throws the later snapshots away.
     """
-    reply = decode_chatgpt_stream(finished(
-        {"p": "/message/content/parts/0", "o": "append", "v": "a"},
-        {"o": "patch", "v": [{"p": "/message/status", "o": "replace", "v": "in_progress"}]},
-        {"v": "c"},
+    later = dict(OPENING)
+    later["message"] = dict(OPENING["message"], id="m2")
+    reply = decode_chatgpt_stream(events(
+        {"c": 0, "o": "add", "p": "", "v": OPENING},
+        {"c": 1, "v": later},
+        {"p": "/message/content/parts/0", "o": "append", "v": "hello"},
+        {"v": " there"},
+        {"p": "/message/status", "o": "replace", "v": "finished_successfully"},
+        {"p": "/message/end_turn", "o": "replace", "v": True},
+        "[DONE]",
     ))
-    assert "c" not in reply.text
+    assert reply.message_id == "m2", "the later snapshot replaces the earlier one"
+    assert reply.text == "hello there"
+    assert reply.trustworthy
+
+
+def test_a_bare_value_with_nothing_to_continue_is_refused() -> None:
+    """Refusing costs a fallback to the page; guessing costs a wrong reply."""
+    reply = decode_chatgpt_stream(events(
+        {"v": "orphaned"},
+        {"p": "/message/status", "o": "replace", "v": "finished_successfully"},
+        "[DONE]",
+    ))
+    assert "orphaned" not in reply.text
     assert not reply.trustworthy
 
 

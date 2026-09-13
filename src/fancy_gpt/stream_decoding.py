@@ -100,6 +100,7 @@ def decode_chatgpt_stream(events: Iterable[str]) -> DecodedReply:
     reply = DecodedReply()
     document = _Document()
     last_path: str | None = None
+    last_op: str | None = None
 
     def note_skip(pointer: str | None) -> None:
         reply.skipped += 1
@@ -152,7 +153,7 @@ def decode_chatgpt_stream(events: Iterable[str]) -> DecodedReply:
         reply.applied += 1
 
     def handle(entry: Any) -> None:
-        nonlocal last_path
+        nonlocal last_path, last_op
         if not isinstance(entry, dict):
             return
         operation = entry.get("o") if isinstance(entry.get("o"), str) else None
@@ -165,17 +166,25 @@ def decode_chatgpt_stream(events: Iterable[str]) -> DecodedReply:
         if isinstance(entry.get("p"), str):
             last_path = entry["p"]
         if operation:
+            last_op = operation
             apply(operation, entry.get("p") if isinstance(entry.get("p"), str) else last_path, entry.get("v"))
             return
         if "v" in entry:
-            # No operation: the encoding continues the previous path. Which
-            # path that is after a patch batch has not been measured, so the
-            # one case we are sure of is honoured and anything else is refused
-            # rather than resolved by preference. Refusing costs a fallback to
-            # the page; guessing costs a reply that is quietly wrong, and a
-            # bare value is reply text often enough that losing one matters.
-            if last_path is not None and _TEXT_PATH in last_path:
-                apply("append", last_path, entry["v"])
+            # No operation and no path: the encoding continues both. Measured
+            # on a live turn -- an opening `{"o":"add","p":"","v":<snapshot>}`
+            # is followed by bare values carrying later snapshots, and an
+            # `{"o":"append","p":"/message/content/parts/0"}` by bare values
+            # carrying the rest of the text. Continuing only the path, as an
+            # earlier version did, appends a whole snapshot object where a
+            # string belongs.
+            #
+            # A batch does not set either, because which one it would leave
+            # behind has not been measured, and a bare value with nothing to
+            # continue is refused rather than placed by preference: refusing
+            # costs a fallback to the page, guessing costs a reply that is
+            # quietly wrong.
+            if last_op is not None and last_path is not None:
+                apply(last_op, last_path, entry["v"])
             else:
                 note_skip(last_path)
                 reply.skipped_text += 1
