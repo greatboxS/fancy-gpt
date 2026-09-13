@@ -229,11 +229,13 @@ class BridgeBrowserDriver:
         if not text:
             raise RuntimeError("bridge response is empty")
         conversation_id = result.get("conversation_id")
+        diagnostics = result.get("diagnostics")
         return BrowserResponse(
             turn_id=turn.turn_id,
             text=text,
             response_identity=str(result.get("response_identity") or result.get("assistant_turn_id") or turn.turn_id),
             conversation_id=str(conversation_id) if conversation_id else None,
+            diagnostics=diagnostics if isinstance(diagnostics, dict) else None,
         )
 
     def close_turn(self, turn: BrowserTurn) -> None:

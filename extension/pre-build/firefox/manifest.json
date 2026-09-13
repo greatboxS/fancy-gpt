@@ -50,5 +50,16 @@
     "gecko": {
       "id": "fancy-gpt@local"
     }
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page_hook.js"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*"
+      ]
+    }
+  ]
 }

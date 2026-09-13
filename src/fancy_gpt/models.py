@@ -374,6 +374,10 @@ class AutomatedModelResponse(StrictModel):
     raw_text: str
     response_identity: str
     conversation_id: str | None = None
+    # Shapes and counts of what the adapter saw, never page text. Recorded for
+    # turns that worked as well as ones that did not: a stall is only
+    # diagnosable against some idea of what a healthy turn looks like.
+    diagnostics: dict | None = None
 
 
 class EvidenceRef(StrictModel):

@@ -22,7 +22,7 @@ _BUILD_PLACEHOLDER = "__FANCYGPT_ADAPTER_BUILD__"
 
 # The scripts that together decide how a page is driven. A change to any of them
 # changes how the browser behaves, so all of them define the build.
-ADAPTER_SOURCES = ("background.js", "bridge_transport.js", "site_kit.js", "content.js")
+ADAPTER_SOURCES = ("background.js", "bridge_transport.js", "site_kit.js", "content.js", "page_hook.js")
 
 
 # The two values `export_extension` patches per browser. They say which browser

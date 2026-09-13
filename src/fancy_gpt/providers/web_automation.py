@@ -130,6 +130,7 @@ class ChatGPTWebAutomationProvider:
                 raw_text=response.text,
                 response_identity=response.response_identity,
                 conversation_id=response.conversation_id,
+                diagnostics=response.diagnostics,
             )
         finally:
             self.active_turn_id = None

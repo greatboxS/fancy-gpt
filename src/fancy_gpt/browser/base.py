@@ -29,6 +29,10 @@ class BrowserResponse:
     text: str
     response_identity: str
     conversation_id: str | None = None
+    # What the adapter could see while it worked: shapes and counts, never page
+    # text. A turn that succeeded used to discard this, so the only turns we
+    # could learn anything from were the ones that failed.
+    diagnostics: dict | None = None
 
 
 class BrowserDriver(Protocol):

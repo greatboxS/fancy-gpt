@@ -26,6 +26,40 @@ function openTickPort(jobId, onTick) {
   return () => { try { port.disconnect(); } catch (_) {} };
 }
 
+/* Install the page-world observer and keep what it reports.
+ *
+ * It runs in the page's own world, which a content script cannot reach, so it
+ * is injected as a script element -- the one method that works the same in
+ * Chrome, Edge and Firefox. It reports shapes and counts only, and this keeps
+ * just the most recent few so a turn can carry them in its diagnostics.
+ */
+const pageHookReports = [];
+
+function installPageHook() {
+  try {
+    const element = document.createElement("script");
+    element.src = ext.runtime.getURL("page_hook.js");
+    element.async = false;
+    (document.head || document.documentElement).appendChild(element);
+    element.addEventListener("load", () => element.remove());
+  } catch (_) {
+    // Without it a turn still runs exactly as before: this observes, and the
+    // turn does not depend on what it sees.
+  }
+}
+
+window.addEventListener("message", event => {
+  if (event.source !== window) return;
+  const data = event.data;
+  if (!data || data.source !== "fancygpt-page-hook") return;
+  const {source, ...report} = data;
+  pageHookReports.push(report);
+  // Only the recent ones: this is a diagnostic, not a log.
+  if (pageHookReports.length > 8) pageHookReports.shift();
+});
+
+installPageHook();
+
 ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "fancy_cancel_turn") {
     const jobId = String(message.jobId ?? "");
@@ -54,7 +88,11 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         },
       );
   Promise.resolve(task)
-    .then(result => sendResponse({ok: true, ...result}))
+    .then(result => sendResponse({
+      ok: true,
+      ...result,
+      diagnostics: {...(result?.diagnostics ?? {}), pageHook: pageHookReports.slice()},
+    }))
     .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}))
     .finally(() => { try { closeTickPort(); } catch (_) {} });
   return true;

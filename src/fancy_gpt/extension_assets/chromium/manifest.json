@@ -43,5 +43,16 @@
       "run_at": "document_idle"
     }
   ],
-  "minimum_chrome_version": "116"
+  "minimum_chrome_version": "116",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page_hook.js"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*"
+      ]
+    }
+  ]
 }

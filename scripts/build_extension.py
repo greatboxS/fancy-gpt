@@ -11,7 +11,7 @@ MANIFESTS = {
     "chromium": ROOT / "extension" / "chromium" / "manifest.json",
     "firefox": ROOT / "extension" / "firefox" / "manifest.json",
 }
-FILES = ["background.js", "bridge_transport.js", "site_kit.js", "site_chatgpt.js", "site_gemini.js", "content.js", "popup.html", "popup.js"]
+FILES = ["background.js", "bridge_transport.js", "site_kit.js", "site_chatgpt.js", "site_gemini.js", "content.js", "page_hook.js", "popup.html", "popup.js"]
 
 # Every generated bundle, and the browser each one is configured for. Keeping
 # them in one table is the point: these copies used to be synced by hand, so one
@@ -39,7 +39,7 @@ def patch_defaults(text: str, browser: str) -> str:
 
 def adapter_source_names() -> list[str]:
     sites = sorted(n for n in FILES if n.startswith("site_") and n != "site_kit.js")
-    return ["background.js", "bridge_transport.js", "site_kit.js", "content.js", *sites]
+    return ["background.js", "bridge_transport.js", "site_kit.js", "content.js", "page_hook.js", *sites]
 
 
 def adapter_build_id() -> str:
