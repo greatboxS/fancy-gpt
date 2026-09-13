@@ -33,6 +33,8 @@
   // Nothing here knows what a reply looks like: that knowledge changes as sites
   // change, and it must not live behind a browser reload.
   const CAPTURE_BYTES = 4 * 1024 * 1024;
+  // Below this a response is chatter, whatever else it may be.
+  const FORWARD_MIN_CHARS = 1000;
 
   const shapeOfPath = url => {
     try {
@@ -239,7 +241,20 @@
             // Requiring two treats a body delivered in two pieces as if it had
             // arrived whole, which is the opposite of what was measured.
             const grewWhileLoading = growth.length > 0 && growth[0].chars < length;
-            if (grewWhileLoading && length <= CAPTURE_BYTES) {
+            /* Growth is a hint, not the test.
+             *
+             * A reply that arrives quickly enough is never seen to grow -- one
+             * sample already holding everything, or none at all -- and two live
+             * turns then forwarded nothing but telemetry, leaving the decoder
+             * with 342 characters of batchexecute and no answer to find.
+             *
+             * Which request is the reply is decided in the runtime, by the path
+             * each site was measured to answer on. All this needs is a bar low
+             * enough to keep the answer and high enough to leave the chatter:
+             * a reply, framing included, is not a few hundred characters.
+             */
+            const worthForwarding = grewWhileLoading || length >= FORWARD_MIN_CHARS;
+            if (worthForwarding && length <= CAPTURE_BYTES) {
               let body = "";
               try { body = this.responseText ?? ""; } catch (_) {}
               if (body) {

@@ -214,6 +214,36 @@ async function main() {
     assert(!JSON.stringify(bodies).includes("telemetry"), "and nothing else");
   });
 
+  await test("a reply that arrived too fast to be seen growing is still forwarded", async () => {
+    /* Growth is a hint, not the test.
+     *
+     * Two live turns answered quickly enough that nothing was sampled mid
+     * flight, so nothing was forwarded and the decoder was left with a few
+     * hundred characters of telemetry and no answer to find.
+     */
+    const {context, posted} = runHook({response: sseResponse(["{}"])});
+    const request = new context.window.XMLHttpRequest();
+    request.open("POST", "https://gemini.google.com/_/BardChatUi/data/StreamGenerate");
+    request.send();
+    request.finish("x".repeat(4000));
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const bodies = posted.filter(item => item.kind === "body");
+    assertEqual(bodies.length, 1, "size alone is enough when growth was never seen");
+  });
+
+  await test("chatter is still left in the page", async () => {
+    const {context, posted} = runHook({response: sseResponse(["{}"])});
+    const request = new context.window.XMLHttpRequest();
+    request.open("POST", "https://gemini.google.com/_/BardChatUi/data/batchexecute");
+    request.send();
+    request.finish("a few hundred characters of telemetry");
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    assert(!posted.some(item => item.kind === "body"),
+      "a reply, framing included, is not a few hundred characters");
+  });
+
   report();
 }
 
