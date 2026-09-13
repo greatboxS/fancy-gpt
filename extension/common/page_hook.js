@@ -224,6 +224,30 @@
           this.addEventListener("loadend", () => {
             let length = 0;
             try { length = (this.responseText ?? "").length; } catch (_) {}
+            /* A body that grew is a candidate for carrying the reply.
+             *
+             * Forwarded on the same terms as a server-sent stream: this is
+             * content, and it is the model's own answer -- the text the turn
+             * returns anyway. A body that arrived whole is not forwarded,
+             * because a response nobody watched grow is far more likely to be
+             * telemetry than an answer, and there is no reason to move it.
+             */
+            // One sample smaller than the final size already proves it grew.
+            // Requiring two treats a body delivered in two pieces as if it had
+            // arrived whole, which is the opposite of what was measured.
+            const grewWhileLoading = growth.length > 0 && growth[0].chars < length;
+            if (grewWhileLoading && length <= CAPTURE_BYTES) {
+              let body = "";
+              try { body = this.responseText ?? ""; } catch (_) {}
+              if (body) {
+                report({
+                  kind: "body",
+                  path: shapeOfPath(watched.url),
+                  contentType: (this.getResponseHeader?.("content-type")) || "",
+                  text: body,
+                });
+              }
+            }
             report({
               kind: "xhr",
               path: shapeOfPath(watched.url),
@@ -232,9 +256,9 @@
               chars: length,
               totalMs: Date.now() - startedAt,
               growth,
-              // One sample that already holds everything means it was not
+              // A first sample that already holds everything means it was not
               // streamed to us, however it travelled on the wire.
-              progressive: growth.length > 1 && growth[0].chars < length,
+              progressive: grewWhileLoading,
             });
           });
         }

@@ -67,6 +67,7 @@ function installPageHook() {
  * corrected by asking someone to reload their browser.
  */
 let streamedEvents = null;
+let streamedBody = null;
 
 window.addEventListener("message", event => {
   if (event.source !== window) return;
@@ -74,6 +75,9 @@ window.addEventListener("message", event => {
   if (!data || data.source !== "fancygpt-page-hook") return;
   const {source, ...report} = data;
   if (report.kind === "events") { streamedEvents = report; return; }
+  // A response body that grew while it loaded, which is how a site answering
+  // over XHR rather than a server-sent stream delivers its reply.
+  if (report.kind === "body") { streamedBody = report; return; }
   pageHookReports.push(report);
   // Only the recent ones: this is a diagnostic, not a log.
   if (pageHookReports.length > 8) pageHookReports.shift();
@@ -126,6 +130,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         ...(result?.diagnostics ?? {}),
         pageHook: pageHookReports.slice(),
         stream: streamedEvents,
+        streamBody: streamedBody,
         pageHookWorld: hookLandedInTheWrongWorld() ? "isolated" : "page",
       },
     }))

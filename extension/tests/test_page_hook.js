@@ -191,6 +191,29 @@ async function main() {
     assert(!JSON.stringify(reports).includes("the rest"), "growth is measured, never carried out");
   });
 
+  await test("only a body that grew is carried out of the page", async () => {
+    // A response nobody watched grow is far more likely to be telemetry than
+    // an answer, and there is no reason to move it.
+    const {context, posted} = runHook({response: sseResponse(["{}"])});
+
+    const streamed = new context.window.XMLHttpRequest();
+    streamed.open("POST", "https://gemini.google.com/_/BardChatUi/data/StreamGenerate");
+    streamed.send();
+    streamed.grow("start");
+    streamed.finish("start and the answer");
+
+    const whole = new context.window.XMLHttpRequest();
+    whole.open("POST", "https://gemini.google.com/_/BardChatUi/data/batchexecute");
+    whole.send();
+    whole.grow("telemetry");
+    whole.finish("telemetry");
+
+    const bodies = posted.filter(item => item.kind === "body");
+    assertEqual(bodies.length, 1, "exactly the one that grew");
+    assert(bodies[0].text.includes("the answer"), "forwarded whole, for the runtime to read");
+    assert(!JSON.stringify(bodies).includes("telemetry"), "and nothing else");
+  });
+
   report();
 }
 
