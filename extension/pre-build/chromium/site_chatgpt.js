@@ -430,6 +430,17 @@
       markdownChars: [...document.querySelectorAll(".markdown")].map(el => (el.textContent ?? "").length),
       mainChars: (document.querySelector("main")?.textContent ?? "").length,
     };
+    /* What the site put there instead of an answer.
+     *
+     * The assistant turn holds 25 characters and generation has stopped, so
+     * whatever is in it is a status or a refusal, not a reply -- and the
+     * difference decides everything about the fix. Only a short text is
+     * sampled, and only the assistant's own: a real answer runs to thousands
+     * of characters and is never reported. */
+    const SAMPLE_LIMIT = 200;
+    const shortAssistantSample = boundText != null && boundText.length <= SAMPLE_LIMIT
+      ? boundText
+      : null;
     const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
     const stallReason = Date.now() >= hardDeadline ? "absolute limit" : `no activity for ${idleFor}s`;
     throw new Error(`ChatGPT response stalled (${stallReason}); ` + JSON.stringify({
@@ -442,6 +453,7 @@
       boundTextChars: boundText == null ? null : boundText.length,
       extraction,
       domShape,
+      shortAssistantSample,
       boundTextComplete: boundText != null && looksLikeCompleteJson(boundText),
       newTurnCount: newTurns.length,
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
