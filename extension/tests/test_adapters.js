@@ -366,6 +366,37 @@ async function main() {
     assertEqual(send.clicks, 1, "no retry needed");
   });
 
+  await test("gemini resuming a conversation reaches the composer at all", async () => {
+    /* The path that only runs when continuing.
+     *
+     * Its loop once tested a deadline and an idle clock belonging to a
+     * different function, so resuming a conversation threw a ReferenceError
+     * before the prompt was ever sent -- while starting a fresh one, which
+     * never reaches this code, worked perfectly. Nothing executed it, so
+     * nothing said so.
+     */
+    loadAdapters(["site_gemini.js"], "gemini.google.com");
+    const composer = new StubElement("div", {contentEditable: "true", role: "textbox"});
+    document.body.append(composer);
+    document._composerTarget = composer;
+    // An earlier answer already on the page, as a resumed thread has.
+    document.body.append(new StubElement("model-response", {text: "an earlier answer"}));
+
+    const adapter = globalThis.FancyGPTSites.gemini;
+    const running = adapter.executeTurn("PROMPT-G", 4000, null, {continuing: true});
+    setTimeout(() => {
+      const reply = new StubElement("model-response", {text: ENVELOPE});
+      document.body.append(reply);
+    }, 100);
+
+    // Whatever it settles on, it must not die on a name that is not there.
+    await running.catch(error => {
+      assert(!/is not defined/.test(String(error && error.message)),
+        "resuming must not fail on an undefined reference: " + error);
+      return null;
+    });
+  });
+
   // -- gemini text extraction ------------------------------------------------
   await test("gemini strips the site's own chrome from the reply", async () => {
     loadAdapters(["site_gemini.js"], "gemini.google.com");

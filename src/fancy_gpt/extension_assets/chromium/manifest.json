@@ -10,7 +10,11 @@
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
-    "https://gemini.google.com/*"
+    "https://gemini.google.com/*",
+    "https://grok.com/*",
+    "https://x.com/i/grok*",
+    "https://copilot.microsoft.com/*",
+    "https://m365.cloud.microsoft/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -23,7 +27,11 @@
     {
       "matches": [
         "https://chatgpt.com/*",
-        "https://gemini.google.com/*"
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://x.com/i/grok*",
+        "https://copilot.microsoft.com/*",
+        "https://m365.cloud.microsoft/*"
       ],
       "js": [
         "page_hook.js"
@@ -52,6 +60,18 @@
         "content.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://grok.com/*",
+        "https://x.com/i/grok*",
+        "https://copilot.microsoft.com/*",
+        "https://m365.cloud.microsoft/*"
+      ],
+      "js": [
+        "observer.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "minimum_chrome_version": "116",
@@ -62,7 +82,11 @@
       ],
       "matches": [
         "https://chatgpt.com/*",
-        "https://gemini.google.com/*"
+        "https://gemini.google.com/*",
+        "https://grok.com/*",
+        "https://x.com/i/grok*",
+        "https://copilot.microsoft.com/*",
+        "https://m365.cloud.microsoft/*"
       ]
     }
   ]

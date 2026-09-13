@@ -134,7 +134,11 @@
     let lastCount = -1;
     let stableSince = Date.now();
     const deadline = Date.now() + 10000;
-    while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
+    // Its own deadline. This loop once tested the turn's `hardDeadline` and
+    // idle clock, neither of which exists here, so resuming a conversation
+    // threw a ReferenceError before the prompt was ever sent -- while starting
+    // a fresh one, which never reaches this function, worked perfectly.
+    while (Date.now() < deadline) {
       const count = responseNodes().length;
       if (count !== lastCount) {
         lastCount = count;

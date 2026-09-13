@@ -89,6 +89,7 @@ src/fancy_gpt/extension_assets/chromium/background.js
 src/fancy_gpt/extension_assets/chromium/bridge_transport.js
 src/fancy_gpt/extension_assets/chromium/content.js
 src/fancy_gpt/extension_assets/chromium/manifest.json
+src/fancy_gpt/extension_assets/chromium/observer.js
 src/fancy_gpt/extension_assets/chromium/page_hook.js
 src/fancy_gpt/extension_assets/chromium/popup.html
 src/fancy_gpt/extension_assets/chromium/popup.js
@@ -99,6 +100,7 @@ src/fancy_gpt/extension_assets/firefox/background.js
 src/fancy_gpt/extension_assets/firefox/bridge_transport.js
 src/fancy_gpt/extension_assets/firefox/content.js
 src/fancy_gpt/extension_assets/firefox/manifest.json
+src/fancy_gpt/extension_assets/firefox/observer.js
 src/fancy_gpt/extension_assets/firefox/page_hook.js
 src/fancy_gpt/extension_assets/firefox/popup.html
 src/fancy_gpt/extension_assets/firefox/popup.js

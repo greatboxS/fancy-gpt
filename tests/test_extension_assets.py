@@ -22,14 +22,31 @@ def test_extension_exports_chromium_and_firefox_manifests(tmp_path: Path) -> Non
     assert edge_manifest == chrome_manifest
     assert firefox_manifest["background"]["scripts"] == ["bridge_transport.js", "background.js"]
     assert firefox_manifest["browser_specific_settings"]["gecko"]["id"] == "fancy-gpt@local"
-    scripts = {entry["matches"][0]: entry["js"] for entry in chrome_manifest["content_scripts"]}
+    # Three kinds of content script now, and only one of them drives a site:
+    # the page hook watches every origin, an observer carries shapes home from
+    # origins with no adapter, and these are the ones that run a turn.
+    def driven(manifest: dict) -> dict[str, list[str]]:
+        return {
+            entry["matches"][0]: entry["js"]
+            for entry in manifest["content_scripts"]
+            if "content.js" in entry["js"]
+        }
+
+    scripts = driven(chrome_manifest)
     assert scripts["https://chatgpt.com/*"] == ["site_kit.js", "site_chatgpt.js", "content.js"]
     assert scripts["https://gemini.google.com/*"] == ["site_kit.js", "site_gemini.js", "content.js"]
     # The kit must load before an adapter that calls into it.
     for js in scripts.values():
         assert js.index("site_kit.js") < min(js.index(name) for name in js if name.startswith("site_") and name != "site_kit.js")
-    firefox_scripts = {entry["matches"][0]: entry["js"] for entry in firefox_manifest["content_scripts"]}
-    assert firefox_scripts == scripts
+    assert driven(firefox_manifest) == scripts
+
+    # A watched origin without an adapter gets the observer and nothing else:
+    # observation is not permission to drive a site.
+    hook = next(e for e in chrome_manifest["content_scripts"] if e["js"] == ["page_hook.js"])
+    observer = next(e for e in chrome_manifest["content_scripts"] if e["js"] == ["observer.js"])
+    assert set(scripts) <= set(hook["matches"]), "every driven site is also watched"
+    assert set(observer["matches"]).isdisjoint(scripts), "a driven site reports through its own adapter"
+    assert set(observer["matches"]) < set(hook["matches"])
     for directory in (chrome, edge, firefox):
         assert (directory / "background.js").is_file()
         assert (directory / "bridge_transport.js").is_file()

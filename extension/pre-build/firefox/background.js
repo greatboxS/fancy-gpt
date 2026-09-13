@@ -350,7 +350,12 @@ async function executeJob(job) {
       assistant_turn_id: result.responseIdentity,
       response_identity: result.responseIdentity,
       conversation_id: result.conversationId ?? null,
-      diagnostics: result.diagnostics ?? null
+      diagnostics: {
+        ...(result.diagnostics ?? {}),
+        // Everything watched since the last turn, including sites this one did
+        // not touch. Cleared as it leaves, so each turn carries what is new.
+        otherSites: siteObservations.splice(0, siteObservations.length),
+      }
     });
   } catch (error) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});
@@ -359,6 +364,22 @@ async function executeJob(job) {
     if (tab?.id != null) await releaseTaskTab(tab.id);
     scheduleTaskWindowClose();
   }
+}
+
+/* Shapes seen on sites we watch but do not drive.
+ *
+ * Kept here because a site with no adapter has no turn of its own to report
+ * through. They ride out with the next turn that does run, so measuring a new
+ * site needs no new transport and no new permission: log in, ask it something
+ * by hand, and the shapes arrive in the next ordinary turn's diagnostics.
+ *
+ * Bounded, and shapes only. This is a notebook, not a log.
+ */
+const siteObservations = [];
+
+function rememberObservation(origin, report) {
+  siteObservations.push({origin, at: new Date().toISOString(), ...report});
+  while (siteObservations.length > 24) siteObservations.shift();
 }
 
 globalThis.FancyGPTTransport.setHandler(async message => {
@@ -378,6 +399,10 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     globalThis.FancyGPTTransport.disconnect();
     connectBridge().then(() => sendResponse({ok: true})).catch(error => sendResponse({ok: false, error: String(error)}));
     return true;
+  }
+  if (message?.type === "fancy_site_observation") {
+    rememberObservation(String(message.origin ?? "unknown"), message.report ?? {});
+    return false;
   }
   if (message?.type === "fancy_status") sendResponse(globalThis.FancyGPTTransport.status());
   if (message?.type === "fancy_progress" && message.jobId) {
