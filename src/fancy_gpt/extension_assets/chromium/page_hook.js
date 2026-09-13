@@ -176,8 +176,13 @@
     let lastPath = null;
     let finished = false;
     const unknownOps = new Set();
+    const skippedPaths = new Set();
     let applied = 0;
     let skipped = 0;
+    // A skip that touched a text part is the one that matters: metadata we
+    // cannot place changes nothing, but a dropped piece of the reply is a
+    // shorter answer that still looks complete.
+    let skippedText = 0;
 
     const segments = pointer => pointer.split("/").slice(1).map(part =>
       part.replace(/~1/g, "/").replace(/~0/g, "~"));
@@ -203,7 +208,13 @@
         }
       }
       const target = container(pointer, true);
-      if (!target) { skipped += 1; return; }
+      if (!target) {
+        skipped += 1;
+        const shape = String(pointer ?? "").replace(/\/\d+/g, "/<n>").slice(0, 60);
+        skippedPaths.add(shape);
+        if (shape.includes("/content/parts")) skippedText += 1;
+        return;
+      }
       const {node, key} = target;
       if (operation === "append") {
         node[key] = (node[key] ?? "") + String(value ?? "");
@@ -214,6 +225,9 @@
       } else {
         unknownOps.add(String(operation).slice(0, 24));
         skipped += 1;
+        const shape = String(pointer ?? "").replace(/\/\d+/g, "/<n>").slice(0, 60);
+        skippedPaths.add(shape);
+        if (shape.includes("/content/parts")) skippedText += 1;
       }
     };
 
@@ -259,9 +273,14 @@
       get status() { return document?.message?.status ?? null; },
       stats() {
         return {
-          applied, skipped, finished,
+          applied, skipped, skippedText, finished,
           unknownOps: [...unknownOps].slice(0, 10),
+          skippedPaths: [...skippedPaths].slice(0, 10),
           endTurn: this.endTurn, status: this.status,
+          // What the decoder itself thinks of its result. Anything it could not
+          // place inside the reply makes this false, because a reply that is
+          // quietly short is the failure this whole exercise exists to avoid.
+          trustworthy: skippedText === 0 && unknownOps.size === 0 && finished,
         };
       },
     };
