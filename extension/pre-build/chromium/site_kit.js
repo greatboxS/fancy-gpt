@@ -163,75 +163,73 @@
    * a layout that may never have run.
    */
   const LINE_BREAKING_TAGS = new Set([
-    "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "BR", "DD", "DIV", "DL", "DT",
+    "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DD", "DIV", "DL", "DT",
     "FIELDSET", "FIGCAPTION", "FIGURE", "FOOTER", "FORM", "H1", "H2", "H3",
     "H4", "H5", "H6", "HEADER", "HR", "LI", "MAIN", "NAV", "OL", "P", "PRE",
     "SECTION", "TABLE", "TD", "TH", "TR", "UL",
   ]);
-  // Controls the site draws around a reply. Their labels ("Copy", "Edit") are
-  // not model output and must never reach the parser.
-  const NON_CONTENT_TAGS = new Set(["BUTTON", "SCRIPT", "STYLE", "NOSCRIPT", "SVG", "SELECT", "TEXTAREA"]);
+  // Elements the browser never renders as text. Everything else is kept,
+  // including the site's own controls: a stray "Copy" on its own line is
+  // harmless to every parser downstream, whereas guessing which subtree is
+  // "chrome" once cost a whole reply -- 25 characters survived of 1155.
+  const UNRENDERED_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
 
   function readLiveText(root, options = {}) {
     if (!root) return "";
     const skip = options.skip instanceof Set ? options.skip : new Set(options.skip ?? []);
-
-    // A subtree that renders as one line already has that line in its
-    // textContent, so it is read whole. This is not an optimisation: a
-    // highlighted code token is a <span> per word and a link or inline <code>
-    // sits mid-sentence, so walking into them would scatter one line of prose
-    // or source across a dozen.
-    const isFlat = (node, inPre) => {
-      for (const child of node.children ?? []) {
-        const tag = String(child.tagName ?? "").toUpperCase();
-        if (LINE_BREAKING_TAGS.has(tag) || NON_CONTENT_TAGS.has(tag)) return false;
-        // Only a fence's <code> is verbatim; inline <code> stays in its line.
-        if (inPre && tag === "CODE") return false;
-        if (skip.has(child) || child.getAttribute?.("aria-hidden") === "true") return false;
-        if (!isFlat(child, inPre)) return false;
+    // Chunks, not a growing string: trimming the tail of a 30KB accumulator on
+    // every block boundary turns reading one long reply into quadratic work.
+    const chunks = [];
+    let lastChar = "";
+    const push = text => { if (text) { chunks.push(text); lastChar = text[text.length - 1]; } };
+    const trimTrailingSpaces = () => {
+      while (chunks.length) {
+        const trimmed = chunks[chunks.length - 1].replace(/[ \t]+$/, "");
+        if (trimmed) { chunks[chunks.length - 1] = trimmed; lastChar = trimmed[trimmed.length - 1]; return; }
+        chunks.pop();
+        lastChar = chunks.length ? chunks[chunks.length - 1].slice(-1) : "";
       }
-      return true;
     };
-
-    const parts = [];
+    // Trailing spaces are dropped at a break so a line never ends in padding,
+    // but newlines are never collapsed away: inside a fence they are payload.
+    const breakLine = () => {
+      trimTrailingSpaces();
+      if (chunks.length && lastChar !== "\n") push("\n");
+    };
     const walk = (node, inPre) => {
       if (!node || skip.has(node)) return;
       if (node.nodeType === 3) {
-        const text = (node.nodeValue ?? node.textContent ?? "").trim();
-        if (text) parts.push(text);
+        const raw = node.nodeValue ?? node.textContent ?? "";
+        if (inPre) { push(raw); return; }
+        // Outside a fence, whitespace collapses exactly as CSS would render it,
+        // so markup indentation never reaches the parser as content.
+        const collapsed = raw.replace(/\s+/g, " ");
+        // At the very start of the output too, or markup indentation before the
+        // first element would become a leading space in the reply.
+        push(!chunks.length || lastChar === "\n" ? collapsed.replace(/^ /, "") : collapsed);
         return;
       }
       const tag = String(node.tagName ?? "").toUpperCase();
-      if (NON_CONTENT_TAGS.has(tag)) return;
-      if (node.getAttribute?.("aria-hidden") === "true") return;
-      // Parts are joined with a newline, so a <br> is already accounted for by
-      // the split between the runs either side of it.
-      if (tag === "BR") return;
-      if (tag === "CODE" && inPre) {
-        // The fence body: its newlines are real text nodes and its leading
-        // whitespace is payload the code-change contract matches literally, so
-        // it is taken exactly as it stands.
-        const raw = node.textContent ?? node.innerText ?? "";
-        const text = raw.replace(/^\n/, "").replace(/[ \t]*\n[ \t]*$/, "");
-        if (text) parts.push(text);
-        return;
-      }
-      // A site wraps its fence in <pre> together with a header carrying the
-      // language label -- which is where a ```fancygpt:<id> tag ends up -- and a
-      // Copy control, so <pre> is descended into rather than read whole.
-      const nowInPre = inPre || tag === "PRE";
-      if (isFlat(node, nowInPre)) {
-        const raw = node.textContent ?? node.innerText ?? "";
-        const text = nowInPre ? raw.replace(/^\n/, "").replace(/[ \t]*\n[ \t]*$/, "") : raw.trim();
-        if (text) parts.push(text);
-        return;
-      }
-      for (const child of node.childNodes ?? node.children ?? []) walk(child, nowInPre);
+      if (UNRENDERED_TAGS.has(tag)) return;
+      if (tag === "BR") { trimTrailingSpaces(); push("\n"); return; }
+      // A fence keeps its newlines and its leading indentation verbatim: the
+      // code-change contract matches an OLD block character for character.
+      // Its text is taken whole rather than walked -- syntax highlighting splits
+      // one line into a span per token, and there is no block boundary inside
+      // code worth reconstructing.
+      if (tag === "CODE") { push(node.textContent ?? ""); return; }
+      const pre = inPre || tag === "PRE";
+      const block = LINE_BREAKING_TAGS.has(tag);
+      if (block) breakLine();
+      const children = node.childNodes ?? node.children ?? [];
+      if (children.length === 0) walk({nodeType: 3, nodeValue: node.textContent ?? ""}, pre);
+      else for (const child of children) walk(child, pre);
+      if (block) breakLine();
     };
     walk(root, false);
-    // Only blank edges are removed. A plain trim would strip the leading
-    // indentation of a reply that is nothing but one verbatim block.
-    return parts.join("\n").replace(/^\n+/, "").replace(/\s+$/, "");
+    // Leading NEWLINES only: a reply that is nothing but one fenced block starts
+    // with its own indentation, and that indentation is content.
+    return chunks.join("").replace(/^\n+/, "").replace(/\s+$/, "");
   }
 
   /* Decide when a streamed reply has settled.
@@ -421,7 +419,7 @@
   }
 
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "40c814082dd9";
+  const BUILD = "d2655a59d255";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,

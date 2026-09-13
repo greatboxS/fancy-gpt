@@ -307,9 +307,12 @@ async function main() {
     root.append(pre);
 
     const text = readLiveText(root);
+    // The Copy control is kept. Nothing is dropped by guesswork: the reader has
+    // no idea what is chrome and what is the answer, and a stray label on its
+    // own line costs nothing, while dropping a subtree can cost the reply.
     assertEqual(text,
-      "Here is the change.\nfancygpt:E1-OLD\n    def run(self):\n        return 1",
-      "label on its own line, indentation verbatim, Copy control dropped");
+      "Here is the change.\nfancygpt:E1-OLD\nCopy\n    def run(self):\n        return 1",
+      "label and indentation survive; no subtree is guessed away");
   });
 
   await test("readLiveText keeps a highlighted code line intact", () => {
@@ -351,6 +354,20 @@ async function main() {
     p.append(new StubElement("code", {text: "x=1"}));
     p.append(new StubElement("span", {text: " first"}));
     assertEqual(readLiveText(p), "set x=1 first", "inline code is not a line break");
+  });
+
+  await test("readLiveText never loses content, whatever the markup", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const root = new StubElement("div");
+    // A wrapper the reader has no reason to understand. Earlier versions
+    // treated such nodes as chrome and returned a fragment of the reply.
+    const wrapper = new StubElement("div", {"aria-hidden": "true"});
+    wrapper.append(new StubElement("p", {text: '{"type":"message","text":"done"}'}));
+    root.append(wrapper);
+    const text = readLiveText(root);
+    assert(text.includes('{"type":"message","text":"done"}'),
+      "an unrecognised wrapper must not hide the answer: " + JSON.stringify(text));
   });
 
   report();
