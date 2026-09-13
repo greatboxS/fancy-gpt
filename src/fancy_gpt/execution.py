@@ -107,6 +107,17 @@ class ExecutionStore:
         self._atomic_write(path, raw_text)
         return path
 
+    def save_diagnostics(self, execution_id: str, diagnostics: dict) -> Path:
+        """Keep what the adapter could see, next to what it returned.
+
+        Shapes and counts only, never page text. A turn that worked is the only
+        baseline a stalled one can be read against, and until now the browser
+        reported this every turn and nothing kept it.
+        """
+        path = self.root / f"{execution_id}.diagnostics.json"
+        self._atomic_write(path, json.dumps(diagnostics, indent=2, sort_keys=True))
+        return path
+
     def raw_response(self, execution_id: str) -> str | None:
         path = self.root / f"{execution_id}.response.txt"
         return path.read_text(encoding="utf-8") if path.exists() else None
@@ -239,7 +250,7 @@ class ExecutionCoordinator:
                     question,
                     provider,
                     request_id=status.request_id,
-                    on_raw_response=lambda text: self._save_focused_response(status, text),
+                    on_response=lambda reply: self._save_focused_response(status, reply),
                 )
             status = self._update(status, phase=ExecutionPhase.COMPLETE)
             self.engine.store.update_status(
@@ -254,9 +265,12 @@ class ExecutionCoordinator:
             self.engine.store.fail(status.request_id, error.message)
             raise ExecutionFailed(status) from exc
 
-    def _save_focused_response(self, status: ExecutionStatus, text: str) -> None:
-        path = self.store.save_raw_response(status.execution_id, text)
+    def _save_focused_response(self, status: ExecutionStatus, reply) -> None:
+        path = self.store.save_raw_response(status.execution_id, reply.raw_text)
         self.engine.store.update_status(status.request_id, final_response_file=str(path))
+        diagnostics = getattr(reply, "diagnostics", None)
+        if diagnostics:
+            self.store.save_diagnostics(status.execution_id, diagnostics)
 
     def run_agent(
         self,

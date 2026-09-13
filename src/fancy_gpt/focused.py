@@ -127,7 +127,7 @@ Return ONLY one JSON object matching this schema:
         provider: AutomaticModelProvider,
         *,
         request_id: str | None = None,
-        on_raw_response: Callable[[str], None] | None = None,
+        on_response: Callable[[object], None] | None = None,
     ) -> FocusedAnswer:
         request = self.build_request(question, request_id=request_id)
         provider_started = False
@@ -143,8 +143,8 @@ Return ONLY one JSON object matching this schema:
                 # Persist before parsing so a malformed reply is still
                 # inspectable, and persist every attempt for the same reason.
                 on_response=(
-                    (lambda reply, _attempt: on_raw_response(reply.raw_text))
-                    if on_raw_response is not None
+                    (lambda reply, _attempt: on_response(reply))
+                    if on_response is not None
                     else None
                 ),
             )
