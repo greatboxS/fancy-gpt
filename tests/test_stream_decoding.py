@@ -248,13 +248,20 @@ def _captures(body: str) -> dict:
     return {"streamBodies": [{"path": "StreamGenerate", "text": body}]}
 
 
-def test_a_page_reading_that_parses_keeps_the_turn() -> None:
-    """A reading that parses is a complete envelope by the contract's own
-    definition, and the page is the path with the longest history behind it."""
+def test_a_trustworthy_stream_wins_even_when_the_page_parses() -> None:
+    """Because the page cannot round-trip what the model wrote.
+
+    Markdown becomes elements when it renders, so the backticks of `inline
+    code` and the ```json around a reply are not characters in the document at
+    all. Reading the page returns an answer missing them, on a turn that
+    reports success -- measured live, which is how it was finally noticed.
+    """
     from fancy_gpt.providers.web_automation import _best_reading
 
     page = '{"request_id": "x", "answer": "complete", "confidence": 1}'
-    assert _best_reading("gemini", _Reply(page, _captures(GEMINI_BODY))) == page
+    chosen = _best_reading("gemini", _Reply(page, _captures(GEMINI_BODY)))
+    assert chosen != page
+    assert parse_json_object(chosen)["answer"].startswith("A hash collision occurs")
 
 
 def test_the_stream_takes_over_when_the_page_froze() -> None:

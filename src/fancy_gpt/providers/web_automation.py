@@ -51,21 +51,27 @@ def _stale_side_hint() -> str:
 
 
 def _best_reading(site: str, response) -> str:
-    """The reply as the stream carried it, when the page's reading fell short.
+    """The reply as the stream carried it, whenever the stream can be trusted.
 
-    Both are read on every turn. The page is preferred while it is complete,
-    because it is the path with the longest history behind it. The stream takes
-    over only when it is trustworthy -- everything placed, nothing
-    unrecognised, the response seen through to its end -- and the page is
-    plainly worse: shorter, or not parseable at all.
+    Both are read on every turn, and the page was preferred at first as the
+    path with the longest history behind it. Measurement changed that. Across
+    every turn where both were read, the stream either agreed with the page or
+    was more faithful than it, and never worse:
 
-    That second condition is what a hidden document produces. It stops being
-    painted and the reply freezes part-written, so the page holds a fragment
-    while the response that carried the answer finished long ago.
+    - A frozen page holds a fragment. A hidden document stops being painted, so
+      the reply stops growing in the DOM while the response that carried it
+      finished long ago.
+    - A rendered page cannot round-trip markdown. The model writes ```json and
+      `inline code`; the renderer turns those into elements, and the characters
+      themselves are not in the document at all. Reading the page returns an
+      answer with its backticks missing, on a turn that reports success -- which
+      is how that went unnoticed until the two readings were compared.
 
-    A decoder that is unsure changes nothing here. Refusing costs a turn read
-    from the page exactly as before; guessing would cost an answer that is
-    quietly wrong, and nothing downstream could tell.
+    So a trustworthy decoding wins. Trustworthy is strict: everything placed,
+    nothing unrecognised, the response seen through to its end. A decoder that
+    is unsure changes nothing and the page answers exactly as before, because
+    refusing costs one reading while guessing costs an answer that is quietly
+    wrong, with nothing downstream able to tell.
     """
     page_text = response.text or ""
     diagnostics = response.diagnostics or {}
@@ -75,11 +81,6 @@ def _best_reading(site: str, response) -> str:
         bodies=diagnostics.get("streamBodies") or None,
     )
     if decoded is None or not decoded.trustworthy:
-        return page_text
-    # A page reading that parses is a complete envelope by the contract's own
-    # definition, so it keeps the turn. Comparing lengths as well only blurred
-    # that: the two carry the same reply and differ by the fence the page lost.
-    if _parses(page_text):
         return page_text
     return decoded.text
 
