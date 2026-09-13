@@ -48,6 +48,11 @@ function runHook({response}) {
       send() { FakeXhr.sent.push(this); }
       addEventListener(type, handler) { (this.listeners[type] ??= []).push(handler); }
       getResponseHeader() { return "application/json"; }
+      grow(text) {
+        this.responseText = text;
+        this.readyState = 3;
+        for (const h of this.listeners.readystatechange ?? []) h();
+      }
       finish(text) { this.responseText = text; for (const h of this.listeners.loadend ?? []) h(); }
       static sent = [];
     },
@@ -155,6 +160,35 @@ async function main() {
     assert(seen.path.includes("StreamGenerate"), "and be identifiable by endpoint");
     assert(seen.chars > 0, "with the size that arrived");
     assert(!JSON.stringify(seen).includes("wrb.fr"), "measured, not carried out of the page");
+  });
+
+  await test("a response that grows is told apart from one that arrives whole", async () => {
+    /* The distinction decides what a decoder can be responsible for.
+     *
+     * A body that grows can carry a reply as it is written; one that appears
+     * complete says nothing until it is finished, so the page still has to say
+     * when the turn is done. A total size cannot tell those apart.
+     */
+    const {context, posted} = runHook({response: sseResponse(["{}"])});
+
+    const streamed = new context.window.XMLHttpRequest();
+    streamed.open("POST", "https://gemini.google.com/_/BardChatUi/data/StreamGenerate");
+    streamed.send();
+    streamed.grow("part");
+    streamed.grow("part and more");
+    streamed.finish("part and more and the rest");
+
+    const whole = new context.window.XMLHttpRequest();
+    whole.open("POST", "https://gemini.google.com/_/BardChatUi/data/batchexecute");
+    whole.send();
+    whole.grow("all of it at once");
+    whole.finish("all of it at once");
+
+    const reports = posted.filter(item => item.kind === "xhr");
+    assertEqual(reports.length, 2, "both are reported");
+    assertEqual(reports[0].progressive, true, "a growing body is recognised");
+    assertEqual(reports[1].progressive, false, "one that was already complete is not");
+    assert(!JSON.stringify(reports).includes("the rest"), "growth is measured, never carried out");
   });
 
   report();

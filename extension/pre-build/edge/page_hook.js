@@ -206,6 +206,21 @@
         const watched = this.__fancyGpt;
         if (watched && watched.method === "POST") {
           const startedAt = Date.now();
+          /* Whether the body arrives in pieces or all at once.
+           *
+           * A total size cannot tell those apart, and the difference decides
+           * what a decoder can be responsible for: a response that grows can
+           * carry a reply as it is written, while one that appears whole says
+           * nothing until it is finished, leaving the page to say when a turn
+           * is done. Lengths and timings only -- never what arrived.
+           */
+          const growth = [];
+          this.addEventListener("readystatechange", () => {
+            if (this.readyState !== 3 || growth.length >= 40) return;
+            let length = 0;
+            try { length = (this.responseText ?? "").length; } catch (_) { return; }
+            growth.push({ms: Date.now() - startedAt, chars: length});
+          });
           this.addEventListener("loadend", () => {
             let length = 0;
             try { length = (this.responseText ?? "").length; } catch (_) {}
@@ -216,6 +231,10 @@
               contentType: (this.getResponseHeader?.("content-type")) || "",
               chars: length,
               totalMs: Date.now() - startedAt,
+              growth,
+              // One sample that already holds everything means it was not
+              // streamed to us, however it travelled on the wire.
+              progressive: growth.length > 1 && growth[0].chars < length,
             });
           });
         }
