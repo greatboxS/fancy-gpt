@@ -35,6 +35,17 @@ function openTickPort(jobId, onTick) {
  */
 const pageHookReports = [];
 
+/* Did the hook land in the page's world, or in ours?
+ *
+ * The two worlds have separate window objects, so a hook that ran where it was
+ * meant to is invisible from here. Seeing its marker means it ran beside this
+ * script instead, wrapping a fetch the page never calls -- which looks exactly
+ * like a site that makes no requests, and would be read as one.
+ */
+function hookLandedInTheWrongWorld() {
+  try { return window.__fancyGptPageHook === true; } catch (_) { return false; }
+}
+
 function installPageHook() {
   try {
     const element = document.createElement("script");
@@ -67,6 +78,18 @@ window.addEventListener("message", event => {
   // Only the recent ones: this is a diagnostic, not a log.
   if (pageHookReports.length > 8) pageHookReports.shift();
 });
+
+/* The hook is declared as a MAIN-world content script, which the browser
+ * injects itself, so the page's CSP does not apply to it. A <script> element
+ * pointing at an extension file is subject to that CSP and ChatGPT's refuses
+ * one: measured, the hook then reported nothing at all -- not even its own
+ * install, which reads exactly like a site that makes no requests.
+ *
+ * Seeing its marker from here means it ran in this world instead, on a browser
+ * too old for MAIN-world content scripts. The element is the fallback for that
+ * case, and the turn reports which world it ended up in either way.
+ */
+if (hookLandedInTheWrongWorld()) installPageHook();
 
 ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "fancy_cancel_turn") {
@@ -103,6 +126,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         ...(result?.diagnostics ?? {}),
         pageHook: pageHookReports.slice(),
         stream: streamedEvents,
+        pageHookWorld: hookLandedInTheWrongWorld() ? "isolated" : "page",
       },
     }))
     .catch(error => sendResponse({ok: false, error: String(error?.message ?? error)}))
