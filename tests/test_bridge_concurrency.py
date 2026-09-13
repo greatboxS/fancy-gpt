@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from fancy_gpt.bridge.server import BrowserWorker
+from fancy_gpt.bridge.server import BridgeHub, BrowserWorker
 
 
 class FakeConnection:
@@ -86,6 +86,46 @@ def test_worker_disconnect_wakes_all_pending_jobs_immediately() -> None:
     assert len(failures) == 3
     assert time.monotonic() - started < 1
     assert all(item["type"] == "job_error" and "generation lost" in item["error"] for item in failures)
+
+
+def test_same_conversation_serializes_while_different_conversation_overlaps() -> None:
+    hub = BridgeHub("token")
+    inside: list[str] = []
+    peak_same = 0
+    different_overlapped = threading.Event()
+    first_entered = threading.Event()
+    release_first = threading.Event()
+
+    def enter(name: str, conversation_id: str) -> None:
+        nonlocal peak_same
+        message = {
+            "tunnel_id": "edge-remote", "site": "chatgpt",
+            "conversation": {"mode": "continue", "conversation_id": conversation_id},
+        }
+        with hub.conversation_slot(message, 2):
+            inside.append(name)
+            if conversation_id == "same":
+                peak_same = max(peak_same, sum(item.startswith("same") for item in inside))
+                if name == "same-1":
+                    first_entered.set()
+                    release_first.wait(1)
+            else:
+                different_overlapped.set()
+            inside.remove(name)
+
+    first = threading.Thread(target=enter, args=("same-1", "same"))
+    second = threading.Thread(target=enter, args=("same-2", "same"))
+    other = threading.Thread(target=enter, args=("other", "different"))
+    first.start()
+    assert first_entered.wait(1)
+    second.start()
+    other.start()
+    assert different_overlapped.wait(1), "an unrelated conversation must not queue behind the first"
+    release_first.set()
+    for thread in (first, second, other):
+        thread.join(2)
+    assert peak_same == 1
+    assert hub._conversation_locks == {}
 
 
 def _answer_when_registered(worker: BrowserWorker, work_s: float, stop: threading.Event) -> None:

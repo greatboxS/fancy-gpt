@@ -5,6 +5,7 @@ import queue
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -194,6 +195,34 @@ class BridgeHub:
         # the worker's thread while the controller's own thread is blocked
         # in recv().
         self._subscribers: dict[int, tuple[Any, threading.Lock, str]] = {}
+        self._conversation_locks: dict[tuple[str, str, str], tuple[threading.Lock, int]] = {}
+
+    @contextmanager
+    def conversation_slot(self, message: dict[str, Any], timeout_s: float):
+        """Serialize an exact provider conversation without blocking peers."""
+        conversation = message.get("conversation")
+        conversation_id = str(conversation.get("conversation_id", "")) if isinstance(conversation, dict) else ""
+        if not conversation_id:
+            yield
+            return
+        key = (str(message.get("tunnel_id", "")), str(message.get("site", "")), conversation_id)
+        with self._lock:
+            lock, refs = self._conversation_locks.get(key, (threading.Lock(), 0))
+            self._conversation_locks[key] = (lock, refs + 1)
+        acquired = lock.acquire(timeout=timeout_s)
+        try:
+            if not acquired:
+                raise TimeoutError(f"conversation capacity wait timed out for {conversation_id}")
+            yield
+        finally:
+            if acquired:
+                lock.release()
+            with self._lock:
+                current_lock, current_refs = self._conversation_locks[key]
+                if current_refs <= 1:
+                    self._conversation_locks.pop(key, None)
+                else:
+                    self._conversation_locks[key] = (current_lock, current_refs - 1)
 
     def _fresh(self, worker: BrowserWorker) -> bool:
         return worker.alive and (time.monotonic() - worker.last_seen) <= self.stale_after_s
@@ -484,7 +513,10 @@ class BridgeServer:
                     if requested_timeout <= 0:
                         raise ValueError("job timeout must be positive")
                     effective_timeout = max(1.0, min(requested_timeout, self.job_timeout_s))
-                    response = worker.request(message, timeout_s=effective_timeout)
+                    started_waiting = time.monotonic()
+                    with self.hub.conversation_slot(message, effective_timeout):
+                        remaining = max(0.001, effective_timeout - (time.monotonic() - started_waiting))
+                        response = worker.request(message, timeout_s=remaining)
                     self.hub.record_job_result(response.get("type") != "job_error")
                 except Exception as exc:
                     response = {"type": "job_error", "job_id": message.get("job_id"), "error": str(exc)}
