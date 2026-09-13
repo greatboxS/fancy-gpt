@@ -57,6 +57,8 @@ async function main() {
     const result = await running;
     assertEqual(result.text, ENVELOPE, "returned text");
     assertEqual(result.responseIdentity, "turn-1", "bound to the turn it created");
+    assert(result.diagnostics?.waiter, "successful turns expose waiter diagnostics");
+    assert(typeof result.diagnostics.maxEvaluateMs === "number", "evaluation cost is measured");
   });
 
   await test("chatgpt streams partial text through the observer", async () => {

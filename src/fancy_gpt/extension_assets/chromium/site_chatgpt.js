@@ -244,11 +244,13 @@
     let lastReported = null;
     const gate = createCompletionGate({stabilityMs: 1200});
     const activity = createActivityWaiter();
+    let maxEvaluateMs = 0;
     // A tick pushed from the background worker is an unthrottled clock: a reply
     // that has finished produces no more mutations to wake us with.
     if (options?.onTick) options.onTick(() => { tickCount += 1; activity.notify(); });
     const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
+      const evaluateStartedAt = Date.now();
       const candidates = [];
       for (const id of turnIds()) {
         const text = assistantText(id);
@@ -321,13 +323,23 @@
         const complete = text != null && looksLikeCompleteJson(text);
         const settled = gate.observe({text, active, complete});
         if (settled) {
+          maxEvaluateMs = Math.max(maxEvaluateMs, Date.now() - evaluateStartedAt);
+          const diagnostics = {
+            ticksReceived: tickCount, loopIterations: wakeCount,
+            maxEvaluateMs, waiter: activity.stats(), completionCandidateAgeMs: gate.candidateAgeMs,
+          };
           release();
-          return {text: settled.text, responseIdentity: boundId, conversationId: currentConversationId()};
+          return {
+            text: settled.text, responseIdentity: boundId,
+            conversationId: currentConversationId(), diagnostics,
+          };
         }
       }
+      maxEvaluateMs = Math.max(maxEvaluateMs, Date.now() - evaluateStartedAt);
       // Woken by a mutation or a background tick; the delay is only a floor.
       wakeCount += 1;
-      await activity.wait(500);
+      const waitMs = gate.remainingMs == null ? 500 : Math.max(1, Math.min(500, gate.remainingMs));
+      await activity.wait(waitMs);
     }
     release();
     /* A timeout that only says "timed out" cannot be diagnosed without
@@ -354,8 +366,11 @@
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
       generating: isGenerating(),
       candidatePending: gate.pending,
+      completionCandidateAgeMs: gate.candidateAgeMs,
       ticksReceived: tickCount,
       loopIterations: wakeCount,
+      maxEvaluateMs,
+      waiter: activity.stats(),
       idleSeconds: idleFor,
     }));
   }

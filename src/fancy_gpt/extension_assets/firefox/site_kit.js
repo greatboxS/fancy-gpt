@@ -226,6 +226,10 @@
         return now() - candidateSince >= stabilityMs ? {text} : null;
       },
       get pending() { return candidateText !== null; },
+      get remainingMs() {
+        return candidateText === null ? null : Math.max(0, stabilityMs - (now() - candidateSince));
+      },
+      get candidateAgeMs() { return candidateText === null ? null : Math.max(0, now() - candidateSince); },
     };
   }
 
@@ -239,19 +243,47 @@
    */
   function createActivityWaiter(target = document.body) {
     let wake = null;
-    const notify = () => { const resolve = wake; wake = null; if (resolve) resolve("activity"); };
+    let generation = 0;
+    let consumedGeneration = 0;
+    let notifications = 0;
+    let immediateWakes = 0;
+    let awaitedWakes = 0;
+    let timeouts = 0;
+    const notify = () => {
+      generation += 1;
+      notifications += 1;
+      const resolve = wake;
+      if (resolve) resolve("activity");
+    };
     const observer = new MutationObserver(notify);
     observer.observe(target, {childList: true, subtree: true, characterData: true});
     return {
       notify,
       wait(maxMs) {
+        // Activity is level-triggered, not a disposable edge. A mutation or
+        // background tick that arrives between two waits remains observable by
+        // the next wait instead of being lost in a wake=null blind spot.
+        if (generation !== consumedGeneration) {
+          consumedGeneration = generation;
+          immediateWakes += 1;
+          return Promise.resolve("activity");
+        }
         return new Promise(resolve => {
           let done = false;
-          const settle = reason => { if (done) return; done = true; wake = null; resolve(reason); };
+          const settle = reason => {
+            if (done) return;
+            done = true;
+            wake = null;
+            consumedGeneration = generation;
+            if (reason === "activity") awaitedWakes += 1;
+            else timeouts += 1;
+            resolve(reason);
+          };
           wake = settle;
           setTimeout(() => settle("timeout"), maxMs);
         });
       },
+      stats() { return {notifications, immediateWakes, awaitedWakes, timeouts, generation}; },
       stop() { try { observer.disconnect(); } catch (_) {} wake = null; },
     };
   }

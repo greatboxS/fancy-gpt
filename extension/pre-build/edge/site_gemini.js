@@ -217,9 +217,12 @@
     let lastReported = null;
     const gate = createCompletionGate({stabilityMs: 1200});
     const activity = createActivityWaiter();
+    let tickCount = 0;
+    let loopIterations = 0;
+    let maxEvaluateMs = 0;
     // An unthrottled clock from the background worker: a finished reply
     // produces no further mutations to wake this loop with.
-    if (options?.onTick) options.onTick(activity.notify);
+    if (options?.onTick) options.onTick(() => { tickCount += 1; activity.notify(); });
     // Driven by DOM mutations, because this loop's timer is throttled while the
     // automation window is hidden.
     const stopObserving = onProgress
@@ -230,6 +233,7 @@
       : null;
     const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
+      const evaluateStartedAt = Date.now();
       if (options?.isCancelled?.()) {
         const stopped = stopGeneration(SELECTORS.stop);
         release();
@@ -251,23 +255,35 @@
       }
       const complete = text != null && looksLikeCompleteJson(text);
       if (gate.observe({text, active, complete})) {
+        maxEvaluateMs = Math.max(maxEvaluateMs, Date.now() - evaluateStartedAt);
+        const diagnostics = {
+          ticksReceived: tickCount, loopIterations,
+          maxEvaluateMs, waiter: activity.stats(), completionCandidateAgeMs: gate.candidateAgeMs,
+        };
         release();
         return {
           text,
           responseIdentity: `gemini-response-${baselineCount + 1}`,
           conversationId: currentConversationId(),
+          diagnostics,
         };
       }
+      maxEvaluateMs = Math.max(maxEvaluateMs, Date.now() - evaluateStartedAt);
       // Woken by a mutation or a background tick; the delay is only a floor.
-      await activity.wait(500);
+      loopIterations += 1;
+      const waitMs = gate.remainingMs == null ? 500 : Math.max(1, Math.min(500, gate.remainingMs));
+      await activity.wait(waitMs);
     }
     release();
     const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
-    throw new Error(
-      Date.now() >= hardDeadline
-        ? "Gemini response exceeded the absolute limit"
-        : `Gemini response stalled: no activity for ${idleFor}s`
-    );
+    throw new Error((Date.now() >= hardDeadline
+        ? "Gemini response exceeded the absolute limit; "
+        : `Gemini response stalled: no activity for ${idleFor}s; `)
+      + JSON.stringify({
+        ticksReceived: tickCount, loopIterations, maxEvaluateMs,
+        waiter: activity.stats(), candidatePending: gate.pending,
+        completionCandidateAgeMs: gate.candidateAgeMs,
+      }));
   }
 
   globalThis.FancyGPTSites = globalThis.FancyGPTSites ?? {};

@@ -262,6 +262,9 @@ async function executeJob(job) {
       timeoutMs: Math.max(1000, Math.floor(((job.timeout_s ?? 300) - 5) * 1000))
     });
     if (!result || !result.ok) throw new Error(result?.error ?? "site content adapter failed");
+    if (result.diagnostics) {
+      console.info("FancyGPT turn diagnostics", {browser: config.browserName, site, jobId: job.job_id, ...result.diagnostics});
+    }
     if (result.cancelled) {
       // Report cancellation distinctly. The controller must be able to tell a
       // stopped turn from one that answered, and keep whatever partial text
@@ -281,7 +284,8 @@ async function executeJob(job) {
       text: result.text,
       assistant_turn_id: result.responseIdentity,
       response_identity: result.responseIdentity,
-      conversation_id: result.conversationId ?? null
+      conversation_id: result.conversationId ?? null,
+      diagnostics: result.diagnostics ?? null
     });
   } catch (error) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});

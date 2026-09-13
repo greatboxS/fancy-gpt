@@ -265,6 +265,28 @@ async function main() {
     assert(gate.pending === false, "no candidate is pending");
   });
 
+  await test("activity arriving between waits is remembered", async () => {
+    loadAdapters([]);
+    const waiter = globalThis.FancyGPTSiteKit.createActivityWaiter();
+    // This is the old blind spot: no promise is waiting when activity arrives.
+    waiter.notify();
+    const started = Date.now();
+    assertEqual(await waiter.wait(3000), "activity", "latched activity wakes the next wait");
+    assert(Date.now() - started < 100, "must not fall through to the throttled timeout");
+    assertEqual(waiter.stats().immediateWakes, 1, "lost edge was consumed exactly once");
+    waiter.stop();
+  });
+
+  await test("completion gate exposes its remaining stability deadline", () => {
+    loadAdapters([]);
+    let clock = 100;
+    const gate = globalThis.FancyGPTSiteKit.createCompletionGate({stabilityMs: 1200, now: () => clock});
+    gate.observe({text: '{"type":"message","text":"done"}', active: false, complete: true});
+    assertEqual(gate.remainingMs, 1200, "candidate begins with a full stability window");
+    clock += 450;
+    assertEqual(gate.remainingMs, 750, "deadline decreases independently of mutations");
+  });
+
   report();
 }
 
