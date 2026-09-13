@@ -25,6 +25,7 @@ async function main() {
   const pending = new Map();
   const sent = [];
   const stored = {};
+  const sessionStored = {};
   const removed = event();
   let handler;
   let reloads = 0;
@@ -62,6 +63,9 @@ async function main() {
         await new Promise(resolve => setImmediate(resolve));
         Object.assign(stored, values);
       },
+    }, session: {
+      async get(key) { return {[key]: sessionStored[key]}; },
+      async set(values) { Object.assign(sessionStored, values); },
     }},
     runtime: {
       onConnect: event(), onInstalled: event(), onStartup: event(), onMessage: event(),
@@ -73,6 +77,10 @@ async function main() {
     async connect() {}, disconnect() {}, status() { return {}; },
     send(message) { sent.push(message); },
   };
+  windows.set(9, {id: 9, tabs: [{id: 99}]});
+  sessionStored.fancyGptSurfaceLeases = [
+    {leaseId: 999, jobId: "orphan", epoch: 1, windowId: 9, tabId: 99},
+  ];
   const context = {
     browser, console, setTimeout, clearTimeout, setInterval, clearInterval,
     __FANCYGPT_TEST__: true, FancyGPTTransport: transport,
@@ -80,6 +88,10 @@ async function main() {
   context.globalThis = context;
   const source = fs.readFileSync(path.join(__dirname, "../common/background.js"), "utf8");
   vm.runInNewContext(source, context, {filename: "background.js"});
+
+  await waitUntil(() => !windows.has(9));
+  assert(!windows.has(9), "a restarted worker quarantines its recorded orphan window");
+  assert.strictEqual(sessionStored.fancyGptSurfaceLeases.length, 0);
 
   autoSubmit = false;
   const first = handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "a", prompt: "A", generation_epoch: 1});
@@ -101,6 +113,7 @@ async function main() {
 
   assert.strictEqual(windows.size, 2, "concurrent turns must own separate windows");
   assert.strictEqual(context.FancyGPTBackgroundTest.surfaceLeases.size, 2);
+  assert.strictEqual(sessionStored.fancyGptSurfaceLeases.length, 2, "live lease ownership is persisted");
   const entries = [...context.FancyGPTBackgroundTest.activeJobs.values()];
   assert.notStrictEqual(entries[0].tabId, entries[1].tabId, "tabs must not be shared");
   assert.strictEqual(removed.size, 2, "each in-flight send owns one close watcher");
@@ -115,6 +128,7 @@ async function main() {
   pending.get(firstTab).resolve({ok: true, text: "A", responseIdentity: "a1"});
   await first;
   assert.strictEqual(windows.size, 0);
+  assert.strictEqual(sessionStored.fancyGptSurfaceLeases.length, 0, "released leases leave no recovery record");
   assert.strictEqual(removed.size, 0);
   assert.deepStrictEqual(sent.filter(item => item.type === "job_result").map(item => item.job_id).sort(), ["a", "b"]);
 
@@ -139,7 +153,7 @@ async function main() {
   const closedJob = handler({
     type: "job", operation: "model.turn", site: "chatgpt", job_id: "closed", prompt: "x", generation_epoch: 1,
   });
-  await new Promise(resolve => setImmediate(resolve));
+  await waitUntil(() => context.FancyGPTBackgroundTest.activeJobs.get("closed")?.tabId != null);
   const closedTab = context.FancyGPTBackgroundTest.activeJobs.get("closed").tabId;
   removed.emit(closedTab);
   await closedJob;

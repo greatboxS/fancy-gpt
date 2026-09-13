@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "aa6a446994b7";
+const EXTENSION_BUILD = "09ec86a6f9fb";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -18,6 +18,41 @@ const DEFAULTS = {
 
 let nextLeaseId = 1;
 const surfaceLeases = new Map();
+const SURFACE_SESSION_KEY = "fancyGptSurfaceLeases";
+let surfaceStateTail = Promise.resolve();
+
+function withSurfaceStateLock(operation) {
+  const next = surfaceStateTail.then(operation, operation);
+  surfaceStateTail = next.catch(() => {});
+  return next;
+}
+
+async function writeSurfaceState() {
+  const area = ext.storage.session;
+  if (!area) return;
+  const records = [...surfaceLeases.values()].map(lease => ({
+    leaseId: lease.leaseId, jobId: lease.jobId, epoch: lease.epoch,
+    windowId: lease.windowId, tabId: lease.tabId,
+  }));
+  await area.set({[SURFACE_SESSION_KEY]: records});
+}
+
+async function quarantineOrphanSurfaces() {
+  const area = ext.storage.session;
+  if (!area) return;
+  const stored = await area.get(SURFACE_SESSION_KEY);
+  const records = Array.isArray(stored?.[SURFACE_SESSION_KEY]) ? stored[SURFACE_SESSION_KEY] : [];
+  // A new service-worker generation cannot prove the outcome of an old turn.
+  // Never replay it. Close only windows whose exact ids this extension stored.
+  for (const record of records) {
+    if (Number.isInteger(record?.windowId)) {
+      try { await ext.windows.remove(record.windowId); } catch (_) {}
+    }
+  }
+  await area.set({[SURFACE_SESSION_KEY]: []});
+}
+
+const surfaceRecovery = withSurfaceStateLock(quarantineOrphanSurfaces).catch(() => {});
 let focusTail = Promise.resolve();
 
 async function acquireFocus() {
@@ -65,6 +100,7 @@ async function acquireSurface(jobId, epoch, url) {
     leaseId: nextLeaseId++, jobId, epoch, windowId: created.id, tabId: tab.id, released: false,
   };
   surfaceLeases.set(lease.leaseId, lease);
+  await withSurfaceStateLock(writeSurfaceState);
   return lease;
 }
 
@@ -72,6 +108,7 @@ async function releaseSurface(lease) {
   if (!lease || lease.released) return;
   lease.released = true;
   surfaceLeases.delete(lease.leaseId);
+  await withSurfaceStateLock(writeSurfaceState);
   // Close only the exact window created for this lease. A stale completion can
   // never remove another job's tab, even if jobs finish out of order.
   try { await ext.windows.remove(lease.windowId); } catch (_) {}
@@ -244,6 +281,7 @@ async function executeJob(job) {
   let lease = null;
   let releaseFocus = null;
   try {
+    await surfaceRecovery;
     if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
     // Which sites this build can drive is decided by which adapters registered
     // themselves, not by a name hardcoded in the runtime layer.
