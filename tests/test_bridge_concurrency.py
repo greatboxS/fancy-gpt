@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from fancy_gpt.bridge.server import BridgeHub, BrowserWorker
+from fancy_gpt.bridge.server import BridgeHub, BrowserWorker, JobCancelledError
 
 
 class FakeConnection:
@@ -159,6 +159,46 @@ def test_same_conversation_serializes_while_different_conversation_overlaps() ->
     for thread in (first, second, other):
         thread.join(2)
     assert peak_same == 1
+    assert hub._conversation_locks == {}
+
+
+def test_conversation_waiter_can_be_cancelled_before_entering_slot() -> None:
+    hub = BridgeHub("token")
+    first_entered = threading.Event()
+    release_first = threading.Event()
+    cancelled: list[str] = []
+    message = {
+        "job_id": "first", "tunnel_id": "edge-remote", "site": "chatgpt",
+        "conversation": {"mode": "continue", "conversation_id": "shared"},
+    }
+
+    def first() -> None:
+        with hub.conversation_slot(message, 2):
+            first_entered.set()
+            release_first.wait(1)
+
+    def second() -> None:
+        try:
+            with hub.conversation_slot({**message, "job_id": "second"}, 2):
+                raise AssertionError("cancelled waiter entered the protected slot")
+        except JobCancelledError as exc:
+            cancelled.append(str(exc))
+
+    owner = threading.Thread(target=first)
+    waiter = threading.Thread(target=second)
+    owner.start()
+    assert first_entered.wait(1)
+    waiter.start()
+    deadline = time.monotonic() + 1
+    while ("edge-remote", "second") not in hub._conversation_waiters and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert hub.cancel_conversation_waiter("edge-remote", "second", "caller stopped")
+    waiter.join(1)
+    release_first.set()
+    owner.join(1)
+
+    assert cancelled == ["caller stopped"]
+    assert hub._conversation_waiters == {}
     assert hub._conversation_locks == {}
 
 

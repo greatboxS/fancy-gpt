@@ -23,6 +23,10 @@ def _is_loopback_host(host: str) -> bool:
         return False
 
 
+class JobCancelledError(Exception):
+    """A job was cancelled before it could be submitted to a browser."""
+
+
 @dataclass
 class BrowserWorker:
     connection: ServerConnection
@@ -240,6 +244,7 @@ class BridgeHub:
         # in recv().
         self._subscribers: dict[int, tuple[Any, threading.Lock, str]] = {}
         self._conversation_locks: dict[tuple[str, str, str], tuple[threading.Lock, int]] = {}
+        self._conversation_waiters: dict[tuple[str, str], tuple[threading.Event, str]] = {}
 
     @contextmanager
     def conversation_slot(self, message: dict[str, Any], timeout_s: float):
@@ -250,23 +255,55 @@ class BridgeHub:
             yield
             return
         key = (str(message.get("tunnel_id", "")), str(message.get("site", "")), conversation_id)
+        job_key = (key[0], str(message.get("job_id", "")))
+        cancelled = threading.Event()
         with self._lock:
             lock, refs = self._conversation_locks.get(key, (threading.Lock(), 0))
             self._conversation_locks[key] = (lock, refs + 1)
-        acquired = lock.acquire(timeout=timeout_s)
+            self._conversation_waiters[job_key] = (cancelled, "cancelled before browser submission")
+        deadline = time.monotonic() + timeout_s
+        acquired = False
         try:
-            if not acquired:
-                raise TimeoutError(f"conversation capacity wait timed out for {conversation_id}")
+            while not cancelled.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"conversation capacity wait timed out for {conversation_id}")
+                acquired = lock.acquire(timeout=min(0.05, remaining))
+                if acquired:
+                    break
+            if cancelled.is_set():
+                with self._lock:
+                    reason = self._conversation_waiters.get(job_key, (cancelled, "cancelled"))[1]
+                raise JobCancelledError(reason)
+            # From here cancellation belongs to the worker queue/active job.
+            # Remove this registry entry before yielding so the cancel path
+            # cannot acknowledge locally while generation is already running.
+            with self._lock:
+                if cancelled.is_set():
+                    reason = self._conversation_waiters.get(job_key, (cancelled, "cancelled"))[1]
+                    raise JobCancelledError(reason)
+                self._conversation_waiters.pop(job_key, None)
             yield
         finally:
             if acquired:
                 lock.release()
             with self._lock:
+                self._conversation_waiters.pop(job_key, None)
                 current_lock, current_refs = self._conversation_locks[key]
                 if current_refs <= 1:
                     self._conversation_locks.pop(key, None)
                 else:
                     self._conversation_locks[key] = (current_lock, current_refs - 1)
+
+    def cancel_conversation_waiter(self, tunnel_id: str, job_id: str, reason: str) -> bool:
+        with self._lock:
+            waiter = self._conversation_waiters.get((tunnel_id, job_id))
+            if waiter is None:
+                return False
+            event, _old_reason = waiter
+            self._conversation_waiters[(tunnel_id, job_id)] = (event, reason)
+            event.set()
+            return True
 
     def _fresh(self, worker: BrowserWorker) -> bool:
         return worker.alive and (time.monotonic() - worker.last_seen) <= self.stale_after_s
@@ -559,7 +596,8 @@ class BridgeServer:
                 }))
             elif msg_type == "job":
                 tunnel_id = str(message.get("tunnel_id", ""))
-                worker = self.hub.worker_for(tunnel_id, str(message.get("site", "")))
+                site = str(message.get("site", ""))
+                worker = self.hub.worker_for(tunnel_id, site)
                 if worker is None:
                     self.hub.record_job_result(False)
                     connection.send(dumps({
@@ -576,9 +614,20 @@ class BridgeServer:
                     effective_timeout = max(1.0, min(requested_timeout, self.job_timeout_s))
                     started_waiting = time.monotonic()
                     with self.hub.conversation_slot(message, effective_timeout):
+                        # The generation selected before a conversation wait may
+                        # have disappeared. Route against the current snapshot.
+                        worker = self.hub.worker_for(tunnel_id, site)
+                        if worker is None:
+                            raise RuntimeError(f"no browser worker connected for tunnel {tunnel_id} and site {site}")
                         remaining = max(0.001, effective_timeout - (time.monotonic() - started_waiting))
                         response = worker.request(message, timeout_s=remaining)
                     self.hub.record_job_result(response.get("type") != "job_error")
+                except JobCancelledError as exc:
+                    response = {
+                        "type": "job_cancelled", "job_id": message.get("job_id"),
+                        "reason": str(exc),
+                    }
+                    self.hub.record_job_result(False)
                 except Exception as exc:
                     response = {"type": "job_error", "job_id": message.get("job_id"), "error": str(exc)}
                     self.hub.record_job_result(False)
@@ -605,6 +654,13 @@ class BridgeServer:
                 # must not consume that pending slot.
                 tunnel_id = str(message.get("tunnel_id", ""))
                 job_id = str(message.get("job_id", ""))
+                reason = str(message.get("reason", "cancelled"))
+                if job_id and self.hub.cancel_conversation_waiter(tunnel_id, job_id, reason):
+                    connection.send(dumps({
+                        "type": "cancel_result", "job_id": job_id, "accepted": True,
+                        "reason": reason,
+                    }))
+                    continue
                 worker = self.hub.worker_for_job(tunnel_id, job_id) if job_id else None
                 if worker is None or not job_id:
                     connection.send(dumps({
@@ -612,7 +668,6 @@ class BridgeServer:
                         "reason": "job_id is required" if not job_id else "job is not queued or active",
                     }))
                     continue
-                reason = str(message.get("reason", "cancelled"))
                 if worker.cancel_queued(job_id, reason):
                     connection.send(dumps({
                         "type": "cancel_result", "job_id": job_id, "accepted": True,
