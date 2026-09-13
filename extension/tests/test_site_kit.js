@@ -293,6 +293,66 @@ async function main() {
     assertEqual(gate.remainingMs, 750, "deadline decreases independently of mutations");
   });
 
+  await test("readLiveText reinstates line structure textContent drops", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const root = new StubElement("div");
+    const pre = new StubElement("pre");
+    const header = new StubElement("div");
+    header.append(new StubElement("div", {text: "fancygpt:E1-OLD"}));
+    header.append(new StubElement("button", {text: "Copy"}));
+    pre.append(header);
+    pre.append(new StubElement("code", {text: "    def run(self):\n        return 1"}));
+    root.append(new StubElement("p", {text: "Here is the change."}));
+    root.append(pre);
+
+    const text = readLiveText(root);
+    assertEqual(text,
+      "Here is the change.\nfancygpt:E1-OLD\n    def run(self):\n        return 1",
+      "label on its own line, indentation verbatim, Copy control dropped");
+  });
+
+  await test("readLiveText keeps a highlighted code line intact", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const code = new StubElement("code");
+    // Syntax highlighting splits one line into a span per token. Treating those
+    // as line boundaries would scatter the line across the output.
+    for (const token of ["def ", "run", "(self):"]) code.append(new StubElement("span", {text: token}));
+    assertEqual(readLiveText(code), "def run(self):", "tokens rejoin into one line");
+  });
+
+  await test("readLiveText skips nodes the caller marks as chrome", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const root = new StubElement("div");
+    const banner = new StubElement("div", {text: "Gemini said"});
+    root.append(banner);
+    root.append(new StubElement("p", {text: "the answer"}));
+    assertEqual(readLiveText(root, {skip: new Set([banner])}), "the answer", "chrome removed");
+  });
+
+  await test("readLiveText keeps the indentation of a reply that is one block", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const pre = new StubElement("pre");
+    pre.append(new StubElement("code", {text: "    def run(self):\n        return 1"}));
+    // A trailing trim on the joined output would silently eat the first line's
+    // indentation, and the contract matches the OLD block character for character.
+    assertEqual(readLiveText(pre), "    def run(self):\n        return 1",
+      "leading indentation of the first line survives");
+  });
+
+  await test("readLiveText keeps inline code inside its sentence", () => {
+    loadAdapters([]);
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
+    const p = new StubElement("p");
+    p.append(new StubElement("span", {text: "set "}));
+    p.append(new StubElement("code", {text: "x=1"}));
+    p.append(new StubElement("span", {text: " first"}));
+    assertEqual(readLiveText(p), "set x=1 first", "inline code is not a line break");
+  });
+
   report();
 }
 

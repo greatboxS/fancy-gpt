@@ -86,19 +86,16 @@
     return start === -1 ? null : head.slice(start);
   }
 
-  function looksLikeCompleteJson(text) {
-    const segment = jsonSegment(text);
-    // Every stage answers with JSON, so text without any is a partial capture,
-    // not a finished non-JSON reply.
-    if (segment == null) return false;
-    // Count structure, not brace characters inside JSON strings. The old raw
-    // character count rejected valid envelopes such as
-    // {"text":"return {\"ok\":true}"} forever.
+  /* The complete JSON value starting at `start`, or null if it is unfinished.
+   *
+   * Structure is counted, not brace characters: a brace inside a JSON string is
+   * data. Counting raw characters rejected a valid envelope such as
+   * {"text":"return {\"ok\":true}"} forever, which reads as a timeout. */
+  function completeJsonAt(segment, start) {
     let depth = 0;
     let inString = false;
     let escaped = false;
-    let end = -1;
-    for (let i = 0; i < segment.length; ++i) {
+    for (let i = start; i < segment.length; ++i) {
       const char = segment[i];
       if (inString) {
         if (escaped) escaped = false;
@@ -110,19 +107,131 @@
       if (char === "{" || char === "[") depth += 1;
       else if (char === "}" || char === "]") {
         depth -= 1;
-        if (depth < 0) return false;
-        if (depth === 0) { end = i + 1; break; }
+        if (depth < 0) return null;
+        if (depth === 0) {
+          const json = segment.slice(start, i + 1);
+          try { JSON.parse(json); } catch (_) { return null; }
+          return json;
+        }
       }
     }
-    if (inString || depth !== 0 || end === -1) return false;
-    const json = segment.slice(0, end);
-    try { JSON.parse(json); } catch (_) { return false; }
+    return null;
+  }
+
+  function looksLikeCompleteJson(text) {
+    const segment = jsonSegment(text);
+    // Every stage answers with JSON, so text without any is a partial capture,
+    // not a finished non-JSON reply.
+    if (segment == null) return false;
+    // Prose may precede the envelope and may itself contain braces, so every
+    // opening position is tried rather than committing to the first one. Fixing
+    // on the first `{` let a sentence like "use {placeholders}" stall the turn
+    // until its deadline.
+    let json = null;
+    for (let i = 0; i < segment.length && json === null; ++i) {
+      const char = segment[i];
+      if (char === "{" || char === "[") json = completeJsonAt(segment, i);
+      else if (char === '"') {
+        // Skip over a quoted run so its contents are not mistaken for a start.
+        for (++i; i < segment.length; ++i) {
+          if (segment[i] === "\\") ++i;
+          else if (segment[i] === '"') break;
+        }
+      }
+    }
+    if (json === null) return false;
     // A reply that names verbatim blocks is only complete once they have arrived.
     const refs = json.match(/"(?:old_ref|new_ref|content_ref)"\s*:\s*"([^"]+)"/g) || [];
     return refs.every(ref => {
       const id = ref.match(/:\s*"([^"]+)"/)[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       return new RegExp("^[ \\t]*fancygpt[:\\s]+" + id + "[ \\t]*$", "im").test(text);
     });
+  }
+
+  /* Read text the way the protocol needs it, from a tab that may be occluded.
+   *
+   * Chromium defers layout for a hidden or minimised tab, so innerText can stay
+   * frozen at whatever prefix was last painted while the DOM has already
+   * streamed on -- that is the lost-characters failure. textContent is live
+   * because it never consults layout, but for the same reason it drops every
+   * line break that existed only because two block elements render on separate
+   * lines. The code-change contract cannot survive that: `fancygpt:<id>` block
+   * labels are matched per line, and a fence's leading indentation is payload.
+   *
+   * So text is read live from text nodes and the line structure is reinstated
+   * structurally, from the element boundaries, instead of being inherited from
+   * a layout that may never have run.
+   */
+  const LINE_BREAKING_TAGS = new Set([
+    "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "BR", "DD", "DIV", "DL", "DT",
+    "FIELDSET", "FIGCAPTION", "FIGURE", "FOOTER", "FORM", "H1", "H2", "H3",
+    "H4", "H5", "H6", "HEADER", "HR", "LI", "MAIN", "NAV", "OL", "P", "PRE",
+    "SECTION", "TABLE", "TD", "TH", "TR", "UL",
+  ]);
+  // Controls the site draws around a reply. Their labels ("Copy", "Edit") are
+  // not model output and must never reach the parser.
+  const NON_CONTENT_TAGS = new Set(["BUTTON", "SCRIPT", "STYLE", "NOSCRIPT", "SVG", "SELECT", "TEXTAREA"]);
+
+  function readLiveText(root, options = {}) {
+    if (!root) return "";
+    const skip = options.skip instanceof Set ? options.skip : new Set(options.skip ?? []);
+
+    // A subtree that renders as one line already has that line in its
+    // textContent, so it is read whole. This is not an optimisation: a
+    // highlighted code token is a <span> per word and a link or inline <code>
+    // sits mid-sentence, so walking into them would scatter one line of prose
+    // or source across a dozen.
+    const isFlat = (node, inPre) => {
+      for (const child of node.children ?? []) {
+        const tag = String(child.tagName ?? "").toUpperCase();
+        if (LINE_BREAKING_TAGS.has(tag) || NON_CONTENT_TAGS.has(tag)) return false;
+        // Only a fence's <code> is verbatim; inline <code> stays in its line.
+        if (inPre && tag === "CODE") return false;
+        if (skip.has(child) || child.getAttribute?.("aria-hidden") === "true") return false;
+        if (!isFlat(child, inPre)) return false;
+      }
+      return true;
+    };
+
+    const parts = [];
+    const walk = (node, inPre) => {
+      if (!node || skip.has(node)) return;
+      if (node.nodeType === 3) {
+        const text = (node.nodeValue ?? node.textContent ?? "").trim();
+        if (text) parts.push(text);
+        return;
+      }
+      const tag = String(node.tagName ?? "").toUpperCase();
+      if (NON_CONTENT_TAGS.has(tag)) return;
+      if (node.getAttribute?.("aria-hidden") === "true") return;
+      // Parts are joined with a newline, so a <br> is already accounted for by
+      // the split between the runs either side of it.
+      if (tag === "BR") return;
+      if (tag === "CODE" && inPre) {
+        // The fence body: its newlines are real text nodes and its leading
+        // whitespace is payload the code-change contract matches literally, so
+        // it is taken exactly as it stands.
+        const raw = node.textContent ?? node.innerText ?? "";
+        const text = raw.replace(/^\n/, "").replace(/[ \t]*\n[ \t]*$/, "");
+        if (text) parts.push(text);
+        return;
+      }
+      // A site wraps its fence in <pre> together with a header carrying the
+      // language label -- which is where a ```fancygpt:<id> tag ends up -- and a
+      // Copy control, so <pre> is descended into rather than read whole.
+      const nowInPre = inPre || tag === "PRE";
+      if (isFlat(node, nowInPre)) {
+        const raw = node.textContent ?? node.innerText ?? "";
+        const text = nowInPre ? raw.replace(/^\n/, "").replace(/[ \t]*\n[ \t]*$/, "") : raw.trim();
+        if (text) parts.push(text);
+        return;
+      }
+      for (const child of node.childNodes ?? node.children ?? []) walk(child, nowInPre);
+    };
+    walk(root, false);
+    // Only blank edges are removed. A plain trim would strip the leading
+    // indentation of a reply that is nothing but one verbatim block.
+    return parts.join("\n").replace(/^\n+/, "").replace(/\s+$/, "");
   }
 
   /* Decide when a streamed reply has settled.
@@ -323,6 +432,7 @@
     selectAll,
     setComposer,
     jsonSegment,
+    readLiveText,
     looksLikeCompleteJson,
     createSettleTracker,
     stopGeneration,

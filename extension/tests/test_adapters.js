@@ -8,6 +8,8 @@ const {loadAdapters, test, assert, assertEqual, rejects, report} = require("./ha
 const {StubElement} = require("./dom_stub.js");
 
 const ENVELOPE = '{"type":"message","text":"done"}';
+const ENVELOPE_WITH_REFS =
+  '{"type":"outcome","edit":{"old_ref":"E1-OLD","new_ref":"E1-NEW"}}';
 
 function chatgptPage() {
   const composer = new StubElement("div", {contentEditable: "true", id: "prompt-textarea"});
@@ -79,6 +81,59 @@ async function main() {
 
     const result = await running;
     assertEqual(result.text, ENVELOPE, "UI controls must not contaminate the reply");
+  });
+
+  await test("chatgpt keeps fenced block labels and indentation on their own lines", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    chatgptPage();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-A3", 8000, null, {});
+    setTimeout(() => {
+      const turn = assistantTurn("turn-1", "");
+      const markdown = new StubElement("div", {class: "markdown"});
+      // A real code block: the ``` fence never reaches the DOM. It renders as a
+      // header label beside a Copy control, and only layout puts them on
+      // separate lines -- which is exactly what textContent does not do.
+      const block = (label, body) => {
+        const pre = new StubElement("pre");
+        const header = new StubElement("div");
+        header.append(new StubElement("div", {text: label}));
+        header.append(new StubElement("button", {text: "Copy"}));
+        pre.append(header);
+        pre.append(new StubElement("code", {text: body}));
+        markdown.append(pre);
+      };
+      block("json", ENVELOPE_WITH_REFS);
+      block("fancygpt:E1-OLD", "    def run(self):\n        return 1");
+      block("fancygpt:E1-NEW", "    def run(self):\n        return 2");
+      turn.append(markdown);
+      turn.append(new StubElement("div", {text: "Copy\nGood response\nBad response"}));
+    }, 50);
+
+    const result = await running;
+    const lines = result.text.split("\n");
+    assert(lines.some(line => line === "fancygpt:E1-OLD"),
+      "a block label must stay on its own line or the contract cannot find it");
+    assert(lines.some(line => line === "        return 1"),
+      "verbatim indentation must survive extraction: " + JSON.stringify(result.text));
+    assert(!/Good response/.test(result.text), "turn action labels must not leak in");
+  });
+
+  await test("chatgpt reads every content part of a split reply", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    chatgptPage();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-A4", 8000, null, {});
+    setTimeout(() => {
+      const turn = assistantTurn("turn-1", "");
+      // ChatGPT splits one assistant turn into several content parts.
+      turn.append(new StubElement("div", {class: "markdown", text: '{"type":"message",'}));
+      turn.append(new StubElement("div", {class: "markdown", text: '"text":"done"}'}));
+    }, 50);
+
+    const result = await running;
+    assert(result.text.includes('"text":"done"}'),
+      "the later parts of a split reply must not be dropped: " + JSON.stringify(result.text));
   });
 
   await test("chatgpt streams partial text through the observer", async () => {

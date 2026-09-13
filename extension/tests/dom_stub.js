@@ -32,8 +32,22 @@ class StubElement {
   }
   set innerText(value) { this._text = value; this._notify(); }
 
-  get textContent() { return this.innerText; }
+  // textContent is NOT innerText. It concatenates the raw text nodes with no
+  // regard for layout, so every line break that only existed because two block
+  // elements render on separate lines is absent. Reproducing that here is the
+  // point: an adapter that reads textContent and expects innerText's line
+  // structure silently destroys the fenced-block protocol, and a stub that
+  // aliased the two hid exactly that failure.
+  get textContent() {
+    return [this._text, ...this.children.map(child => child.textContent)].join("");
+  }
   set textContent(value) { this.innerText = value; }
+
+  // Real adapters walk text nodes, not just elements.
+  get childNodes() {
+    const own = this._text ? [{nodeType: 3, nodeValue: this._text, textContent: this._text}] : [];
+    return [...own, ...this.children];
+  }
 
   setText(value) { this._text = value; this._notify(); }
 

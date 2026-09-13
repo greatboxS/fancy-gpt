@@ -74,21 +74,26 @@
     const turns = [...document.querySelectorAll(SELECTORS.turns)].filter(el => el.getAttribute("data-turn-id") === turnId);
     if (turns.length !== 1) return null;
     const turn = turns[0];
+    const {readLiveText} = globalThis.FancyGPTSiteKit;
     const role = turn.getAttribute("data-message-author-role");
     if (role === "assistant") {
       for (const selector of SELECTORS.assistantContent) {
-        const content = turn.querySelector(selector);
-        // textContent follows DOM mutations even while Chromium defers layout
-        // and paint for an occluded/minimized tab. innerText can remain frozen
-        // at a streaming prefix until the window is focused.
-        if (content) return (content.textContent ?? content.innerText ?? "").trim() || null;
+        // Every matching part, not just the first: ChatGPT splits one assistant
+        // turn into several content parts, and reading one of them truncates
+        // the reply into something that can never parse as a complete envelope.
+        const parts = [...turn.querySelectorAll(selector)]
+          // A nested match is already covered by the ancestor that contains it.
+          .filter((node, _, all) => !all.some(other => other !== node && other.contains?.(node)))
+          .map(node => readLiveText(node))
+          .filter(Boolean);
+        if (parts.length) return parts.join("\n").trim() || null;
       }
-      return (turn.textContent ?? turn.innerText ?? "").trim() || null;
+      return readLiveText(turn) || null;
     }
     for (const selector of SELECTORS.assistant) {
-      if (turn.matches?.(selector)) return (turn.textContent ?? turn.innerText ?? "").trim() || null;
+      if (turn.matches?.(selector)) return readLiveText(turn) || null;
       const child = turn.querySelector(selector);
-      if (child) return (child.textContent ?? child.innerText ?? "").trim() || null;
+      if (child) return readLiveText(child) || null;
     }
     return null;
   }

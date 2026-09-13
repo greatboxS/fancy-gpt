@@ -93,21 +93,11 @@
       try { matches = [...root.querySelectorAll(selector)]; } catch (_) { continue; }
       for (const node of matches) chrome.add(node);
     }
-    if (chrome.size === 0) return (root.textContent ?? root.innerText ?? "").trim();
     // Read the parts that are not chrome, rather than string-subtracting the
     // chrome afterwards: the same words can legitimately appear in the reply.
-    const parts = [];
-    const walk = node => {
-      if (chrome.has(node)) return;
-      if (!node.children || node.children.length === 0) {
-        const text = (node.textContent ?? node.innerText ?? "").trim();
-        if (text) parts.push(text);
-        return;
-      }
-      for (const child of node.children) walk(child);
-    };
-    walk(root);
-    return parts.join("\n").trim();
+    // readLiveText does the reading so that a hidden tab still yields live text
+    // and a fenced block keeps its line breaks and leading indentation.
+    return globalThis.FancyGPTSiteKit.readLiveText(root, {skip: chrome});
   }
 
   function latestResponseText(baselineCount) {
