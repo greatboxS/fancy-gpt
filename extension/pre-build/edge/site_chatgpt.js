@@ -90,8 +90,16 @@
     if (turns.length !== 1) return null;
     const turn = turns[0];
     const {readLiveText} = globalThis.FancyGPTSiteKit;
-    if (RAW_TEXT_PROBE) return (turn.textContent ?? "").trim() || null;
     const role = turn.getAttribute("data-message-author-role");
+    if (RAW_TEXT_PROBE) {
+      // Still only assistant turns. Answering for the user's own turn as well
+      // makes the prompt look like a second new reply, and the turn is refused
+      // as ambiguous before it ever reads an answer.
+      const isAssistant = role === "assistant"
+        || SELECTORS.assistant.some(selector => turn.matches?.(selector) || turn.querySelector(selector));
+      if (!isAssistant) return null;
+      return (turn.textContent ?? "").trim() || null;
+    }
     if (role === "assistant") {
       for (const selector of SELECTORS.assistantContent) {
         // Every matching part, not just the first: ChatGPT splits one assistant
