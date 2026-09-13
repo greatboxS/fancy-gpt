@@ -42,7 +42,20 @@ def repair_attempts() -> int:
         return 2
 
 
-def repair_prompt(error: str) -> str:
+# A reply quoted back into the repair prompt is capped, because the prompt has
+# to fit in a composer. Past this, the model is asked without it rather than the
+# turn being failed by an oversized prompt.
+QUOTE_BACK_LIMIT = 24000
+
+
+def repair_prompt(error: str, previous: str | None = None) -> str:
+    quoted = ""
+    if previous:
+        quoted = (
+            "\n\nThis is the reply that could not be parsed. "
+            "Correct it and send only the corrected version:\n\n"
+            + previous
+        )
     return (
         f"Your previous reply could not be parsed: {error}.\n\n"
         "Send that same reply again with no change to its content or meaning, "
@@ -51,6 +64,7 @@ def repair_prompt(error: str) -> str:
         "The usual cause is a double quote inside a string that was not escaped. "
         'Every " inside a string must be written as \\", and every backslash as \\\\.\n'
         "If your reply included fenced blocks after the JSON, repeat them exactly as they were."
+        + quoted
     )
 
 
@@ -87,17 +101,24 @@ def parse_or_reask(
             last_error = exc
             if attempt == limit:
                 break
+        # The model can only correct its own reply if it can still see it. When
+        # the turn ran in a conversation we can return to, continue it. When it
+        # did not -- a fresh or temporary turn never gets an id, which is the
+        # default for focused questions -- the reply is quoted into the prompt
+        # instead. Asking to continue an id we do not have would open a brand
+        # new chat: the model would be asked to correct a reply it has never
+        # seen, and a deliberately temporary turn would leave a saved thread
+        # behind it.
+        conversation_id = getattr(current, "conversation_id", None)
+        metadata = dict(model_request.metadata)
+        if conversation_id:
+            metadata["conversation_id"] = conversation_id
+            metadata["conversation_mode"] = "persistent"
+        quote_back = None
+        if not conversation_id and len(current.raw_text) <= QUOTE_BACK_LIMIT:
+            quote_back = current.raw_text
         retry = model_request.model_copy(
-            update={
-                "prompt": repair_prompt(str(last_error)),
-                "metadata": {
-                    **model_request.metadata,
-                    # Continue the same conversation: the model can only correct
-                    # its own reply if it can still see it.
-                    "conversation_id": getattr(current, "conversation_id", None),
-                    "conversation_mode": "persistent",
-                },
-            }
+            update={"prompt": repair_prompt(str(last_error), quote_back), "metadata": metadata}
         )
         current = provider.execute(retry, on_progress=on_progress)
     plural = "" if limit == 1 else "s"

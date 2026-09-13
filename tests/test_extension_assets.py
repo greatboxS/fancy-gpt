@@ -186,3 +186,20 @@ def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
     # And never a background tab, on any of the paths that can open one.
     assert "active: false" not in background
     assert background.count("active: true") >= 2
+
+
+def test_the_task_window_survives_the_job_that_created_it(tmp_path: Path) -> None:
+    """Otherwise every single turn takes the user's focus.
+
+    Removing a window's last tab closes the window. The task tab was simply
+    removed when its job ended, so the window never lasted past one job: the
+    next found a dead window id and created a fresh, focused one. The reuse
+    path and the idle close were unreachable code stating the opposite.
+    """
+    background = (export_extension("edge", tmp_path / "edge-window-life") / "background.js").read_text(encoding="utf-8")
+    # The tab is handed back through one place, which parks it rather than
+    # removing it when it is the last one in the task window.
+    assert "await releaseTaskTab(tab.id)" in background
+    assert 'ext.tabs.update(tabId, {url: "about:blank"})' in background
+    # And the idle close still refuses to take a tab the user opened.
+    assert "item.id === taskKeeperTabId" in background

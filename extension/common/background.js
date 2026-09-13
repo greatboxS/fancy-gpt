@@ -18,15 +18,18 @@ const DEFAULTS = {
 };
 
 let taskWindowId = null;
+// The tab left behind to keep the task window alive between jobs. Removing a
+// window's last tab closes the window, so without this the window created for
+// one job is gone before the next arrives.
+let taskKeeperTabId = null;
 
 async function taskWindowFor(url) {
   if (taskWindowId != null) {
     try {
       await ext.windows.get(taskWindowId);
-      // Active, and the window brought back up. Creating the tab inactive was
-      // why reuse kept failing after the very first turn: the window may be
-      // fine, but a tab that is not the active one in it is hidden just the
-      // same, and the page reported visibilityState "hidden" throughout.
+      // Active, and the window brought back up. A tab that is not the active
+      // one in its window is a hidden document however visible the window is,
+      // and a hidden document stops being painted mid-reply.
       try { await ext.windows.update(taskWindowId, {focused: true, state: "normal"}); } catch (_) {}
       return ext.tabs.create({url, windowId: taskWindowId, active: true});
     } catch (_) {
@@ -59,6 +62,39 @@ async function taskWindowFor(url) {
   return created.tabs?.[0] ?? null;
 }
 
+/* Give the tab back without destroying the window it lives in.
+ *
+ * Removing a window's last tab closes the window, so simply removing the task
+ * tab meant the window never survived a single job: the next one found a dead
+ * window id, created a fresh window, and took the user's focus again. The
+ * reuse path and the idle close below could never run at all.
+ *
+ * One tab is therefore parked on a blank page instead of removed, which costs
+ * nothing to keep and leaves the window reusable. It is closed with the window
+ * once work has genuinely stopped arriving.
+ */
+async function releaseTaskTab(tabId) {
+  if (taskWindowId == null) {
+    try { await ext.tabs.remove(tabId); } catch (_) {}
+    return;
+  }
+  let siblings = [];
+  try { siblings = await ext.tabs.query({windowId: taskWindowId}) ?? []; } catch (_) {}
+  const isLast = siblings.length <= 1 && siblings.some(item => item.id === tabId);
+  if (!isLast) {
+    try { await ext.tabs.remove(tabId); } catch (_) {}
+    if (taskKeeperTabId === tabId) taskKeeperTabId = null;
+    return;
+  }
+  try {
+    await ext.tabs.update(tabId, {url: "about:blank"});
+    taskKeeperTabId = tabId;
+  } catch (_) {
+    try { await ext.tabs.remove(tabId); } catch (_) {}
+    taskKeeperTabId = null;
+  }
+}
+
 /* Close the automation window once it has been idle for a while.
  *
  * Closing it the instant a job ends means the next job creates a new one, and
@@ -84,8 +120,11 @@ async function closeTaskWindowIfIdle() {
   try {
     const remaining = await ext.tabs.query({windowId});
     // Only ever close a window this extension created, and only when nothing is
-    // left in it: never take away a tab the user opened.
-    if (!remaining || remaining.length === 0) {
+    // left in it but the blank tab parked there to keep it open: never take
+    // away a tab the user opened.
+    const onlyOurs = (remaining ?? []).every(item => item.id === taskKeeperTabId);
+    if (!remaining || remaining.length === 0 || onlyOurs) {
+      taskKeeperTabId = null;
       taskWindowId = null;
       await ext.windows.remove(windowId);
     }
@@ -317,7 +356,7 @@ async function executeJob(job) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});
   } finally {
     activeJobs.delete(job.job_id);
-    if (tab?.id != null) try { await ext.tabs.remove(tab.id); } catch (_) {}
+    if (tab?.id != null) await releaseTaskTab(tab.id);
     scheduleTaskWindowClose();
   }
 }

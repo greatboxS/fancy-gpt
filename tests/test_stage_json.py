@@ -99,6 +99,39 @@ def test_every_attempt_is_kept_for_diagnosis() -> None:
     assert seen == [(BAD, 0), (GOOD, 1)], "the failed reply must remain inspectable"
 
 
+def test_a_turn_with_no_conversation_is_not_promoted_into_a_saved_one() -> None:
+    """A fresh or temporary turn never reports a conversation id.
+
+    Asking to continue one we do not have opens a brand new chat: the model
+    would be corrected about a reply it has never seen, and a deliberately
+    temporary turn would leave a saved thread behind. So the reply is quoted
+    into the prompt instead, and the turn keeps the mode it was given.
+    """
+    provider = ScriptedProvider(GOOD)
+    request = a_request()
+    parse_or_reask(provider, request, Reply(BAD, conversation_id=None), parse_json_object)
+    assert "conversation_id" not in provider.metadata[0] or not provider.metadata[0]["conversation_id"]
+    assert provider.metadata[0]["conversation_mode"] == "temporary", "must not become a saved chat"
+    assert BAD in provider.prompts[0], "the model must be shown the reply it has to correct"
+
+
+def test_an_existing_conversation_is_continued_rather_than_quoted() -> None:
+    provider = ScriptedProvider(GOOD)
+    parse_or_reask(provider, a_request(), Reply(BAD, conversation_id="conv-9"), parse_json_object)
+    assert provider.metadata[0]["conversation_id"] == "conv-9"
+    assert provider.metadata[0]["conversation_mode"] == "persistent"
+    assert BAD not in provider.prompts[0], "no need to resend what the chat already holds"
+
+
+def test_a_reply_too_large_to_quote_is_still_re_asked() -> None:
+    from fancy_gpt.stage_json import QUOTE_BACK_LIMIT
+
+    huge = '{"a": "' + "x" * (QUOTE_BACK_LIMIT + 10) + '"'
+    provider = ScriptedProvider(GOOD)
+    parse_or_reask(provider, a_request(), Reply(huge, conversation_id=None), parse_json_object)
+    assert len(provider.prompts[0]) < QUOTE_BACK_LIMIT, "an oversized prompt would fail the turn outright"
+
+
 def test_zero_attempts_restores_the_old_strictness() -> None:
     provider = ScriptedProvider()
     with pytest.raises(ValueError):
