@@ -28,11 +28,23 @@ async function taskWindowFor(url) {
       taskWindowId = null;
     }
   }
-  // A minimized, unfocused window keeps the page rendered -- the automation
-  // drives the real ChatGPT UI and needs a live document -- while staying out
-  // of the way. Chrome may throttle timers in a hidden window, so completion
-  // detection can be slower here than in a visible tab.
-  const created = await ext.windows.create({url, focused: false, state: "minimized"});
+  /* Unfocused, but never minimized.
+   *
+   * This used to minimize the window on the assumption that a minimized window
+   * still renders. It does not: Chromium reports a minimized or fully occluded
+   * window as hidden, which stops the rendering ChatGPT's UI is driven by. The
+   * reply then freezes in the DOM part-written -- measured at 30 characters of
+   * a 1294 character answer, with the stop control frozen alongside it, so the
+   * turn looked finished and stalled until its deadline. Bringing the same tab
+   * to the front let the identical prompt complete.
+   *
+   * So the window stays a real, rendered window. It is small and unfocused and
+   * keeps out of the way, but it is not hidden, because a hidden document
+   * cannot be automated through its UI.
+   */
+  const created = await ext.windows.create({
+    url, focused: false, state: "normal", width: 900, height: 700, top: 0, left: 0,
+  });
   taskWindowId = created.id;
   return created.tabs?.[0] ?? null;
 }

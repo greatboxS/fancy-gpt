@@ -25,7 +25,10 @@
     assistant: ['[data-message-author-role="assistant"]', '[data-testid="conversation-turn-assistant"]'],
     // The turn container also owns Copy/feedback controls. Reading its
     // innerText contaminates the protocol envelope with UI labels.
-    assistantContent: ['[data-message-content]', '.markdown']
+    // Measured live: [data-message-content] matched zero nodes on every turn,
+    // while .markdown held exactly the reply and none of the "ChatGPT said:"
+    // screen-reader label that sits beside it in the turn.
+    assistantContent: ['.markdown']
   };
 
   function composerRoot(composer) {
@@ -83,7 +86,7 @@
    * `fancygpt:<id>` block would be unreadable -- which is exactly why the walk
    * exists. Once the numbers say which cause is real, this goes away. */
   // Tests set this to false to keep exercising the real extraction path.
-  const RAW_TEXT_PROBE = globalThis.FANCY_GPT_RAW_TEXT_PROBE !== false;
+  const RAW_TEXT_PROBE = globalThis.FANCY_GPT_RAW_TEXT_PROBE === true;
 
   function assistantText(turnId) {
     const turns = [...document.querySelectorAll(SELECTORS.turns)].filter(el => el.getAttribute("data-turn-id") === turnId);
