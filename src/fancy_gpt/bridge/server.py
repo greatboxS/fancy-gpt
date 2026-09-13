@@ -144,6 +144,11 @@ class BrowserWorker:
                 job_id in self.queued or job_id in self.pending
             )
 
+    def load(self) -> tuple[int, int]:
+        """Return active and queued counts from one consistent snapshot."""
+        with self.request_lock:
+            return len(self.pending), len(self.queued)
+
     def send_control(self, message: dict[str, Any]) -> None:
         """Fire-and-forget message to the worker, outside any job's reply path."""
         self.send(message)
@@ -367,15 +372,20 @@ class BridgeHub:
             if worker in self._workers:
                 self._workers.remove(worker)
 
-    def worker_for(self, tunnel_id: str) -> BrowserWorker | None:
+    def worker_for(self, tunnel_id: str, site: str = "") -> BrowserWorker | None:
         with self._lock:
             self._expire_stale_unlocked()
-            candidates = [worker for worker in self._workers if self._fresh(worker) and tunnel_id in worker.tunnel_ids]
+            candidates = [
+                worker for worker in self._workers
+                if self._fresh(worker)
+                and tunnel_id in worker.tunnel_ids
+                and (not site or not worker.sites or site in worker.sites)
+            ]
             if not candidates:
                 return None
             return min(
                 candidates,
-                key=lambda worker: (len(worker.pending) / worker.max_turns, -worker.last_seen),
+                key=lambda worker: (sum(worker.load()) / worker.max_turns, -worker.last_seen),
             )
         return None
 
@@ -393,6 +403,7 @@ class BridgeHub:
         now = time.monotonic()
         with self._lock:
             self._expire_stale_unlocked()
+            loads = {worker.worker_id: worker.load() for worker in self._workers}
             return [
                 {
                     "worker_id": worker.worker_id,
@@ -407,7 +418,8 @@ class BridgeHub:
                     "jobs_started": worker.jobs_started,
                     "jobs_succeeded": worker.jobs_succeeded,
                     "jobs_failed": worker.jobs_failed,
-                    "active_jobs": len(worker.pending),
+                    "active_jobs": loads[worker.worker_id][0],
+                    "queued_jobs": loads[worker.worker_id][1],
                     "max_turns": worker.max_turns,
                     "max_render_slots": worker.max_render_slots,
                     "sites": list(worker.sites),
@@ -547,7 +559,7 @@ class BridgeServer:
                 }))
             elif msg_type == "job":
                 tunnel_id = str(message.get("tunnel_id", ""))
-                worker = self.hub.worker_for(tunnel_id)
+                worker = self.hub.worker_for(tunnel_id, str(message.get("site", "")))
                 if worker is None:
                     self.hub.record_job_result(False)
                     connection.send(dumps({

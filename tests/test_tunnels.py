@@ -282,6 +282,30 @@ def test_bridge_hub_routes_concurrent_workers_by_exact_tunnel() -> None:
     hub.register(firefox)
     assert hub.worker_for("chrome-remote") is chrome
     assert hub.worker_for("firefox-remote") is firefox
+
+
+def test_bridge_hub_routes_only_to_worker_advertising_requested_site() -> None:
+    from fancy_gpt.bridge.server import BridgeHub, BrowserWorker
+
+    class Connection:
+        def send(self, _message):
+            pass
+
+    hub = BridgeHub(token="secret")
+    chatgpt = BrowserWorker(
+        connection=Connection(), tunnel_ids={"edge-remote"}, browser="edge",
+        sites=("chatgpt",),
+    )
+    gemini = BrowserWorker(
+        connection=Connection(), tunnel_ids={"edge-remote"}, browser="edge",
+        sites=("gemini",),
+    )
+    hub.register(chatgpt)
+    hub.register(gemini)
+
+    assert hub.worker_for("edge-remote", "chatgpt") is chatgpt
+    assert hub.worker_for("edge-remote", "gemini") is gemini
+    assert hub.worker_for("edge-remote", "grok") is None
     assert len(hub.snapshot()) == 2
 
 

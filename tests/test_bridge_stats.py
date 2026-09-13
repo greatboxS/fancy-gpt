@@ -77,6 +77,7 @@ def test_hub_snapshot_reports_connection_and_job_fields():
     assert entry["jobs_succeeded"] == 2
     assert entry["jobs_failed"] == 1
     assert entry["active_jobs"] == 0
+    assert entry["queued_jobs"] == 0
     assert entry["max_turns"] == 1
     assert "connected_at" in entry
     assert entry["connected_seconds"] >= 0
