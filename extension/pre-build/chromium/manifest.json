@@ -84,7 +84,6 @@
         "https://chatgpt.com/*",
         "https://gemini.google.com/*",
         "https://grok.com/*",
-        "https://x.com/i/grok*",
         "https://copilot.microsoft.com/*",
         "https://m365.cloud.microsoft/*"
       ]

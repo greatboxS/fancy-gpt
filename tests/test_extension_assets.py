@@ -55,6 +55,34 @@ def test_extension_exports_chromium_and_firefox_manifests(tmp_path: Path) -> Non
         assert (directory / "popup.html").is_file()
 
 
+def test_every_match_pattern_is_one_the_browser_will_accept(tmp_path: Path) -> None:
+    """Chrome refuses to load an extension over a single bad pattern.
+
+    web_accessible_resources takes host-level patterns only: a path narrower
+    than /* is rejected outright, and the failure is the whole extension
+    failing to load with "Invalid match pattern" -- after a build, an install
+    and a push, because nothing here had looked.
+    """
+    import re
+
+    host_only = re.compile(r"^https://[A-Za-z0-9.*-]+/\*$")
+    general = re.compile(r"^https://[A-Za-z0-9.*-]+/\S*$")
+
+    for browser in ("chrome", "edge", "firefox"):
+        manifest = json.loads((export_extension(browser, tmp_path / browser) / "manifest.json").read_text())
+        for index, entry in enumerate(manifest.get("web_accessible_resources", [])):
+            for pattern in entry["matches"]:
+                assert host_only.match(pattern), (
+                    f"{browser} web_accessible_resources[{index}]: {pattern!r} is narrower than a host"
+                )
+        # Content scripts and host permissions may narrow by path.
+        for pattern in manifest["host_permissions"]:
+            assert general.match(pattern), f"{browser} host_permissions: {pattern!r}"
+        for entry in manifest["content_scripts"]:
+            for pattern in entry["matches"]:
+                assert general.match(pattern), f"{browser} content_scripts: {pattern!r}"
+
+
 def test_extension_export_patches_browser_specific_defaults(tmp_path: Path) -> None:
     for browser in ("chrome", "edge", "firefox"):
         target = export_extension(browser, tmp_path / browser)
