@@ -8,9 +8,9 @@ This runs the whole matrix concurrently instead: every site that has an
 adapter, on every tunnel with a live worker, in parallel where the runtime
 allows it. One pass, one table, every failure at once.
 
-Parallelism is real across tunnels and only across tunnels: the runtime holds
-one lock per tunnel for the length of a turn, so two sites on the same browser
-queue behind each other rather than interleaving in one window.
+Each matrix cell is submitted independently. Turns on the same tunnel therefore
+exercise the extension's surface capacity and turns on different tunnels also
+overlap; this is both a compatibility smoke test and a real concurrency gate.
 
     PYTHONPATH=src python scripts/live_matrix.py
     PYTHONPATH=src python scripts/live_matrix.py --sites chatgpt --question "..."
@@ -154,6 +154,7 @@ def main() -> int:
     parser.add_argument("--tunnels", default="", help="default: every tunnel with a live worker")
     parser.add_argument("--scenarios", default=",".join(SCENARIOS))
     parser.add_argument("--root", default=os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt"))
+    parser.add_argument("--max-workers", type=int, default=0, help="default: one worker per matrix cell")
     args = parser.parse_args()
 
     manager = TunnelManager()
@@ -165,20 +166,18 @@ def main() -> int:
     scenarios = [s for s in args.scenarios.split(",") if s in SCENARIOS]
     root = Path(args.root)
 
-    # Grouped by tunnel: turns on one browser queue behind each other anyway,
-    # so a thread per tunnel is exactly as much parallelism as exists.
-    work = {tunnel: [(site, name) for site in sites for name in scenarios] for tunnel in tunnels}
-    total = sum(len(items) for items in work.values())
+    work = [(site, tunnel, name) for tunnel in tunnels for site in sites for name in scenarios]
+    total = len(work)
     print(f"{total} turns: {len(sites)} site(s) x {len(scenarios)} scenario(s) x {len(tunnels)} tunnel(s)\n")
 
-    def run_tunnel(tunnel: str) -> list[dict]:
-        return [
-            run_one(root, manager, site, tunnel, name, SCENARIOS[name])
-            for site, name in work[tunnel]
-        ]
-
-    with ThreadPoolExecutor(max_workers=len(tunnels)) as pool:
-        results = [row for rows in pool.map(run_tunnel, tunnels) for row in rows]
+    max_workers = args.max_workers or total
+    if max_workers < 1:
+        parser.error("--max-workers must be positive")
+    with ThreadPoolExecutor(max_workers=min(max_workers, total)) as pool:
+        results = list(pool.map(
+            lambda item: run_one(root, manager, item[0], item[1], item[2], SCENARIOS[item[2]]),
+            work,
+        ))
 
     width = max(len(f"{r['site']}/{r['tunnel']}/{r['scenario']}") for r in results)
     failures = 0
