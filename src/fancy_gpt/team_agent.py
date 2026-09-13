@@ -16,6 +16,7 @@ from .project_models import (
 from .providers.base import AutomaticModelProvider
 from .relevance import semantic_policy_text
 from .response_parser import parse_json_object_with_blocks
+from .stage_json import parse_or_reask
 
 
 CODE_CHANGE_CONTRACT = """## CODE CHANGE CONTRACT
@@ -176,10 +177,19 @@ Return ONLY one JSON object matching this schema:
             provider.start()
             started = True
             response: AutomatedModelResponse = provider.execute(request)
-            if on_raw_response is not None:
-                # Persist before parsing so a malformed reply is still inspectable.
-                on_raw_response(response.raw_text)
-            payload, blocks = parse_json_object_with_blocks(response.raw_text)
+            (payload, blocks), response = parse_or_reask(
+                provider,
+                request,
+                response,
+                parse_json_object_with_blocks,
+                # Every attempt is persisted: a malformed reply nobody
+                # kept is a failure nobody can diagnose.
+                on_response=(
+                    (lambda reply, _attempt: on_raw_response(reply.raw_text))
+                    if on_raw_response is not None
+                    else None
+                ),
+            )
             outcome = AgentOutcome.model_validate(payload)
             if outcome.code_change is not None:
                 outcome = outcome.model_copy(update={"code_change": outcome.code_change.resolved(blocks)})

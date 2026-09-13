@@ -86,12 +86,21 @@
     return start === -1 ? null : head.slice(start);
   }
 
-  /* The complete JSON value starting at `start`, or null if it is unfinished.
+  /* Scan one JSON value starting at `start`.
    *
-   * Structure is counted, not brace characters: a brace inside a JSON string is
-   * data. Counting raw characters rejected a valid envelope such as
-   * {"text":"return {\"ok\":true}"} forever, which reads as a timeout. */
-  function completeJsonAt(segment, start) {
+   * Three outcomes, and keeping them apart is the whole point:
+   *   {json}      a complete, parseable value
+   *   {skipTo}    a structure that closed but is not JSON, so it was prose
+   *               that merely contained a brace; resume scanning after it
+   *   null        a structure that never closed, so the reply is still
+   *               arriving and nothing after it can be trusted
+   *
+   * Collapsing the last two is how a truncated reply was accepted as finished:
+   * the outer object had not closed, the scan walked on into it, found the
+   * complete `[]` of an inner field, and called the turn done -- silently
+   * handing back a JSON document cut off mid-key.
+   */
+  function scanJsonAt(segment, start) {
     let depth = 0;
     let inString = false;
     let escaped = false;
@@ -107,11 +116,12 @@
       if (char === "{" || char === "[") depth += 1;
       else if (char === "}" || char === "]") {
         depth -= 1;
-        if (depth < 0) return null;
+        // A closer with nothing open is punctuation in prose, not structure.
+        if (depth < 0) return {skipTo: i + 1};
         if (depth === 0) {
           const json = segment.slice(start, i + 1);
-          try { JSON.parse(json); } catch (_) { return null; }
-          return json;
+          try { JSON.parse(json); } catch (_) { return {skipTo: i + 1}; }
+          return {json};
         }
       }
     }
@@ -123,21 +133,27 @@
     // Every stage answers with JSON, so text without any is a partial capture,
     // not a finished non-JSON reply.
     if (segment == null) return false;
-    // Prose may precede the envelope and may itself contain braces, so every
-    // opening position is tried rather than committing to the first one. Fixing
-    // on the first `{` let a sentence like "use {placeholders}" stall the turn
-    // until its deadline.
+    // Prose may precede the envelope and may itself contain braces, so a
+    // structure that turns out not to be JSON is stepped over rather than
+    // ending the search. One that never closes ends it immediately.
     let json = null;
-    for (let i = 0; i < segment.length && json === null; ++i) {
+    let i = 0;
+    while (i < segment.length && json === null) {
       const char = segment[i];
-      if (char === "{" || char === "[") json = completeJsonAt(segment, i);
-      else if (char === '"') {
-        // Skip over a quoted run so its contents are not mistaken for a start.
+      if (char === '"') {
+        // Step over a quoted run so its contents are not read as structure.
         for (++i; i < segment.length; ++i) {
           if (segment[i] === "\\") ++i;
           else if (segment[i] === '"') break;
         }
+        i += 1;
+        continue;
       }
+      if (char !== "{" && char !== "[") { i += 1; continue; }
+      const found = scanJsonAt(segment, i);
+      if (found === null) return false;
+      if (found.json != null) { json = found.json; break; }
+      i = found.skipTo;
     }
     if (json === null) return false;
     // A reply that names verbatim blocks is only complete once they have arrived.
@@ -148,20 +164,6 @@
     });
   }
 
-  /* Read text the way the protocol needs it, from a tab that may be occluded.
-   *
-   * Chromium defers layout for a hidden or minimised tab, so innerText can stay
-   * frozen at whatever prefix was last painted while the DOM has already
-   * streamed on -- that is the lost-characters failure. textContent is live
-   * because it never consults layout, but for the same reason it drops every
-   * line break that existed only because two block elements render on separate
-   * lines. The code-change contract cannot survive that: `fancygpt:<id>` block
-   * labels are matched per line, and a fence's leading indentation is payload.
-   *
-   * So text is read live from text nodes and the line structure is reinstated
-   * structurally, from the element boundaries, instead of being inherited from
-   * a layout that may never have run.
-   */
   const LINE_BREAKING_TAGS = new Set([
     "ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DD", "DIV", "DL", "DT",
     "FIELDSET", "FIGCAPTION", "FIGURE", "FOOTER", "FORM", "H1", "H2", "H3",
@@ -447,7 +449,7 @@
   }
 
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "f1db47778170";
+  const BUILD = "868a8680ff1b";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,

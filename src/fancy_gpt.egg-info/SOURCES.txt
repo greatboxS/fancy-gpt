@@ -49,6 +49,7 @@ src/fancy_gpt/self_test.py
 src/fancy_gpt/server_stats.py
 src/fancy_gpt/session_repository.py
 src/fancy_gpt/skills.py
+src/fancy_gpt/stage_json.py
 src/fancy_gpt/store.py
 src/fancy_gpt/team_agent.py
 src/fancy_gpt.egg-info/PKG-INFO
@@ -165,6 +166,7 @@ tests/test_server_stats.py
 tests/test_session_inspection.py
 tests/test_sessions.py
 tests/test_skills.py
+tests/test_stage_json.py
 tests/test_store.py
 tests/test_team_runtime.py
 tests/test_tunnel_cli.py

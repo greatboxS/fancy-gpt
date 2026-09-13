@@ -17,6 +17,7 @@ from .models import (
     ChatResolution,
     FinalReport,
     InteractionRequired,
+    ModelRequest,
     RawRequest,
     RequestState,
     RequestStatus,
@@ -30,6 +31,7 @@ from .providers import ChatGPTWebInteractiveProvider
 from .providers.base import AutomaticModelProvider
 from .request_builder import FinalRequestBuilder, PlannerRequestBuilder
 from .response_parser import parse_json_object
+from .stage_json import parse_or_reask
 from .routing import RequestClassifier
 from .store import RequestStore, SessionStore
 
@@ -276,7 +278,19 @@ class ReviewEngine:
             )
             planner_response_path = self.store.write_model(request_id, "planner-response.json", planner_response)
             emit("manifest-validate")
-            manifest = self._validate_manifest(parse_json_object(planner_response.raw_text), route)
+            planner_payload, planner_response = parse_or_reask(
+                provider,
+                planner_request,
+                planner_response,
+                parse_json_object,
+                on_progress=lambda text: self.store.update_progress(request_id, text),
+                on_response=lambda reply, attempt: self.store.write_model(
+                    request_id,
+                    "planner-response.json" if attempt == 0 else f"planner-response-reask-{attempt}.json",
+                    reply,
+                ),
+            )
+            manifest = self._validate_manifest(planner_payload, route)
             self.store.write_model(request_id, "research-manifest.json", manifest)
 
             emit("context-build")
@@ -321,12 +335,23 @@ class ReviewEngine:
                 self.store.update_status(request_id, conversation_id=final_response.conversation_id)
                 final_response_path = self.store.write_model(request_id, "final-response.json", final_response)
                 emit("report-validate")
+                final_payload, final_response = parse_or_reask(
+                    provider,
+                    final_request,
+                    final_response,
+                    parse_json_object,
+                    on_response=lambda reply, attempt: self.store.write_model(
+                        request_id,
+                        "final-response.json" if attempt == 0 else f"final-response-reask-{attempt}.json",
+                        reply,
+                    ),
+                )
                 report = self._validate_report(
                     request_id,
                     request,
                     route,
                     manifest,
-                    parse_json_object(final_response.raw_text),
+                    final_payload,
                 )
                 result_path = self.store.write_model(request_id, "final-result.json", report)
                 self.store.transition(

@@ -176,6 +176,15 @@ async function main() {
       "escaped quotes and braces are parsed correctly");
     assert(kit2.looksLikeCompleteJson('{"type":"message","text":}') === false,
       "balanced but invalid JSON is incomplete");
+    // Taken from a live turn that was accepted as finished and handed back a
+    // document cut off mid-key. The outer object never closed; the scan used to
+    // walk on into it, find the complete [] of an inner field, and settle.
+    assert(kit2.looksLikeCompleteJson('{"answer":"done","material_context":[],"unknowns":[],"next_actio') === false,
+      "an unclosed object is unfinished however complete its inner values are");
+    assert(kit2.looksLikeCompleteJson('{"a":"partial') === false,
+      "a reply cut off inside a string is unfinished");
+    assert(kit2.looksLikeCompleteJson('I will use {placeholders} here.\n{"a":1}') === true,
+      "prose that merely contains a brace is stepped over, not treated as the envelope");
   });
 
   await test("settle tracker waits for the stop control to disappear", () => {

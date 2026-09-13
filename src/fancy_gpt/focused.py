@@ -14,6 +14,7 @@ from .project_models import ConversationStrategy, RelevantProjectContext, conver
 from .providers.base import AutomaticModelProvider
 from .relevance import RelevanceAssessment, RelevanceSufficiencyPolicy, ResponseIntent, semantic_policy_text
 from .response_parser import parse_json_object
+from .stage_json import parse_or_reask
 
 
 class FocusedQuestion(BaseModel):
@@ -134,10 +135,19 @@ Return ONLY one JSON object matching this schema:
             provider.start()
             provider_started = True
             response: AutomatedModelResponse = provider.execute(request)
-            if on_raw_response is not None:
-                # Persist before parsing so a malformed reply is still inspectable.
-                on_raw_response(response.raw_text)
-            payload = parse_json_object(response.raw_text)
+            payload, response = parse_or_reask(
+                provider,
+                request,
+                response,
+                parse_json_object,
+                # Persist before parsing so a malformed reply is still
+                # inspectable, and persist every attempt for the same reason.
+                on_response=(
+                    (lambda reply, _attempt: on_raw_response(reply.raw_text))
+                    if on_raw_response is not None
+                    else None
+                ),
+            )
             answer = FocusedAnswer.model_validate(payload)
             if answer.request_id != request.request_id:
                 raise ValueError("focused answer request_id mismatch")
