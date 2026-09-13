@@ -93,14 +93,14 @@
       try { matches = [...root.querySelectorAll(selector)]; } catch (_) { continue; }
       for (const node of matches) chrome.add(node);
     }
-    if (chrome.size === 0) return (root.innerText ?? "").trim();
+    if (chrome.size === 0) return (root.textContent ?? root.innerText ?? "").trim();
     // Read the parts that are not chrome, rather than string-subtracting the
     // chrome afterwards: the same words can legitimately appear in the reply.
     const parts = [];
     const walk = node => {
       if (chrome.has(node)) return;
       if (!node.children || node.children.length === 0) {
-        const text = (node.innerText ?? node.textContent ?? "").trim();
+        const text = (node.textContent ?? node.innerText ?? "").trim();
         if (text) parts.push(text);
         return;
       }
@@ -124,7 +124,7 @@
     // the actual code. innerText includes that site chrome, while the code
     // element contains only the model payload.
     const codeBlocks = [...content.querySelectorAll("code")]
-      .map(element => (element.innerText ?? element.textContent ?? "").trim())
+      .map(element => (element.textContent ?? element.innerText ?? "").trim())
       .filter(Boolean);
     if (codeBlocks.length === 1) return codeBlocks[0];
     const text = readWithoutChrome(content);

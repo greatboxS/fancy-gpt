@@ -68,7 +68,12 @@ async function main() {
     const running = adapter.executeTurn("PROMPT-A2", 8000, null, {});
     setTimeout(() => {
       const turn = assistantTurn("turn-1", "");
-      turn.append(new StubElement("div", {class: "markdown", text: ENVELOPE}));
+      const content = new StubElement("div", {class: "markdown", text: ENVELOPE});
+      // Chromium may defer layout for an occluded tab: innerText remains at an
+      // old rendered prefix while textContent already reflects the live DOM.
+      Object.defineProperty(content, "innerText", {get: () => '{"type":"message","text'});
+      Object.defineProperty(content, "textContent", {get: () => ENVELOPE});
+      turn.append(content);
       turn.append(new StubElement("div", {text: "Copy\nGood response\nBad response"}));
     }, 50);
 

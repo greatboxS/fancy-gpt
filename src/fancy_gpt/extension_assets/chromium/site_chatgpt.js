@@ -78,14 +78,17 @@
     if (role === "assistant") {
       for (const selector of SELECTORS.assistantContent) {
         const content = turn.querySelector(selector);
-        if (content) return (content.innerText ?? "").trim() || null;
+        // textContent follows DOM mutations even while Chromium defers layout
+        // and paint for an occluded/minimized tab. innerText can remain frozen
+        // at a streaming prefix until the window is focused.
+        if (content) return (content.textContent ?? content.innerText ?? "").trim() || null;
       }
-      return (turn.innerText ?? "").trim() || null;
+      return (turn.textContent ?? turn.innerText ?? "").trim() || null;
     }
     for (const selector of SELECTORS.assistant) {
-      if (turn.matches?.(selector)) return (turn.innerText ?? "").trim() || null;
+      if (turn.matches?.(selector)) return (turn.textContent ?? turn.innerText ?? "").trim() || null;
       const child = turn.querySelector(selector);
-      if (child) return (child.innerText ?? "").trim() || null;
+      if (child) return (child.textContent ?? child.innerText ?? "").trim() || null;
     }
     return null;
   }
