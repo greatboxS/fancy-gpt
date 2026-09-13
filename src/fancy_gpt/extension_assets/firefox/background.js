@@ -27,9 +27,19 @@ async function taskWindowFor(url) {
       // Active, and the window brought back up. A tab that is not the active
       // one in its window is a hidden document however visible the window is,
       // and a hidden document stops being painted mid-reply.
-      // Left alone. Reading the reply no longer depends on the page being
-      // painted, so there is nothing to gain by taking the window back.
-      return ext.tabs.create({url, windowId: taskWindowId, active: true});
+      /* Inactive, and pushed back down afterwards.
+       *
+       * Adding an active tab restores a minimized window, so asking for one
+       * undid the minimizing on every turn after the first: measured, seven of
+       * eight turns ran with the document visible and focused, which is the
+       * window appearing in front of the user again.
+       *
+       * There is no longer anything to gain by activating it. The reply is
+       * read from the response that carried it, not from a painted page.
+       */
+      const tab = await ext.tabs.create({url, windowId: taskWindowId, active: false});
+      try { await ext.windows.update(taskWindowId, {state: "minimized"}); } catch (_) {}
+      return tab;
     } catch (_) {
       taskWindowId = null;
     }
