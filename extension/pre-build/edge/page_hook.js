@@ -180,5 +180,51 @@
     return result;
   };
 
+  /* Sites that stream over a socket rather than a response body.
+   *
+   * Not every site answers through fetch. Microsoft Copilot carries its reply
+   * in SignalR frames over a WebSocket, and webllm-proxy (MIT) handles it as a
+   * separate transport for that reason. A hook that watches only fetch reports
+   * nothing on such a site -- the same silence as a hook that failed to load,
+   * which has already cost one wrong diagnosis here.
+   *
+   * Frames are counted and sized rather than read. Nothing is forwarded until
+   * that site has been measured and given a decoder, because forwarding a
+   * transport nobody has looked at carries content out of the page for no
+   * decided purpose.
+   */
+  const NativeWebSocket = window.WebSocket;
+  if (typeof NativeWebSocket === "function") {
+    const observed = function FancyGptObservedWebSocket(url, protocols) {
+      const socket = protocols === undefined
+        ? new NativeWebSocket(url)
+        : new NativeWebSocket(url, protocols);
+      const summary = {path: shapeOfPath(String(url)), frames: 0, bytes: 0, startedAt: Date.now()};
+      let reported = false;
+      const flush = () => {
+        if (reported || summary.frames === 0) return;
+        reported = true;
+        report({
+          kind: "socket",
+          path: summary.path,
+          frames: summary.frames,
+          bytes: summary.bytes,
+          totalMs: Date.now() - summary.startedAt,
+        });
+      };
+      socket.addEventListener("message", event => {
+        summary.frames += 1;
+        const data = event?.data;
+        summary.bytes += typeof data === "string" ? data.length : (data?.byteLength ?? data?.size ?? 0);
+      });
+      socket.addEventListener("close", flush);
+      socket.addEventListener("error", flush);
+      return socket;
+    };
+    observed.prototype = NativeWebSocket.prototype;
+    for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) observed[key] = NativeWebSocket[key];
+    try { window.WebSocket = observed; } catch (_) {}
+  }
+
   report({kind: "installed", path: shapeOfPath(location.href)});
 })();

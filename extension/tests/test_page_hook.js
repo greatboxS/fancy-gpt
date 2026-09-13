@@ -42,6 +42,12 @@ function runHook({response}) {
     JSON,
     Promise,
     location: {href: "https://chatgpt.com/", origin: "https://chatgpt.com"},
+    WebSocket: class FakeSocket {
+      constructor(url) { this.url = url; this.listeners = {}; FakeSocket.made.push(this); }
+      addEventListener(type, handler) { (this.listeners[type] ??= []).push(handler); }
+      emit(type, event) { for (const handler of this.listeners[type] ?? []) handler(event); }
+      static made = [];
+    },
   };
   context.window = context;
   context.window.postMessage = message => posted.push(message);
@@ -106,6 +112,23 @@ async function main() {
     await new Promise(resolve => setTimeout(resolve, 20));
     assert(!posted.some(item => item.kind === "stream" || item.kind === "events"),
       "a reply is submitted, so only what the page posts is worth watching");
+  });
+
+  await test("a site that streams over a socket is not invisible", async () => {
+    // Copilot carries its reply in SignalR frames, not a response body. A hook
+    // that watches only fetch reports nothing there -- the same silence as a
+    // hook that failed to load, which has already cost one wrong diagnosis.
+    const {context, posted} = runHook({response: sseResponse(["{}"])});
+    const socket = new context.window.WebSocket("wss://example.test/chat/abc123def456");
+    socket.emit("message", {data: "frame one"});
+    socket.emit("message", {data: "frame two"});
+    socket.emit("close", {});
+
+    const seen = posted.find(item => item.kind === "socket");
+    assert(seen, "its traffic must show up as something");
+    assertEqual(seen.frames, 2, "frames are counted");
+    assert(!seen.path.includes("abc123def456"), "and identifiers still never leave the page");
+    assert(!JSON.stringify(seen).includes("frame one"), "frames are measured, not carried out");
   });
 
   report();
