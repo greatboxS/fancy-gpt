@@ -70,11 +70,27 @@
       .filter(Boolean);
   }
 
+  /* TEMPORARY PROBE -- remove once the stall is understood.
+   *
+   * Four live stalls reported a 25-45 character prefix while the finished
+   * reply stood on screen. Two causes remain and they need opposite fixes:
+   * the turn element holds the whole reply and our extraction loses it, or
+   * the element holds the prefix too. Reading the turn's raw textContent
+   * settles that, because it is the least clever thing that can be read: no
+   * selector, no walk, no judgement about what any subtree means.
+   *
+   * It is not the end state. Raw textContent has no line breaks, so a fenced
+   * `fancygpt:<id>` block would be unreadable -- which is exactly why the walk
+   * exists. Once the numbers say which cause is real, this goes away. */
+  // Tests set this to false to keep exercising the real extraction path.
+  const RAW_TEXT_PROBE = globalThis.FANCY_GPT_RAW_TEXT_PROBE !== false;
+
   function assistantText(turnId) {
     const turns = [...document.querySelectorAll(SELECTORS.turns)].filter(el => el.getAttribute("data-turn-id") === turnId);
     if (turns.length !== 1) return null;
     const turn = turns[0];
     const {readLiveText} = globalThis.FancyGPTSiteKit;
+    if (RAW_TEXT_PROBE) return (turn.textContent ?? "").trim() || null;
     const role = turn.getAttribute("data-message-author-role");
     if (role === "assistant") {
       for (const selector of SELECTORS.assistantContent) {

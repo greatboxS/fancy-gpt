@@ -64,6 +64,8 @@ async function main() {
   });
 
   await test("chatgpt reads message content without turn action labels", async () => {
+    // The raw-text probe is a temporary bypass; this covers the real path.
+    globalThis.FANCY_GPT_RAW_TEXT_PROBE = false;
     loadAdapters(["site_chatgpt.js"]);
     chatgptPage();
     const adapter = globalThis.FancyGPTSites.chatgpt;
@@ -84,6 +86,8 @@ async function main() {
   });
 
   await test("chatgpt keeps fenced block labels and indentation on their own lines", async () => {
+    // The raw-text probe is a temporary bypass; this covers the real path.
+    globalThis.FANCY_GPT_RAW_TEXT_PROBE = false;
     loadAdapters(["site_chatgpt.js"]);
     chatgptPage();
     const adapter = globalThis.FancyGPTSites.chatgpt;
