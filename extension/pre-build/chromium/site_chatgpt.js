@@ -22,7 +22,10 @@
       '[data-testid="thinking-indicator"]',
     ],
     turns: "[data-turn-id]",
-    assistant: ['[data-message-author-role="assistant"]', '[data-testid="conversation-turn-assistant"]']
+    assistant: ['[data-message-author-role="assistant"]', '[data-testid="conversation-turn-assistant"]'],
+    // The turn container also owns Copy/feedback controls. Reading its
+    // innerText contaminates the protocol envelope with UI labels.
+    assistantContent: ['[data-message-content]', '.markdown']
   };
 
   function composerRoot(composer) {
@@ -72,7 +75,13 @@
     if (turns.length !== 1) return null;
     const turn = turns[0];
     const role = turn.getAttribute("data-message-author-role");
-    if (role === "assistant") return (turn.innerText ?? "").trim() || null;
+    if (role === "assistant") {
+      for (const selector of SELECTORS.assistantContent) {
+        const content = turn.querySelector(selector);
+        if (content) return (content.innerText ?? "").trim() || null;
+      }
+      return (turn.innerText ?? "").trim() || null;
+    }
     for (const selector of SELECTORS.assistant) {
       if (turn.matches?.(selector)) return (turn.innerText ?? "").trim() || null;
       const child = turn.querySelector(selector);

@@ -170,6 +170,12 @@ async function main() {
     const kit2 = globalThis.FancyGPTSiteKit;
     assert(kit2.looksLikeCompleteJson('{"type":"message","text":"done"}') === true, "complete");
     assert(kit2.looksLikeCompleteJson('{"type":"message","text":"partial') === false, "partial");
+    assert(kit2.looksLikeCompleteJson('{"type":"message","text":"nested { brace }"}') === true,
+      "braces inside strings are data, not structure");
+    assert(kit2.looksLikeCompleteJson('{"type":"message","text":"escaped \\\"}\\\""}') === true,
+      "escaped quotes and braces are parsed correctly");
+    assert(kit2.looksLikeCompleteJson('{"type":"message","text":}') === false,
+      "balanced but invalid JSON is incomplete");
   });
 
   await test("settle tracker waits for the stop control to disappear", () => {

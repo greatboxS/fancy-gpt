@@ -61,6 +61,21 @@ async function main() {
     assert(typeof result.diagnostics.maxEvaluateMs === "number", "evaluation cost is measured");
   });
 
+  await test("chatgpt reads message content without turn action labels", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    chatgptPage();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-A2", 8000, null, {});
+    setTimeout(() => {
+      const turn = assistantTurn("turn-1", "");
+      turn.append(new StubElement("div", {class: "markdown", text: ENVELOPE}));
+      turn.append(new StubElement("div", {text: "Copy\nGood response\nBad response"}));
+    }, 50);
+
+    const result = await running;
+    assertEqual(result.text, ENVELOPE, "UI controls must not contaminate the reply");
+  });
+
   await test("chatgpt streams partial text through the observer", async () => {
     loadAdapters(["site_chatgpt.js"]);
     chatgptPage();

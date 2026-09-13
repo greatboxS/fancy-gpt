@@ -91,11 +91,34 @@
     // Every stage answers with JSON, so text without any is a partial capture,
     // not a finished non-JSON reply.
     if (segment == null) return false;
-    const opens = (segment.match(/[{[]/g) || []).length;
-    const closes = (segment.match(/[}\]]/g) || []).length;
-    if (opens !== closes) return false;
+    // Count structure, not brace characters inside JSON strings. The old raw
+    // character count rejected valid envelopes such as
+    // {"text":"return {\"ok\":true}"} forever.
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let i = 0; i < segment.length; ++i) {
+      const char = segment[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') { inString = true; continue; }
+      if (char === "{" || char === "[") depth += 1;
+      else if (char === "}" || char === "]") {
+        depth -= 1;
+        if (depth < 0) return false;
+        if (depth === 0) { end = i + 1; break; }
+      }
+    }
+    if (inString || depth !== 0 || end === -1) return false;
+    const json = segment.slice(0, end);
+    try { JSON.parse(json); } catch (_) { return false; }
     // A reply that names verbatim blocks is only complete once they have arrived.
-    const refs = segment.match(/"(?:old_ref|new_ref|content_ref)"\s*:\s*"([^"]+)"/g) || [];
+    const refs = json.match(/"(?:old_ref|new_ref|content_ref)"\s*:\s*"([^"]+)"/g) || [];
     return refs.every(ref => {
       const id = ref.match(/:\s*"([^"]+)"/)[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       return new RegExp("^[ \\t]*fancygpt[:\\s]+" + id + "[ \\t]*$", "im").test(text);
@@ -289,7 +312,7 @@
   }
 
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "523926005a78";
+  const BUILD = "cb81f6309f5d";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,
