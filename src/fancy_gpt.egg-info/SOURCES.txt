@@ -143,6 +143,7 @@ tests/test_gateway_cancel_path.py
 tests/test_gateway_correlation.py
 tests/test_gateway_execution.py
 tests/test_gateway_hardening.py
+tests/test_gateway_limits_lineage.py
 tests/test_gateway_streaming.py
 tests/test_gateway_trace.py
 tests/test_gateway_transport.py

@@ -115,6 +115,16 @@ Status: **largely delivered**
 
 Delivered:
 
+- `max_tool_loop_iterations` enforced per session: a client answering tool calls
+  with tool calls is bounded, a final message resets the budget, and the refusal
+  happens before anything reaches the browser.
+- Legal turn-state transitions enforced as a compare-and-set against the record
+  on disk, so a stale copy cannot resurrect a finished turn. `uncertain-submit`
+  is deliberately not terminal - it can still be resolved once we learn what the
+  browser did.
+- Real retry lineage: a retry is its own record linked to the one it supersedes,
+  and `requests trace` shows the attempt chain and every state transition.
+
 - Browser failure taxonomy: 17 distinct causes, each carrying whether a retry
   helps, whether a human must act, and its honest protocol status.
 - Per-turn trace (`requests trace`, MCP `get_request_trace`) recording every
@@ -159,14 +169,15 @@ Delivered:
 
 Remaining:
 
+- End-to-end conformance runs driven by the real Codex, Claude Code and Gemini
+  CLI binaries rather than protocol-level tests.
+- Browser tab-lease ownership and composer-edit detection.
+
 - Push-based progress transport. Streaming works, but its latency granularity
   is the existing ~1.5s progress poll; the bridge keeps only the latest
   snapshot per job, so a push channel would cut latency without changing the
   delta semantics.
 
-- Enforce or remove `max_tool_loop_iterations`, which is declared but not enforced.
-- Real retry lineage (`attempt`, `retry_of`) populated and surfaced in inspection.
-- Legal turn-state transitions enforced as a compare-and-set.
 - Browser tab-lease ownership and composer-edit detection.
 - End-to-end conformance runs driven by the real Codex, Claude Code and Gemini CLI
   binaries rather than protocol-level tests.

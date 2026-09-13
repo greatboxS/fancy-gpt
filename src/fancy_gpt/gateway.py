@@ -89,6 +89,19 @@ def _scrub(message: str) -> str:
     return cleaned[:4000]
 
 
+class ToolLoopExhausted(RuntimeError):
+    """A session answered tool calls with tool calls past the configured bound."""
+
+    def __init__(self, depth: int, limit: int) -> None:
+        super().__init__(
+            f"tool loop has run for {depth} consecutive turns on this session, "
+            f"which is the configured limit of {limit}; answer with a final message "
+            "or start a new session"
+        )
+        self.depth = depth
+        self.limit = limit
+
+
 class CrossSessionError(ValueError):
     """One gateway session tried to continue another session's turn."""
 
@@ -745,6 +758,8 @@ class GatewayService:
 
         payload_digest = _digest(turn.model_dump(mode="json", exclude={"idempotency_key"}))
         response_id = f"resp_{uuid.uuid4().hex}"
+        attempt = 1
+        retry_of: str | None = None
         trace = TurnTrace(response_id, self.requests.request_dir(response_id) / "trace.jsonl")
         self._traces[response_id] = trace
         trace.event(
@@ -774,9 +789,15 @@ class GatewayService:
                 record = self.state.load_turn(claim.response_id)
                 if record is not None and record.resumable:
                     raise UncertainSubmitError(claim.response_id, record.state)
-                # The prior attempt never reached the provider, so retry under
-                # the original response id to keep the lineage intact.
-                response_id = claim.response_id
+                # The prior attempt never reached the provider, so this is a
+                # genuine retry: a new record linked to the one it supersedes,
+                # rather than silently reusing the old id.
+                if record is not None:
+                    attempt = record.attempt + 1
+                    retry_of = record.response_id
+                    trace.event(
+                        TraceStage.IDEMPOTENCY, "retry", claim.response_id, attempt=attempt,
+                    )
 
         # A turn that may already be sitting in the provider chat must not be
         # duplicated by a fresh submit on the same session.
@@ -789,6 +810,15 @@ class GatewayService:
                 raise UncertainSubmitError(pending.response_id, pending.state)
 
         binding = self.state.bind(session_id=session_id, site=site, model=turn.model, protocol=turn.protocol)
+        # A client that keeps answering tool calls with more tool calls would
+        # otherwise run until something else stopped it.
+        if binding.tool_loop_depth >= self.limits.max_tool_loop_iterations:
+            trace.event(
+                TraceStage.ADMISSION, "tool-loop-exhausted",
+                f"{binding.tool_loop_depth} consecutive tool-call turns",
+                limit=self.limits.max_tool_loop_iterations,
+            )
+            raise ToolLoopExhausted(binding.tool_loop_depth, self.limits.max_tool_loop_iterations)
         conversation_id = binding.conversation_id or (previous.conversation_id if previous else None)
         trace.event(
             TraceStage.CORRELATION, "bound", conversation_id or "no provider conversation yet",
@@ -807,8 +837,8 @@ class GatewayService:
                 idempotency_key=key,
                 predecessor_response_id=previous.response_id if previous else None,
                 conversation_id=conversation_id,
-                attempt=1 if previous is None else 1,
-                retry_of=None,
+                attempt=attempt,
+                retry_of=retry_of,
             )
         )
         self.state.transition(record, TurnState.QUEUED, "admitted to gateway queue")
@@ -1120,11 +1150,12 @@ class GatewayService:
             self.requests.write_text(
                 response_id, "gateway-compaction.json", compaction.model_dump_json(indent=2)
             )
+        depth = self.state.record_turn_outcome(session_id, made_tool_call=bool(calls))
         trace.event(
             TraceStage.TERMINAL, "completed", f"{len(text)} chars, {len(calls)} tool call(s)",
             input_units=result.input_units, output_units=result.output_units,
             stream_failed=deltas.failed, realignments=deltas.realignments,
-            conversation=raw.conversation_id,
+            conversation=raw.conversation_id, tool_loop_depth=depth,
         )
         self.state.transition(record, TurnState.COMPLETED, "provider answered")
         if key:
@@ -1242,7 +1273,11 @@ class GatewayService:
         scrubbed = _scrub(message)
         self.state.transition(record, TurnState.FAILED, scrubbed)
         if key:
-            self.state.release_idempotency(key)
+            # The claim is kept rather than released. Same key plus same payload
+            # is the same logical operation whether or not it succeeded, so the
+            # next use of it is recorded as a further attempt with its lineage
+            # intact, instead of looking like a brand new turn.
+            self.state.update_idempotency(key, TurnState.FAILED)
         self.metrics.record("failed")
         self.requests.fail(response_id, scrubbed)
 
@@ -1645,6 +1680,8 @@ def classify_error(exc: Exception, protocol: str) -> tuple[int, dict[str, Any], 
         # 499 is the Gemini-documented client-cancelled code; the other two
         # clients simply see the request aborted with a matching envelope.
         return 499, _protocol_error(protocol, 499, exc.reason, "request_cancelled"), None
+    if isinstance(exc, ToolLoopExhausted):
+        return 409, _protocol_error(protocol, 409, str(exc), "invalid_request_error"), None
     if isinstance(exc, BrowserTurnError):
         # The browser failure taxonomy already decided what this honestly is,
         # including whether a retry can help.

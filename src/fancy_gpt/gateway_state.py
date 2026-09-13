@@ -64,6 +64,33 @@ class TurnState(str, Enum):
 
 TERMINAL_STATES = {TurnState.COMPLETED, TurnState.FAILED, TurnState.CANCELLED}
 
+#: Which transitions are legal. Recording a transition that cannot have happened
+#: writes a history that lies, and a resurrected terminal turn could be
+#: re-submitted. UNCERTAIN is deliberately not terminal: it can still be
+#: resolved once we learn what the browser actually did.
+LEGAL_TRANSITIONS: dict[TurnState, frozenset[TurnState]] = {
+    TurnState.QUEUED: frozenset({TurnState.QUEUED, TurnState.SUBMITTING, TurnState.CANCELLED, TurnState.FAILED}),
+    TurnState.SUBMITTING: frozenset({TurnState.SUBMITTED, TurnState.UNCERTAIN, TurnState.CANCELLED, TurnState.FAILED}),
+    TurnState.SUBMITTED: frozenset({TurnState.OBSERVING, TurnState.UNCERTAIN, TurnState.COMPLETED, TurnState.CANCELLED, TurnState.FAILED}),
+    TurnState.OBSERVING: frozenset({TurnState.COMPLETED, TurnState.UNCERTAIN, TurnState.CANCELLED, TurnState.FAILED}),
+    TurnState.UNCERTAIN: frozenset({TurnState.COMPLETED, TurnState.FAILED, TurnState.CANCELLED}),
+    TurnState.COMPLETED: frozenset(),
+    TurnState.FAILED: frozenset(),
+    TurnState.CANCELLED: frozenset(),
+}
+
+
+class IllegalTransition(RuntimeError):
+    """A turn was moved to a state it cannot reach from where it was."""
+
+    def __init__(self, response_id: str, current: TurnState, requested: TurnState) -> None:
+        super().__init__(
+            f"turn {response_id} cannot move from {current.value} to {requested.value}"
+        )
+        self.response_id = response_id
+        self.current = current
+        self.requested = requested
+
 #: States in which the prompt may already be sitting in the provider chat.
 SUBMIT_MAY_HAVE_LANDED = {TurnState.SUBMITTING, TurnState.SUBMITTED, TurnState.OBSERVING, TurnState.UNCERTAIN}
 
@@ -92,6 +119,10 @@ class SessionBinding(BaseModel):
     protocol: str
     conversation_id: str | None = None
     generation: int = 0
+    #: Consecutive turns on this session that ended in a tool call. A client
+    #: whose tool loop never terminates is bounded by this rather than by
+    #: its own good behaviour.
+    tool_loop_depth: int = 0
     rebind_reason: RebindReason | None = None
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
@@ -257,6 +288,23 @@ class GatewayStateStore:
             return self.save_binding(existing)
         return existing
 
+    def record_turn_outcome(self, session_id: str, *, made_tool_call: bool) -> int:
+        """Update the session's tool-loop depth. Returns the new depth.
+
+        A turn that answers with text ends the loop; a turn that asks for
+        another tool call extends it.
+        """
+        binding = self.load_binding(session_id)
+        if binding is None:
+            return 0
+        binding.tool_loop_depth = binding.tool_loop_depth + 1 if made_tool_call else 0
+        self.save_binding(binding)
+        return binding.tool_loop_depth
+
+    def tool_loop_depth(self, session_id: str) -> int:
+        binding = self.load_binding(session_id)
+        return binding.tool_loop_depth if binding else 0
+
     def rebind(self, session_id: str, reason: RebindReason) -> SessionBinding | None:
         """Drop the provider conversation so the next turn starts a fresh chat."""
         binding = self.load_binding(session_id)
@@ -301,6 +349,20 @@ class GatewayStateStore:
         return turn
 
     def transition(self, turn: TurnRecord, state: TurnState, detail: str = "") -> TurnRecord:
+        """Move a turn to a new state, refusing a move it cannot legally make.
+
+        Checked against the record on disk rather than the in-memory copy, so a
+        stale object cannot resurrect a turn that another writer has already
+        finished.
+        """
+        persisted = self.load_turn(turn.response_id)
+        current = persisted.state if persisted is not None else turn.state
+        if state is not current and state not in LEGAL_TRANSITIONS[current]:
+            raise IllegalTransition(turn.response_id, current, state)
+        if persisted is not None:
+            # Keep the history that is already recorded; the caller's copy may
+            # have been made before another writer appended to it.
+            turn.transitions = persisted.transitions
         turn.state = state
         turn.transitions.append(StateTransition(state=state, at=_now(), detail=detail))
         if state is TurnState.CANCELLED and detail:
@@ -308,6 +370,39 @@ class GatewayStateStore:
         if state is TurnState.FAILED and detail:
             turn.error = detail
         return self.save_turn(turn)
+
+    def record_retry(self, original: TurnRecord, response_id: str) -> TurnRecord:
+        """Start a new attempt, linked to the one it supersedes.
+
+        A retry is its own record rather than a mutation of the original, so
+        inspection can show how many attempts a logical turn took and which
+        superseded which.
+        """
+        return self.save_turn(
+            TurnRecord(
+                response_id=response_id,
+                session_id=original.session_id,
+                protocol=original.protocol,
+                model=original.model,
+                site=original.site,
+                payload_digest=original.payload_digest,
+                idempotency_key=original.idempotency_key,
+                attempt=original.attempt + 1,
+                retry_of=original.response_id,
+                predecessor_response_id=original.predecessor_response_id,
+            )
+        )
+
+    def retry_lineage(self, response_id: str) -> list[TurnRecord]:
+        """The chain of attempts ending at this one, oldest first."""
+        chain: list[TurnRecord] = []
+        seen: set[str] = set()
+        current = self.load_turn(response_id)
+        while current is not None and current.response_id not in seen:
+            seen.add(current.response_id)
+            chain.append(current)
+            current = self.load_turn(current.retry_of) if current.retry_of else None
+        return list(reversed(chain))
 
     def session_turns(self, session_id: str) -> list[TurnRecord]:
         turns: list[TurnRecord] = []

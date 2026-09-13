@@ -433,6 +433,35 @@ class ReviewEngine:
             "outcome": terminal.get("event") if terminal else None,
             "outcome_detail": terminal.get("detail", "") if terminal else "",
         }
+        # Lineage is part of diagnosing a turn: it says how many attempts a
+        # logical request took and which superseded which.
+        lineage: list[dict] = []
+        try:
+            from .gateway_state import GatewayStateStore
+
+            state = GatewayStateStore(self.store.root)
+            record = state.load_turn(request_id)
+            if record is not None:
+                lineage = [
+                    {
+                        "response_id": item.response_id,
+                        "attempt": item.attempt,
+                        "state": item.state.value,
+                        "retry_of": item.retry_of,
+                        "created_at": item.created_at,
+                    }
+                    for item in state.retry_lineage(request_id)
+                ]
+                summary["state"] = record.state.value
+                summary["attempt"] = record.attempt
+                summary["transitions"] = [
+                    {"state": item.state.value, "at": item.at, "detail": item.detail}
+                    for item in record.transitions
+                ]
+        except Exception:
+            # Inspection must never fail because a side record is unreadable.
+            lineage = []
+        summary["retry_lineage"] = lineage
         if summary_only:
             return {"summary": summary, "events": []}
         return {"summary": summary, "events": events}
