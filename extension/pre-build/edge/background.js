@@ -14,25 +14,10 @@ const DEFAULTS = {
   reconnectIntervalMs: 2000,
 };
 
-let taskWindowId = null;
-// The tab left behind to keep the task window alive between jobs. Removing a
-// window's last tab closes the window, so without this the window created for
-// one job is gone before the next arrives.
-let taskKeeperTabId = null;
+let nextLeaseId = 1;
+const surfaceLeases = new Map();
 
-async function taskWindowFor(url) {
-  if (taskWindowId != null) {
-    try {
-      await ext.windows.get(taskWindowId);
-      // Active, and the window brought back up. A tab that is not the active
-      // one in its window is a hidden document however visible the window is,
-      // and a hidden document stops being painted mid-reply.
-      try { await ext.windows.update(taskWindowId, {focused: true, state: "normal"}); } catch (_) {}
-      return ext.tabs.create({url, windowId: taskWindowId, active: true});
-    } catch (_) {
-      taskWindowId = null;
-    }
-  }
+async function acquireSurface(jobId, epoch, url) {
   /* Unfocused, but never minimized.
    *
    * This used to minimize the window on the assumption that a minimized window
@@ -55,80 +40,25 @@ async function taskWindowFor(url) {
   const created = await ext.windows.create({
     url, focused: true, state: "normal", width: 900, height: 700, top: 0, left: 0,
   });
-  taskWindowId = created.id;
-  return created.tabs?.[0] ?? null;
+  const tab = created.tabs?.[0] ?? null;
+  if (created.id == null || tab?.id == null) {
+    if (created.id != null) try { await ext.windows.remove(created.id); } catch (_) {}
+    throw new Error("failed to create site task surface");
+  }
+  const lease = {
+    leaseId: nextLeaseId++, jobId, epoch, windowId: created.id, tabId: tab.id, released: false,
+  };
+  surfaceLeases.set(lease.leaseId, lease);
+  return lease;
 }
 
-/* Give the tab back without destroying the window it lives in.
- *
- * Removing a window's last tab closes the window, so simply removing the task
- * tab meant the window never survived a single job: the next one found a dead
- * window id, created a fresh window, and took the user's focus again. The
- * reuse path and the idle close below could never run at all.
- *
- * One tab is therefore parked on a blank page instead of removed, which costs
- * nothing to keep and leaves the window reusable. It is closed with the window
- * once work has genuinely stopped arriving.
- */
-async function releaseTaskTab(tabId) {
-  if (taskWindowId == null) {
-    try { await ext.tabs.remove(tabId); } catch (_) {}
-    return;
-  }
-  let siblings = [];
-  try { siblings = await ext.tabs.query({windowId: taskWindowId}) ?? []; } catch (_) {}
-  const isLast = siblings.length <= 1 && siblings.some(item => item.id === tabId);
-  if (!isLast) {
-    try { await ext.tabs.remove(tabId); } catch (_) {}
-    if (taskKeeperTabId === tabId) taskKeeperTabId = null;
-    return;
-  }
-  try {
-    await ext.tabs.update(tabId, {url: "about:blank"});
-    taskKeeperTabId = tabId;
-  } catch (_) {
-    try { await ext.tabs.remove(tabId); } catch (_) {}
-    taskKeeperTabId = null;
-  }
-}
-
-/* Close the automation window once it has been idle for a while.
- *
- * Closing it the instant a job ends means the next job creates a new one, and
- * creating a window is visible to the user however unfocused it is asked to be.
- * Keeping it forever leaves an empty minimized window behind for the rest of
- * the session. So it is reused while work keeps arriving, and closed once it
- * has genuinely gone quiet.
- */
-const TASK_WINDOW_IDLE_MS = 30000;
-let taskWindowIdleTimer = null;
-
-function scheduleTaskWindowClose() {
-  if (taskWindowIdleTimer != null) clearTimeout(taskWindowIdleTimer);
-  taskWindowIdleTimer = setTimeout(() => {
-    taskWindowIdleTimer = null;
-    closeTaskWindowIfIdle().catch(() => {});
-  }, TASK_WINDOW_IDLE_MS);
-}
-
-async function closeTaskWindowIfIdle() {
-  if (taskWindowId == null || activeJobs.size > 0) return;
-  const windowId = taskWindowId;
-  try {
-    const remaining = await ext.tabs.query({windowId});
-    // Only ever close a window this extension created, and only when nothing is
-    // left in it but the blank tab parked there to keep it open: never take
-    // away a tab the user opened.
-    const onlyOurs = (remaining ?? []).every(item => item.id === taskKeeperTabId);
-    if (!remaining || remaining.length === 0 || onlyOurs) {
-      taskKeeperTabId = null;
-      taskWindowId = null;
-      await ext.windows.remove(windowId);
-    }
-  } catch (_) {
-    // Already gone, which is the state we wanted anyway.
-    taskWindowId = null;
-  }
+async function releaseSurface(lease) {
+  if (!lease || lease.released) return;
+  lease.released = true;
+  surfaceLeases.delete(lease.leaseId);
+  // Close only the exact window created for this lease. A stale completion can
+  // never remove another job's tab, even if jobs finish out of order.
+  try { await ext.windows.remove(lease.windowId); } catch (_) {}
 }
 
 async function getConfig() {
@@ -146,8 +76,9 @@ async function sendToContent(tabId, message, retries = 50) {
 }
 
 function whenTabCloses(tabId) {
-  return new Promise(resolve => {
-    const listener = closedId => {
+  let listener;
+  const promise = new Promise(resolve => {
+    listener = closedId => {
       if (closedId === tabId) {
         ext.tabs.onRemoved.removeListener(listener);
         resolve();
@@ -155,6 +86,7 @@ function whenTabCloses(tabId) {
     };
     ext.tabs.onRemoved.addListener(listener);
   });
+  return {promise, dispose: () => ext.tabs.onRemoved.removeListener(listener)};
 }
 
 // ext.tabs.sendMessage() does not reliably reject when the receiving tab is
@@ -162,10 +94,12 @@ function whenTabCloses(tabId) {
 // a manually or externally closed task tab can otherwise hang the whole job
 // until its full timeout instead of failing fast.
 async function sendToContentOrTabClose(tabId, message) {
-  const closed = whenTabCloses(tabId).then(() => {
+  const watcher = whenTabCloses(tabId);
+  const closed = watcher.promise.then(() => {
     throw new Error("site task tab was closed before the turn completed");
   });
-  return Promise.race([sendToContent(tabId, message), closed]);
+  try { return await Promise.race([sendToContent(tabId, message), closed]); }
+  finally { watcher.dispose(); }
 }
 
 const CONVERSATION_ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
@@ -271,7 +205,7 @@ async function cancelJob(message) {
 }
 
 async function executeJob(job) {
-  let tab = null;
+  let lease = null;
   try {
     if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
     // Which sites this build can drive is decided by which adapters registered
@@ -282,9 +216,8 @@ async function executeJob(job) {
     const config = await getConfig();
     // Claimed before the tab exists: otherwise another job finishing in this
     // moment sees an idle window and closes it while this tab is being created.
-    const entry = {tabId: null, epoch: Number(job.generation_epoch ?? 0), cancelled: false};
+    const entry = {tabId: null, leaseId: null, epoch: Number(job.generation_epoch ?? 0), cancelled: false};
     activeJobs.set(job.job_id, entry);
-    if (taskWindowIdleTimer != null) { clearTimeout(taskWindowIdleTimer); taskWindowIdleTimer = null; }
     /* Always the extension's own window, never the one you are working in.
      *
      * Driving a page means the page has to be drawn, and a tab that is not the
@@ -294,9 +227,9 @@ async function executeJob(job) {
      * window is what makes that cost affordable -- it is the automation's own
      * space, reused for as long as work keeps arriving.
      */
-    tab = await taskWindowFor(taskUrl);
-    if (!tab || tab.id == null) throw new Error("failed to create site task tab");
-    entry.tabId = tab.id;
+    lease = await acquireSurface(job.job_id, entry.epoch, taskUrl);
+    entry.tabId = lease.tabId;
+    entry.leaseId = lease.leaseId;
     if (entry.cancelled) {
       globalThis.FancyGPTTransport.send({
         type: "job_cancelled", job_id: job.job_id, text: "", stopped_generation: false,
@@ -305,7 +238,7 @@ async function executeJob(job) {
       return;
     }
     if (job.operation === "site.health") {
-      const health = await sendToContentOrTabClose(tab.id, {type: "fancy_site_health", site});
+      const health = await sendToContentOrTabClose(lease.tabId, {type: "fancy_site_health", site});
       const payload = health ?? {ok: false, reason: "site-health-no-response"};
       globalThis.FancyGPTTransport.send({
         type: "job_result", job_id: job.job_id, text: JSON.stringify(payload),
@@ -313,7 +246,7 @@ async function executeJob(job) {
       });
       return;
     }
-    const result = await sendToContentOrTabClose(tab.id, {
+    const result = await sendToContentOrTabClose(lease.tabId, {
       type: "fancy_execute_turn",
       site,
       prompt: job.prompt,
@@ -361,8 +294,7 @@ async function executeJob(job) {
     globalThis.FancyGPTTransport.send({type: "job_error", job_id: job.job_id, error: String(error?.message ?? error)});
   } finally {
     activeJobs.delete(job.job_id);
-    if (tab?.id != null) await releaseTaskTab(tab.id);
-    scheduleTaskWindowClose();
+    await releaseSurface(lease);
   }
 }
 
@@ -437,5 +369,11 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     catch (_) {}
   }
 });
+
+// A narrow seam for the executable lifecycle test. It intentionally exposes
+// ownership operations, not browser credentials or transport internals.
+if (globalThis.__FANCYGPT_TEST__) {
+  globalThis.FancyGPTBackgroundTest = {acquireSurface, releaseSurface, surfaceLeases, activeJobs};
+}
 
 connectBridge().catch(console.error);

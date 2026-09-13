@@ -331,28 +331,18 @@ def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
     # would have to keep taking over the one in front of them, because a tab
     # that is not active is a hidden document that stops being drawn.
     assert "separateTaskWindow" not in background
-    assert "tab = await taskWindowFor(taskUrl)" in background
+    assert "lease = await acquireSurface(job.job_id, entry.epoch, taskUrl)" in background
     # Its own window, still out of the way -- but never minimized.
     assert 'state: "minimized"' not in background
     assert 'state: "normal"' in background
-    # And never a background tab. There is one path that opens one now, since
-    # the shared-window mode is gone, and it opens it active.
+    # windows.create(url) makes that URL the active tab of the new window.
     assert "active: false" not in background
-    assert "active: true" in background
+    assert "url, focused: true" in background
 
 
-def test_the_task_window_survives_the_job_that_created_it(tmp_path: Path) -> None:
-    """Otherwise every single turn takes the user's focus.
-
-    Removing a window's last tab closes the window. The task tab was simply
-    removed when its job ended, so the window never lasted past one job: the
-    next found a dead window id and created a fresh, focused one. The reuse
-    path and the idle close were unreachable code stating the opposite.
-    """
+def test_each_job_releases_only_its_own_surface(tmp_path: Path) -> None:
+    """Out-of-order completion must never close another concurrent job."""
     background = (export_extension("edge", tmp_path / "edge-window-life") / "background.js").read_text(encoding="utf-8")
-    # The tab is handed back through one place, which parks it rather than
-    # removing it when it is the last one in the task window.
-    assert "await releaseTaskTab(tab.id)" in background
-    assert 'ext.tabs.update(tabId, {url: "about:blank"})' in background
-    # And the idle close still refuses to take a tab the user opened.
-    assert "item.id === taskKeeperTabId" in background
+    assert "const surfaceLeases = new Map()" in background
+    assert "await releaseSurface(lease)" in background
+    assert "ext.windows.remove(lease.windowId)" in background

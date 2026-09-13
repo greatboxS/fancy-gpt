@@ -193,8 +193,8 @@ def test_cancellation_is_wired_through_the_exported_extension(tmp_path: Path) ->
     # the map entry after that await used to erase the cancellation after it had
     # already been acknowledged.
     assert "const entry = {tabId: null" in background
-    assert "entry.tabId = tab.id" in background
-    after_tab_creation = background.index("entry.tabId = tab.id")
+    assert "entry.tabId = lease.tabId" in background
+    after_tab_creation = background.index("entry.tabId = lease.tabId")
     assert background.index("if (entry.cancelled)", after_tab_creation) < background.index(
         'type: "fancy_execute_turn"', after_tab_creation
     )
@@ -236,16 +236,13 @@ def test_each_adapter_observes_and_disconnects(tmp_path: Path, adapter: str) -> 
     assert "stopObserving()" in source
 
 
-def test_the_automation_window_is_closed_when_idle(tmp_path: Path) -> None:
-    """An empty minimized window left behind is a leak the user can see."""
+def test_each_automation_surface_is_closed_with_its_lease(tmp_path: Path) -> None:
+    """Completed jobs leave no window behind and cannot close a peer's."""
     exported = export_extension("edge", tmp_path / "edge-window")
     background = (exported / "background.js").read_text(encoding="utf-8")
-    assert "async function closeTaskWindowIfIdle(" in background
-    assert "closeTaskWindowIfIdle()" in background
-    # It must never close a window that still holds tabs, which could be the
-    # user's own.
-    assert "remaining.length === 0" in background
-    assert "activeJobs.size > 0" in background
+    assert "async function releaseSurface(" in background
+    assert "surfaceLeases.delete(lease.leaseId)" in background
+    assert "ext.windows.remove(lease.windowId)" in background
 
 
 def test_completion_is_gated_not_inferred_from_one_signal(tmp_path: Path) -> None:

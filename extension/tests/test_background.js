@@ -1,0 +1,86 @@
+"use strict";
+
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+
+function event() {
+  const listeners = new Set();
+  return {
+    addListener(fn) { listeners.add(fn); },
+    removeListener(fn) { listeners.delete(fn); },
+    emit(...args) { for (const fn of [...listeners]) fn(...args); },
+    get size() { return listeners.size; },
+  };
+}
+
+async function main() {
+  let nextWindow = 10;
+  let nextTab = 100;
+  const windows = new Map();
+  const pending = new Map();
+  const sent = [];
+  const removed = event();
+  let handler;
+
+  const browser = {
+    windows: {
+      async create(options) {
+        const value = {id: nextWindow++, tabs: [{id: nextTab++}], options};
+        windows.set(value.id, value);
+        return value;
+      },
+      async remove(id) { windows.delete(id); },
+    },
+    tabs: {
+      onRemoved: removed,
+      async sendMessage(tabId, message) {
+        if (message.type === "fancy_cancel_turn") return {ok: true};
+        return new Promise((resolve, reject) => pending.set(tabId, {resolve, reject, message}));
+      },
+    },
+    storage: {local: {async get(defaults) { return defaults; }, async set() {}}},
+    runtime: {
+      onConnect: event(), onInstalled: event(), onStartup: event(), onMessage: event(),
+    },
+  };
+  const transport = {
+    setHandler(fn) { handler = fn; },
+    async connect() {}, disconnect() {}, status() { return {}; },
+    send(message) { sent.push(message); },
+  };
+  const context = {
+    browser, console, setTimeout, clearTimeout, setInterval, clearInterval,
+    __FANCYGPT_TEST__: true, FancyGPTTransport: transport,
+  };
+  context.globalThis = context;
+  const source = fs.readFileSync(path.join(__dirname, "../common/background.js"), "utf8");
+  vm.runInNewContext(source, context, {filename: "background.js"});
+
+  const first = handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "a", prompt: "A", generation_epoch: 1});
+  const second = handler({type: "job", operation: "model.turn", site: "chatgpt", job_id: "b", prompt: "B", generation_epoch: 1});
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.strictEqual(windows.size, 2, "concurrent turns must own separate windows");
+  assert.strictEqual(context.FancyGPTBackgroundTest.surfaceLeases.size, 2);
+  const entries = [...context.FancyGPTBackgroundTest.activeJobs.values()];
+  assert.notStrictEqual(entries[0].tabId, entries[1].tabId, "tabs must not be shared");
+  assert.strictEqual(removed.size, 2, "each in-flight send owns one close watcher");
+
+  const secondTab = context.FancyGPTBackgroundTest.activeJobs.get("b").tabId;
+  pending.get(secondTab).resolve({ok: true, text: "B", responseIdentity: "b1"});
+  await second;
+  assert.strictEqual(windows.size, 1, "out-of-order completion closes only its lease");
+  assert.strictEqual(removed.size, 1, "winning send removes its close watcher");
+
+  const firstTab = context.FancyGPTBackgroundTest.activeJobs.get("a").tabId;
+  pending.get(firstTab).resolve({ok: true, text: "A", responseIdentity: "a1"});
+  await first;
+  assert.strictEqual(windows.size, 0);
+  assert.strictEqual(removed.size, 0);
+  assert.deepStrictEqual(sent.filter(item => item.type === "job_result").map(item => item.job_id).sort(), ["a", "b"]);
+  console.log("background lifecycle: 1 passed");
+}
+
+main().catch(error => { console.error(error); process.exitCode = 1; });
