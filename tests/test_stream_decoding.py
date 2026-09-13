@@ -141,6 +141,24 @@ def test_malformed_events_do_not_stop_the_decode() -> None:
     assert not reply.trustworthy
 
 
+def test_measured_delta_encoding_marker_is_not_a_framing_error() -> None:
+    reply = decode_chatgpt_stream(["\"v1\"", *finished(
+        {"p": "/message/content/parts/0", "o": "append", "v": "complete"},
+    )])
+    assert reply.text == "complete"
+    assert reply.framing_errors == 0
+    assert reply.trustworthy
+
+
+def test_an_unknown_json_scalar_still_fails_closed() -> None:
+    reply = decode_chatgpt_stream(["\"v2\"", *finished(
+        {"p": "/message/content/parts/0", "o": "append", "v": "complete"},
+    )])
+    assert reply.text == "complete"
+    assert reply.framing_errors == 1
+    assert not reply.trustworthy
+
+
 def test_an_unmeasured_site_has_no_decoder_rather_than_a_guessed_one() -> None:
     # Each site is decoded from the shape it actually produces, and a site with
     # no entry reads the page exactly as before.

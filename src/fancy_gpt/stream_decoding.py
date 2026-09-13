@@ -201,6 +201,11 @@ def decode_chatgpt_stream(events: Iterable[str]) -> DecodedReply:
         except (TypeError, ValueError):
             reply.framing_errors += 1
             continue
+        # The SSE event named ``delta_encoding`` carries the JSON string "v1"
+        # before the patch documents. This is a measured protocol marker, not a
+        # malformed patch. No other scalar is accepted implicitly.
+        if parsed == "v1":
+            continue
         if isinstance(parsed, dict) and "message" in parsed and "o" not in parsed and "p" not in parsed:
             # The opening snapshot arrives as a whole conversation event.
             document.root = {"message": parsed["message"], "conversation_id": parsed.get("conversation_id")}
