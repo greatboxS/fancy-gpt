@@ -43,6 +43,33 @@
     return Object.keys(value).slice(0, 40);
   };
 
+  /* The vocabulary of a delta, not its contents.
+   *
+   * The stream does not append text, it patches a document: each delta carries
+   * an operation, a JSON-pointer path and a value. A decoder written on the
+   * assumption that values concatenate would be wrong in a way that produces
+   * plausible text, which is the worst kind. So the operations and the shape of
+   * the paths are recorded -- pointer segments are structure, and array indices
+   * are reduced to <n> -- while values are never touched beyond their type.
+   */
+  const noteDeltaShape = (parsed, summary) => {
+    const visit = entry => {
+      if (!entry || typeof entry !== "object") return;
+      if (typeof entry.o === "string") summary.ops.add(entry.o.slice(0, 24));
+      if (typeof entry.p === "string") {
+        summary.paths.add(entry.p.replace(/\/\d+/g, "/<n>").slice(0, 80));
+      }
+      if ("v" in entry) {
+        const value = entry.v;
+        summary.valueTypes.add(Array.isArray(value) ? "array" : typeof value);
+        if (Array.isArray(value)) for (const item of value) visit(item);
+        else if (value && typeof value === "object" && ("o" in value || "p" in value)) visit(value);
+      }
+    };
+    visit(parsed);
+    if (Array.isArray(parsed)) for (const item of parsed) visit(item);
+  };
+
   const report = payload => {
     try { window.postMessage({source: CHANNEL, ...payload}, location.origin); } catch (_) {}
   };
@@ -59,6 +86,7 @@
       path: shape, status: response.status,
       contentType: response.headers.get("content-type") || "",
       chunks: 0, bytes: 0, eventNames: new Set(), dataFields: new Set(),
+      ops: new Set(), paths: new Set(), valueTypes: new Set(),
       sawDone: false, firstChunkMs: null,
     };
     const startedAt = Date.now();
@@ -78,7 +106,11 @@
           if (!line.startsWith("data:")) continue;
           const data = line.slice(5).trim();
           if (data === "[DONE]") { summary.sawDone = true; continue; }
-          try { for (const name of fieldNames(JSON.parse(data))) summary.dataFields.add(name); } catch (_) {}
+          try {
+            const parsed = JSON.parse(data);
+            for (const name of fieldNames(parsed)) summary.dataFields.add(name);
+            noteDeltaShape(parsed, summary);
+          } catch (_) {}
         }
       }
     } catch (_) {
@@ -93,6 +125,9 @@
       bytes: summary.bytes,
       eventNames: [...summary.eventNames].slice(0, 20),
       dataFields: [...summary.dataFields].slice(0, 40),
+      ops: [...summary.ops].slice(0, 20),
+      paths: [...summary.paths].slice(0, 30),
+      valueTypes: [...summary.valueTypes].slice(0, 10),
       sawDone: summary.sawDone,
       firstChunkMs: summary.firstChunkMs,
       totalMs: Date.now() - startedAt,
