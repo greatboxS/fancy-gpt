@@ -6,25 +6,10 @@
  * that a rich-text editor ignores a direct DOM write.
  */
 (() => {
-  /* Usable, which in an automated tab is not the same as on screen.
-   *
-   * This check exists to avoid picking a control the site has hidden -- an
-   * off-screen duplicate composer, a collapsed menu -- and a box with no size
-   * is a good sign of that while the document is being shown.
-   *
-   * It is a bad sign when the document is not being shown. A browser does not
-   * paint a hidden tab, and a never-painted document can report every element
-   * as zero-sized, which would make the page look empty and a turn fail as
-   * "composer unavailable" on a page that is perfectly ready. What the site
-   * says it has hidden is still honoured; only the measurement that depends on
-   * painting is set aside.
-   */
   function visible(element) {
-    const style = getComputedStyle(element);
-    if (style.visibility === "hidden" || style.display === "none") return false;
-    if (document.visibilityState === "hidden") return true;
     const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    const style = getComputedStyle(element);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
   }
 
   // Deliberately strict: a selector that matches several elements is ambiguous,
@@ -518,7 +503,7 @@
   }
 
   // Stamped at export time; every adapter reports this one value.
-  const BUILD = "b442f13d8503";
+  const BUILD = "d921bd78dece";
 
   globalThis.FancyGPTSiteKit = {
     build: BUILD,

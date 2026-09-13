@@ -85,28 +85,11 @@ function sizeOf(report) {
   return String(report.text ?? "").length;
 }
 
-/* Keep the best example of each endpoint, not the best few overall.
- *
- * Which request is the reply is decided in the runtime, by the path each site
- * was measured to answer on, so all this has to do is make sure every distinct
- * path is still represented when the runtime looks.
- *
- * Ranking them against each other does not work, and both attempts at it made
- * things worse. Dropping the oldest let a telemetry call that finished later
- * replace the answer; dropping the smallest let six large batchexecute bodies
- * crowd out the StreamGenerate response entirely, and every Gemini turn in a
- * run decoded nothing. A site can talk to as many endpoints as it likes, at
- * any size, in any order, and one entry each survives all of it.
- */
 function remember(list, report) {
-  const path = String(report.path ?? "");
-  const existing = list.findIndex(item => String(item.path ?? "") === path);
-  if (existing !== -1) {
-    // The fullest sighting of this endpoint, since a later one may be shorter.
-    if (sizeOf(report) > sizeOf(list[existing])) list[existing] = report;
-    return;
-  }
   list.push(report);
+  // When it is full, the smallest goes -- not the oldest. Gemini makes eight
+  // requests a turn and its reply is not the last of them, so dropping by age
+  // pushed an eleven thousand character answer out behind telemetry.
   while (list.length > CAPTURES) {
     let smallest = 0;
     for (let i = 1; i < list.length; ++i) {

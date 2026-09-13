@@ -435,30 +435,6 @@ async function main() {
     assertEqual(readLiveText(pre), "    two spaces kept", "no fence to restore, nothing invented");
   });
 
-  await test("a hidden document does not make every control disappear", () => {
-    /* A browser does not paint a tab it is not showing.
-     *
-     * A never-painted document can report every element as zero-sized, and
-     * this check used to require a box with size -- so an automated turn in a
-     * hidden tab would fail as "composer unavailable" on a page that was
-     * perfectly ready. Reading the reply no longer needs the page painted, so
-     * neither may finding the controls.
-     */
-    loadAdapters([]);
-    const {visible} = globalThis.FancyGPTSiteKit;
-    const control = new StubElement("button", {"data-testid": "send-button"});
-    document.body.append(control);
-
-    document.setVisibility("hidden");
-    assert(visible(control), "a control in a hidden document is still usable");
-
-    // What the site itself hides is still refused, in either state.
-    control.hidden = true;
-    assert(!visible(control), "display:none is the site's decision, not the browser's");
-    document.setVisibility("visible");
-    assert(!visible(control), "and it holds when the tab comes back");
-  });
-
   report();
 }
 
