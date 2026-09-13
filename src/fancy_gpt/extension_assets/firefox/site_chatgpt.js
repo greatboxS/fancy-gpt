@@ -368,6 +368,25 @@
       return Boolean(text) && (!baseline.has(id) || baseline.get(id) !== text);
     });
     const boundText = boundId != null ? assistantText(boundId) : null;
+    /* Where the text went, in shapes only.
+     *
+     * A stall whose bound turn holds far more text than the adapter extracted
+     * is an extraction bug, not a site that went quiet, and the two are
+     * indistinguishable from a character count alone. Selector strings are our
+     * own constants and the numbers are lengths, so no page content is
+     * reported. */
+    const boundTurnElement = boundId == null ? null
+      : [...document.querySelectorAll(SELECTORS.turns)]
+          .find(el => el.getAttribute("data-turn-id") === boundId) ?? null;
+    const extraction = boundTurnElement == null ? null : {
+      turnChars: (boundTurnElement.textContent ?? "").length,
+      bySelector: SELECTORS.assistantContent.map(selector => ({
+        selector,
+        matches: boundTurnElement.querySelectorAll(selector).length,
+        chars: [...boundTurnElement.querySelectorAll(selector)]
+          .map(node => (node.textContent ?? "").length),
+      })),
+    };
     const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
     const stallReason = Date.now() >= hardDeadline ? "absolute limit" : `no activity for ${idleFor}s`;
     throw new Error(`ChatGPT response stalled (${stallReason}); ` + JSON.stringify({
@@ -378,6 +397,7 @@
             .some(el => el.getAttribute("data-turn-id") === boundId)
         : null,
       boundTextChars: boundText == null ? null : boundText.length,
+      extraction,
       boundTextComplete: boundText != null && looksLikeCompleteJson(boundText),
       newTurnCount: newTurns.length,
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
