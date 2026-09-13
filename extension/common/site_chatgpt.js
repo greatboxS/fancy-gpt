@@ -411,6 +411,25 @@
           .map(node => (node.textContent ?? "").length),
       })),
     };
+    /* Where the reply actually lives.
+     *
+     * The bound turn held 15 characters of the 1155 on screen and no other
+     * turn counted as new, so the answer is not inside any [data-turn-id] at
+     * all and the turn selector is looking in the wrong place. Roles are the
+     * site's own constants ("user"/"assistant") and everything else is a
+     * length, so no page text is reported. */
+    const domShape = {
+      turns: document.querySelectorAll(SELECTORS.turns).length,
+      turnChars: [...document.querySelectorAll(SELECTORS.turns)].map(el => (el.textContent ?? "").length),
+      roles: [...document.querySelectorAll("[data-message-author-role]")].map(el => ({
+        role: el.getAttribute("data-message-author-role"),
+        chars: (el.textContent ?? "").length,
+        insideTurn: Boolean(el.closest?.(SELECTORS.turns)),
+      })),
+      articleChars: [...document.querySelectorAll("article")].map(el => (el.textContent ?? "").length),
+      markdownChars: [...document.querySelectorAll(".markdown")].map(el => (el.textContent ?? "").length),
+      mainChars: (document.querySelector("main")?.textContent ?? "").length,
+    };
     const idleFor = Math.round((Date.now() - lastActivityAt) / 1000);
     const stallReason = Date.now() >= hardDeadline ? "absolute limit" : `no activity for ${idleFor}s`;
     throw new Error(`ChatGPT response stalled (${stallReason}); ` + JSON.stringify({
@@ -422,6 +441,7 @@
         : null,
       boundTextChars: boundText == null ? null : boundText.length,
       extraction,
+      domShape,
       boundTextComplete: boundText != null && looksLikeCompleteJson(boundText),
       newTurnCount: newTurns.length,
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
