@@ -176,6 +176,19 @@
         const text = assistantText(id);
         if (text) candidates.push({id, text});
       }
+      if (boundId != null && assistantText(boundId) === null) {
+        /* The turn we bound to is gone.
+         *
+         * ChatGPT shows a "Thinking" placeholder turn and then replaces it with
+         * the real answer under a DIFFERENT data-turn-id. Staying bound to the
+         * placeholder means assistantText() returns null forever, no completion
+         * signal ever arrives, and the turn hangs until its timeout with the
+         * answer sitting finished on screen. Observed live: progress stopped at
+         * "Thinking" and the reply was never seen.
+         */
+        boundId = null;
+        if (stopObserving) { stopObserving(); stopObserving = null; }
+      }
       if (boundId == null) {
         if (candidates.length > 1) throw new Error("ambiguous ChatGPT response: multiple new assistant turns");
         if (candidates.length === 1) boundId = candidates[0].id;

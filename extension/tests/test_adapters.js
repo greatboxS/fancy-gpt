@@ -309,6 +309,41 @@ async function main() {
     assert(health.ok === true, "a localised UI must still be usable");
   });
 
+  await test("chatgpt rebinds when a thinking placeholder is replaced", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const seen = [];
+
+    const running = adapter.executeTurn("PROMPT-M", 10000, text => seen.push(text), {});
+    // ChatGPT shows a placeholder turn first.
+    const placeholder = await replyAfterSend("turn-thinking", "Thinking");
+    await new Promise(resolve => setTimeout(resolve, 250));
+    // Then replaces it with the real answer under a different turn id.
+    placeholder.remove();
+    assistantTurn("turn-answer", ENVELOPE);
+
+    const result = await running;
+    // Staying bound to the placeholder used to hang until the timeout.
+    assertEqual(result.text, ENVELOPE, "the replacement answer must be picked up");
+    assertEqual(result.responseIdentity, "turn-answer", "must rebind to the real turn");
+    assert(seen.includes(ENVELOPE), "progress must follow the rebind");
+  });
+
+  await test("chatgpt does not rebind while its turn is still present", async () => {
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    send.onclick = () => composer.setText("");
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-N", 8000, null, {});
+    const turn = await replyAfterSend("turn-1", '{"type":"message","text":"gro');
+    await new Promise(resolve => setTimeout(resolve, 200));
+    turn.setText(ENVELOPE);
+    const result = await running;
+    assertEqual(result.responseIdentity, "turn-1", "a turn that is still there must keep its binding");
+  });
+
   report();
 }
 
