@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from fancy_gpt.gateway import (
+    _gateway_prompt,
     GatewayService,
     anthropic_response,
     gemini_response,
@@ -62,6 +63,30 @@ def test_protocol_normalization_and_output_mapping() -> None:
     gemini = normalize_gemini({"systemInstruction": {"parts": [{"text": "system"}]}, "contents": [{"role": "user", "parts": [{"text": "hello"}]}]}, "fancy-gemini")
     assert openai.messages[0].text == anthropic.messages[0].text == gemini.messages[0].text == "hello"
     assert openai.instructions == anthropic.instructions == gemini.instructions == "system"
+
+
+def test_browser_prompt_compacts_large_claude_metadata() -> None:
+    tools = [{
+        "name": f"tool_{index}",
+        "description": "verbose " * 200,
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string", "description": "detail " * 200}},
+            "required": ["path"],
+        },
+    } for index in range(90)]
+    turn = normalize_anthropic({
+        "model": "fancy-chatgpt",
+        "system": "system metadata " * 5000,
+        "messages": [{"role": "user", "content": "ACTUAL-QUESTION"}],
+        "tools": tools,
+    })
+    prompt = _gateway_prompt(turn, include_history=True)
+    assert "ACTUAL-QUESTION" in prompt
+    assert "tool_89" in prompt
+    assert '"name": "path"' in prompt
+    assert "system metadata:" in prompt
+    assert len(prompt) < 40_000
 
 
 def test_gateway_prompt_keeps_exact_output_requests_inside_json_envelope(tmp_path: Path) -> None:
