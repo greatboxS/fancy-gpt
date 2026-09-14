@@ -112,7 +112,12 @@
                   conversationId: conversationId(), cancelled: true, stoppedGeneration: stopped};
         }
         const text = latest();
-        const active = isGenerating();
+        // Some sites replace or rename their Stop control frequently. Bytes
+        // arriving from the model are authoritative evidence that generation
+        // is still active and prevent the completion gate from returning a
+        // stable-looking prefix.
+        const active = isGenerating()
+          || (lastNetworkActivityAt != null && Date.now() - lastNetworkActivityAt < 1200);
         if (active || text !== lastText) { lastActivity = Date.now(); lastText = text; }
         if (gate.observe({text, active, complete: Boolean(text)})) {
           release();

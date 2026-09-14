@@ -357,6 +357,8 @@ def test_extra_sites_have_current_composer_and_submit_fallbacks(tmp_path: Path) 
     grok = (exported / "site_grok.js").read_text(encoding="utf-8")
     kimi = (exported / "site_kimi.js").read_text(encoding="utf-8")
     assert 'data-testid="grok-compose-input"' in grok
+    assert 'data-testid="assistant-message"' in grok
+    assert 'div.ProseMirror[role="textbox"]' in grok
     assert ".send-button-container" in kimi
     assert "form.requestSubmit()" in engine
     assert '["keydown", "keypress", "keyup"]' in engine

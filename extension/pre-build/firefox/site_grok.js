@@ -2,6 +2,7 @@
 globalThis.FancyGPTCreateGenericSite("grok", {
   hosts: ["grok.com", "x.com"], freshUrl: "https://grok.com/",
   composer: [
+    'div.ProseMirror[role="textbox"]', '[data-testid="chat-input"] [contenteditable="true"]',
     'textarea[data-testid="grok-compose-input"]', 'textarea[placeholder*="Grok" i]',
     'textarea[placeholder*="Ask" i]', 'div[contenteditable="true"][data-lexical-editor="true"]',
     '[role="textbox"][contenteditable="true"]', 'textarea[spellcheck="false"]',
@@ -13,5 +14,8 @@ globalThis.FancyGPTCreateGenericSite("grok", {
     'button[type="submit"]', 'button[aria-label*="Send" i]',
   ],
   stop: ['button[aria-label*="Stop" i]'],
-  responses: ['div[data-testid="message-bubble"]', 'div[class*="message"] .prose', 'article .prose'],
+  responses: [
+    '[data-testid="assistant-message"]', 'div[data-testid="message-bubble"]',
+    'div[class*="message"] .prose', 'article .prose',
+  ],
 });
