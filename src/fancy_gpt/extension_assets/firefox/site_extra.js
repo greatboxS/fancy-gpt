@@ -2,7 +2,7 @@
  * in site_<id>.js so one site's UI update stays isolated. */
 (() => {
   const kit = globalThis.FancyGPTSiteKit;
-  const {firstVisible, waitFor, setComposer, stopGeneration, observeText,
+  const {visible, firstVisible, waitFor, setComposer, stopGeneration, observeText,
          createCompletionGate, createActivityWaiter} = kit;
 
   const visibleNodes = selectors => {
@@ -28,8 +28,20 @@
     // Give reactive UIs a moment to enable/render their send control after the
     // input event. Kimi uses a clickable div container, while Grok currently
     // exposes a normal button.
+    const enabledControl = () => {
+      const roots = [composer.closest?.("form"), document].filter(Boolean);
+      for (const root of roots) {
+        for (const selector of selectors) {
+          const matches = [...root.querySelectorAll(selector)].filter(node =>
+            visible(node) && !node.disabled && node.getAttribute?.("aria-disabled") !== "true"
+          );
+          if (matches.length === 1) return matches[0];
+        }
+      }
+      return null;
+    };
     let send = null;
-    try { send = await waitFor(() => firstVisible(selectors), 3000, "send control unavailable"); } catch (_) {}
+    try { send = await waitFor(enabledControl, 5000, "enabled send control unavailable"); } catch (_) {}
     if (send) { send.click(); return true; }
     const form = composer.closest?.("form");
     if (form?.requestSubmit) { form.requestSubmit(); return true; }

@@ -66,8 +66,12 @@
     }
     selectAll(composer);
     const inserted = document.execCommand("insertText", false, prompt);
-    if (inserted && (composer.textContent ?? "").includes(prompt.slice(0, 32))) return;
-    composer.textContent = prompt;
+    if (!inserted || !(composer.textContent ?? "").includes(prompt.slice(0, 32))) {
+      composer.textContent = prompt;
+    }
+    // execCommand updates Grok's ProseMirror DOM but does not consistently
+    // notify its React state after switching to Private Chat. Always emit the
+    // input event, otherwise the text is visible while Send remains disabled.
     composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
   }
 

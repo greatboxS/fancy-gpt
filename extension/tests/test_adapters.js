@@ -56,7 +56,7 @@ async function main() {
   await test("grok temporary turns activate and verify native Private Chat", async () => {
     loadAdapters(["site_extra.js", "site_grok.js"], "grok.com");
     const composer = new StubElement("textarea");
-    const send = new StubElement("button", {"data-testid": "send-button"});
+    const send = new StubElement("button", {"data-testid": "send-button", "aria-disabled": "true"});
     const privateChat = new StubElement("a", {"aria-label": "Switch to Private Chat"});
     document.body.append(composer);
     document.body.append(send);
@@ -67,6 +67,10 @@ async function main() {
       privateChat.remove();
       composer.remove();
       privateComposer = new StubElement("textarea");
+      privateComposer.dispatchEvent = event => {
+        if (event.type === "input") send.setAttribute("aria-disabled", "false");
+        return true;
+      };
       document.body.append(privateComposer);
       document._composerTarget = privateComposer;
       document.body.append(new StubElement("div", {
