@@ -119,7 +119,13 @@ async function getConfig() {
   return {...DEFAULTS, ...value};
 }
 
-async function sendToContent(tabId, message, retries = 50) {
+async function sendToContent(tabId, message, retries = 150) {
+  /* A newly-created Gemini surface can pass through several app redirects
+   * before the manifest content script exists. Under four-window startup this
+   * was measured beyond the old 10s allowance even though the same turns all
+   * passed in an Edge-only run. Keep retrying within a bounded 30s readiness
+   * window; a missing/invalid manifest still fails explicitly after the bound.
+   */
   let lastError = null;
   for (let i = 0; i < retries; ++i) {
     try { return await ext.tabs.sendMessage(tabId, message); }
