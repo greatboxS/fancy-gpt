@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "889f5a4ef3f1";
+const EXTENSION_BUILD = "f73144e08121";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",

@@ -52,7 +52,14 @@
     const conversationId = () => location.pathname.split('/').filter(Boolean).at(-1) || null;
 
     async function healthCheck() {
-      const composer = hostOk() && firstVisible(config.composer);
+      // React/Lexical sites can reach document "interactive" well before the
+      // chat composer hydrates. A synchronous probe made Grok fail in 1.6s
+      // with zero inputs even though the page was still starting.
+      let composer = null;
+      if (hostOk()) {
+        try { composer = await waitFor(() => firstVisible(config.composer), 12000, "composer unavailable"); }
+        catch (_) {}
+      }
       const genericInputs = [...document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]')];
       const visibleGenericInputs = genericInputs.filter(node => node.getClientRects().length);
       const loginControls = document.querySelectorAll(
@@ -63,7 +70,7 @@
         probe: {
           path: location.pathname, readyState: document.readyState,
           genericInputs: genericInputs.length, visibleGenericInputs: visibleGenericInputs.length,
-          loginControls,
+          loginControls, titleSuggestsAuth: /log\s*in|sign\s*in/i.test(document.title),
         },
       };
     }

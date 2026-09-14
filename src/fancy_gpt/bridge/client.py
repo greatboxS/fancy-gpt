@@ -142,6 +142,10 @@ class BridgeBrowserDriver:
                     "the connected browser extension is older than this FancyGPT build; "
                     "re-export it with 'fancy-gpt extension export' and reload it in the browser"
                 )
+            if "task tab was closed" in error:
+                raise RuntimeError(
+                    "site task tab was closed before completion; the site may require login or user verification"
+                )
             raise RuntimeError(error)
         if result.get("type") != "job_result":
             raise RuntimeError(f"unexpected site-health response: {result.get('type')}")
