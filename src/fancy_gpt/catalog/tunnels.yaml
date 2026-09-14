@@ -72,3 +72,63 @@ tunnels:
       requires_bridge: true
       supports_ssh_forward: true
       browser_families: [firefox]
+
+  # Compatibility routes for extensions built before tunnel IDs were
+  # simplified. Keep these automatic until installed extensions have had time
+  # to migrate their saved configuration to *-remote.
+  - id: chrome-extension-ws-remote
+    description: Legacy Chrome extension route (compatibility alias).
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: chrome
+    priority: 20
+    endpoint: ws://127.0.0.1:8765
+    tags: [remote, chrome, existing-session, legacy]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [chrome]
+
+  - id: edge-extension-ws-remote
+    description: Legacy Edge extension route (compatibility alias).
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: edge
+    priority: 21
+    endpoint: ws://127.0.0.1:8765
+    tags: [remote, edge, existing-session, legacy]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [edge]
+
+  - id: firefox-extension-ws-remote
+    description: Legacy Firefox extension route (compatibility alias).
+    runtime: extension
+    transport: websocket
+    scope: remote
+    browser: firefox
+    priority: 22
+    endpoint: ws://127.0.0.1:8765
+    tags: [remote, firefox, existing-session, legacy]
+    capabilities:
+      automatic: true
+      remote_capable: true
+      existing_session: true
+      persistent_session: true
+      requires_extension: true
+      requires_bridge: true
+      supports_ssh_forward: true
+      browser_families: [firefox]

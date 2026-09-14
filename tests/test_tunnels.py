@@ -20,7 +20,10 @@ from fancy_gpt.tunnels import (
 def test_tunnel_catalog_has_expected_compositions() -> None:
     registry = TunnelRegistry()
     ids = {item.id for item in registry.all()}
-    assert ids == {"chromium-local", "chrome-remote", "edge-remote", "firefox-remote"}
+    assert ids == {
+        "chromium-local", "chrome-remote", "edge-remote", "firefox-remote",
+        "chrome-extension-ws-remote", "edge-extension-ws-remote", "firefox-extension-ws-remote",
+    }
     assert all("site" not in spec.model_dump() for spec in registry.all())
 
 
