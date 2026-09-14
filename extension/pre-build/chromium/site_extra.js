@@ -92,7 +92,8 @@
           return Date.now() - stableSince >= 1200;
         }, 10000, `${id} conversation history did not settle`);
       }
-      const baseline = responseNodes().length;
+      const baselineNodes = new Map(responseNodes().map(node => [node, textOf(node)]));
+      const baseline = baselineNodes.size;
       setComposer(composer, prompt);
       await submitComposer(composer, config.send);
       options?.onSubmitted?.();
@@ -105,8 +106,11 @@
       if (options?.onTick) options.onTick(() => activity.notify());
       const latest = () => {
         const nodes = responseNodes();
-        if (nodes.length <= baseline) return null;
-        const raw = textOf(nodes[nodes.length - 1]);
+        const candidates = nodes.filter(node =>
+          !baselineNodes.has(node) || textOf(node) !== baselineNodes.get(node)
+        );
+        if (!candidates.length) return null;
+        const raw = textOf(candidates[candidates.length - 1]);
         const text = config.cleanResponse ? config.cleanResponse(raw) : raw;
         return text && !thinkingOnly(text) ? text : null;
       };
