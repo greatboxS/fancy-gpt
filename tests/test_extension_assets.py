@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from importlib.resources import files
 
@@ -346,3 +349,36 @@ def test_each_job_releases_only_its_own_surface(tmp_path: Path) -> None:
     assert "const surfaceLeases = new Map()" in background
     assert "await releaseSurface(lease)" in background
     assert "ext.windows.remove(lease.windowId)" in background
+
+
+def test_site_health_is_single_flight_across_provider_instances() -> None:
+    from fancy_gpt.providers import web_automation
+
+    web_automation._site_health_locks.clear()
+    web_automation._site_health_success.clear()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def check(_site: str, *, timeout_s: float) -> dict:
+        nonlocal calls
+        assert timeout_s == 20.0
+        with calls_lock:
+            calls += 1
+        time.sleep(0.05)
+        return {"ok": True}
+
+    providers = [SimpleNamespace(
+        driver=SimpleNamespace(endpoint="ws://bridge", tunnel_id="edge-remote"),
+        tunnel_id="edge-remote", timeout_s=300.0,
+        _require_current_adapter=lambda _payload: None,
+    ) for _ in range(4)]
+    threads = [threading.Thread(
+        target=web_automation._shared_site_health, args=(provider, "gemini", check)
+    ) for provider in providers]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(1)
+
+    assert calls == 1
+    assert all(not thread.is_alive() for thread in threads)

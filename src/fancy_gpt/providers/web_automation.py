@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Callable
 
 import os
@@ -13,6 +14,42 @@ from fancy_gpt.browser import BrowserDriver, BrowserPromptTooLargeError, Browser
 from fancy_gpt.models import AutomatedModelResponse, ModelRequest
 from fancy_gpt.response_parser import parse_json_object
 from fancy_gpt.stream_decoding import decode_stream
+
+
+_SITE_HEALTH_TTL_S = 30.0
+_site_health_guard = threading.Lock()
+_site_health_locks: dict[tuple[str, str, str, str], threading.Lock] = {}
+_site_health_success: dict[tuple[str, str, str, str], float] = {}
+
+
+def _shared_site_health(provider: "ChatGPTWebAutomationProvider", site: str, check) -> None:
+    """Single-flight an expensive UI health probe across provider instances.
+
+    CLI/gateway callers commonly construct separate coordinators. Without a
+    process-wide seam, a four-request burst opens four health windows and the
+    focus arbiter correctly serializes them -- while the later callers exhaust
+    their 20-second health deadline before their actual model turn starts.
+    """
+    key = (
+        str(getattr(provider.driver, "endpoint", "local")),
+        str(getattr(provider.driver, "tunnel_id", provider.tunnel_id or "")),
+        site,
+        adapter_build_id(),
+    )
+    with _site_health_guard:
+        lock = _site_health_locks.setdefault(key, threading.Lock())
+        if len(_site_health_locks) > 64:
+            # Build ids make stale entries unreachable. Bound long-running
+            # development processes without removing the current key/lock.
+            _site_health_locks.clear()
+            _site_health_success.clear()
+            _site_health_locks[key] = lock
+    with lock:
+        checked_at = _site_health_success.get(key, 0.0)
+        if time.monotonic() - checked_at <= _SITE_HEALTH_TTL_S:
+            return
+        provider._require_current_adapter(check(site, timeout_s=min(20.0, provider.timeout_s)))
+        _site_health_success[key] = time.monotonic()
 
 
 def _stale_side_hint() -> str:
@@ -201,7 +238,7 @@ class ChatGPTWebAutomationProvider:
         site_health = getattr(self.driver, "site_health", None)
         if callable(site_health) and site not in self.site_health_checked:
             try:
-                self._require_current_adapter(site_health(site, timeout_s=min(20.0, self.timeout_s)))
+                _shared_site_health(self, site, site_health)
             except SiteHealthUnsupported:
                 pass
             self.site_health_checked.add(site)
