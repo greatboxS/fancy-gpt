@@ -359,8 +359,8 @@ def test_extra_sites_have_current_composer_and_submit_fallbacks(tmp_path: Path) 
     assert 'data-testid="grok-compose-input"' in grok
     assert 'data-testid="assistant-message"' in grok
     assert 'div.ProseMirror[role="textbox"]' in grok
-    assert 'freshUrl: "https://grok.com/chat#private"' in grok
-    assert 'location.hash === "#private"' in grok
+    assert 'a[aria-label="Switch to Private Chat"]' in grok
+    assert "This chat won.t appear in your history" in grok
     assert "Worked|Thought" in grok
     assert ".send-button-container" in kimi
     assert "form.requestSubmit()" in engine
@@ -375,7 +375,7 @@ def test_extra_sites_have_current_composer_and_submit_fallbacks(tmp_path: Path) 
     assert "textOf(node).includes(expectedRequestId)" in engine
     background = (exported / "background.js").read_text()
     content = (exported / "content.js").read_text()
-    assert 'fresh: "https://grok.com/chat#private"' in background
+    assert 'fresh: "https://grok.com/"' in background
     assert 'temporary: job.conversation?.mode !== "persistent"' in background
     assert "temporary: Boolean(message.temporary)" in content
 

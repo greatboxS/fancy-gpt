@@ -88,6 +88,7 @@ class StubElement {
   getBoundingClientRect() {
     return this.hidden ? {width: 0, height: 0} : {width: 100, height: 20};
   }
+  getClientRects() { return this.hidden ? [] : [this.getBoundingClientRect()]; }
 }
 
 /* Supports the selector shapes the adapters actually use: tag, #id, .class,

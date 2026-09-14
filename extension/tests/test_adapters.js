@@ -53,6 +53,31 @@ async function main() {
     });
   }
 
+  await test("grok temporary turns activate and verify native Private Chat", async () => {
+    loadAdapters(["site_extra.js", "site_grok.js"], "grok.com");
+    const composer = new StubElement("textarea");
+    const send = new StubElement("button", {"data-testid": "send-button"});
+    const privateChat = new StubElement("a", {"aria-label": "Switch to Private Chat"});
+    document.body.append(composer);
+    document.body.append(send);
+    document.body.append(privateChat);
+    document._composerTarget = composer;
+    privateChat.onclick = () => {
+      privateChat.remove();
+      document.body.append(new StubElement("div", {
+        text: "This chat won't appear in your history and will not be used to train models.",
+      }));
+    };
+    send.onclick = () => setTimeout(() => document.body.append(new StubElement("div", {
+      "data-testid": "assistant-message", text: ENVELOPE,
+    })), 20);
+    const result = await globalThis.FancyGPTSites.grok.executeTurn(
+      "PROMPT", 3000, null, {temporary: true},
+    );
+    assertEqual(privateChat.clicks, 1, "native Private Chat control is clicked once");
+    assertEqual(result.conversationId, null, "a private turn is never persisted as a binding");
+  });
+
   // -- ChatGPT: a normal turn ------------------------------------------------
   await test("chatgpt submits the prompt and returns the settled reply", async () => {
     loadAdapters(["site_chatgpt.js"]);

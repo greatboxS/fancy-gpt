@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "aa8df0f0f8bc";
+const EXTENSION_BUILD = "3dd9b0248691";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -192,9 +192,9 @@ const SITES = {
     hosts: ["grok.com", "x.com"],
     conversation: id => `https://grok.com/c/${id}`,
     persistent: "https://grok.com/",
-    // The hash is Grok's native Private Chat route. The bare homepage creates
-    // a normal conversation which remains in the account history.
-    fresh: "https://grok.com/chat#private",
+    // The adapter activates Grok's native Private Chat control after the SPA
+    // hydrates. The old #private route is no longer retained by the live UI.
+    fresh: "https://grok.com/",
   },
   kimi: {
     hosts: ["www.kimi.com", "kimi.com", "www.kimi.ai", "kimi.ai"],

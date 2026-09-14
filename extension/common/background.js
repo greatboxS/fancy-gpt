@@ -192,9 +192,9 @@ const SITES = {
     hosts: ["grok.com", "x.com"],
     conversation: id => `https://grok.com/c/${id}`,
     persistent: "https://grok.com/",
-    // The hash is Grok's native Private Chat route. The bare homepage creates
-    // a normal conversation which remains in the account history.
-    fresh: "https://grok.com/chat#private",
+    // The adapter activates Grok's native Private Chat control after the SPA
+    // hydrates. The old #private route is no longer retained by the live UI.
+    fresh: "https://grok.com/",
   },
   kimi: {
     hosts: ["www.kimi.com", "kimi.com", "www.kimi.ai", "kimi.ai"],
