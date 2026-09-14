@@ -21,7 +21,7 @@ globalThis.FancyGPTCreateGenericSite("grok", {
   // Grok renders its elapsed-thinking badge into the assistant node's
   // innerText. It is UI chrome, not part of the model's JSON response.
   cleanResponse: text => String(text ?? "").replace(
-    /^(?:Worked|Thought)\s+for\s+\d+(?:\.\d+)?s\s*(?=\{|\[)/i,
+    /^(?:(?:Worked|Thought)\s+for\s+\d+(?:\.\d+)?s\s*)?(?:JSON\s*)?(?=\{|\[)/i,
     "",
   ).trim(),
 });
