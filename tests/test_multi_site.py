@@ -341,10 +341,24 @@ def test_a_turn_stalls_on_inactivity_not_on_elapsed_time(tmp_path: Path) -> None
 
 def test_glm_thinking_is_activity_not_a_response(tmp_path: Path) -> None:
     exported = export_extension("edge", tmp_path / "edge-glm-thinking")
-    source = (exported / "site_extra.js").read_text(encoding="utf-8")
+    engine = (exported / "site_extra.js").read_text(encoding="utf-8")
+    source = (exported / "site_glm.js").read_text(encoding="utf-8")
     assert "excludeResponses" in source
     assert '[class*="thinking" i]' in source
-    assert "node.closest?.(selector)" in source
+    assert "node.closest?.(selector)" in engine
+    assert "thinkingOnly(text)" in engine
+
+
+def test_extra_sites_have_current_composer_and_submit_fallbacks(tmp_path: Path) -> None:
+    exported = export_extension("edge", tmp_path / "edge-extra-selectors")
+    engine = (exported / "site_extra.js").read_text(encoding="utf-8")
+    grok = (exported / "site_grok.js").read_text(encoding="utf-8")
+    kimi = (exported / "site_kimi.js").read_text(encoding="utf-8")
+    assert 'data-testid="grok-compose-input"' in grok
+    assert ".send-button-container" in kimi
+    assert "form.requestSubmit()" in engine
+    assert '["keydown", "keypress", "keyup"]' in engine
+    assert "composed: true" in engine
 
 
 def test_the_adapter_reports_a_stall_before_the_bridge_gives_up(tmp_path: Path) -> None:

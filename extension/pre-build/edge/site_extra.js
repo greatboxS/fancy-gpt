@@ -1,35 +1,9 @@
-/* DOM adapters for MCP-only sites: Grok, Kimi and GLM/Z.ai. */
+/* Shared DOM adapter engine for MCP-only sites. Site policy and selectors live
+ * in site_<id>.js so one site's UI update stays isolated. */
 (() => {
   const kit = globalThis.FancyGPTSiteKit;
   const {firstVisible, waitFor, setComposer, stopGeneration, observeText,
          createCompletionGate, createActivityWaiter} = kit;
-
-  const configs = {
-    grok: {
-      hosts: ["grok.com", "x.com"], freshUrl: "https://grok.com/",
-      composer: ['textarea[placeholder]', 'textarea', 'div[contenteditable="true"]'],
-      send: ['button[type="submit"]', 'button[aria-label*="Send" i]'],
-      stop: ['button[aria-label*="Stop" i]'],
-      responses: ['div[data-testid="message-bubble"]', 'div[class*="message"] .prose', 'article .prose'],
-    },
-    kimi: {
-      hosts: ["www.kimi.com", "kimi.com", "www.kimi.ai", "kimi.ai"], freshUrl: "https://www.kimi.com/",
-      composer: ['div[contenteditable="true"]', 'textarea'],
-      send: ['button[type="submit"]', 'button[aria-label*="Send" i]', 'button[class*="send"]'],
-      stop: ['button[aria-label*="Stop" i]', 'button[class*="stop"]'],
-      responses: ['div[class*="assistant"] div[class*="markdown"]', 'div[class*="segment-content"]', 'div[class*="markdown"]'],
-    },
-    glm: {
-      hosts: ["chat.z.ai", "z.ai"], freshUrl: "https://chat.z.ai/",
-      composer: ['textarea', 'div[contenteditable="true"]'],
-      send: ['button[type="submit"]', 'button[aria-label*="Send" i]', 'button[class*="send"]'],
-      stop: ['button[aria-label*="Stop" i]', 'button[class*="stop"]'],
-      responses: ['div[class*="assistant"] div[class*="markdown"]', 'div[class*="message-content"]', 'div[class*="markdown"]'],
-      // GLM renders chain-of-thought in markdown-shaped containers too. It is
-      // progress, not the assistant's final answer.
-      excludeResponses: ['[class*="thinking" i]', '[class*="reasoning" i]', '[data-testid*="thinking" i]', '[data-testid*="reasoning" i]'],
-    },
-  };
 
   const visibleNodes = selectors => {
     for (const selector of selectors) {
@@ -39,6 +13,29 @@
     return [];
   };
   const textOf = node => (node?.innerText ?? node?.textContent ?? "").trim();
+  const thinkingOnly = text => {
+    const value = String(text ?? "").trim();
+    return value.length <= 120 && /^(thinking|reasoning|analyzing|searching|思考中|正在思考)[.…。\s]*$/i.test(value);
+  };
+
+  const submitComposer = async (composer, selectors) => {
+    // Give reactive UIs a moment to enable/render their send control after the
+    // input event. Kimi uses a clickable div container, while Grok currently
+    // exposes a normal button.
+    let send = null;
+    try { send = await waitFor(() => firstVisible(selectors), 3000, "send control unavailable"); } catch (_) {}
+    if (send) { send.click(); return true; }
+    const form = composer.closest?.("form");
+    if (form?.requestSubmit) { form.requestSubmit(); return true; }
+    composer.focus?.();
+    for (const type of ["keydown", "keypress", "keyup"]) {
+      composer.dispatchEvent(new KeyboardEvent(type, {
+        key: "Enter", code: "Enter", keyCode: 13, which: 13,
+        bubbles: true, cancelable: true, composed: true,
+      }));
+    }
+    return true;
+  };
 
   function createAdapter(id, config) {
     const hostOk = () => config.hosts.includes(location.hostname);
@@ -58,8 +55,7 @@
       const composer = await waitFor(() => firstVisible(config.composer), 20000, `${id} composer unavailable; sign in first`);
       const baseline = responseNodes().length;
       setComposer(composer, prompt);
-      const send = await waitFor(() => firstVisible(config.send), 10000, `${id} send control unavailable`);
-      send.click();
+      await submitComposer(composer, config.send);
       options?.onSubmitted?.();
 
       const gate = createCompletionGate({stabilityMs: 1500});
@@ -70,7 +66,9 @@
       if (options?.onTick) options.onTick(() => activity.notify());
       const latest = () => {
         const nodes = responseNodes();
-        return nodes.length > baseline ? textOf(nodes[nodes.length - 1]) || null : null;
+        if (nodes.length <= baseline) return null;
+        const text = textOf(nodes[nodes.length - 1]);
+        return text && !thinkingOnly(text) ? text : null;
       };
       const stopObserving = onProgress ? observeText(latest, onProgress) : null;
       const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
@@ -104,5 +102,5 @@
     globalThis.FancyGPTSites[id] = {id, freshUrl: config.freshUrl, healthCheck, executeTurn};
   }
 
-  for (const [id, config] of Object.entries(configs)) createAdapter(id, config);
+  globalThis.FancyGPTCreateGenericSite = createAdapter;
 })();
