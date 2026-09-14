@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -10,6 +11,7 @@ from pathlib import Path
 class MCPClientKind(str, Enum):
     CODEX = "codex"
     CLAUDE_CODE = "claude-code"
+    GEMINI = "gemini"
 
 
 @dataclass(frozen=True)
@@ -36,12 +38,18 @@ class MCPClientRegistry:
 
     @staticmethod
     def _binary(kind: MCPClientKind) -> str:
-        return "codex" if kind == MCPClientKind.CODEX else "claude"
+        return {
+            MCPClientKind.CODEX: "codex",
+            MCPClientKind.CLAUDE_CODE: "claude",
+            MCPClientKind.GEMINI: "gemini",
+        }[kind]
 
     def executable(self, kind: MCPClientKind) -> str | None:
         return shutil.which(self._binary(kind))
 
     def _get_command(self, kind: MCPClientKind, executable: str) -> list[str]:
+        if kind == MCPClientKind.GEMINI:
+            return [executable, "mcp", "list"]
         return [executable, "mcp", "get", self.server_name]
 
     def _add_command(self, kind: MCPClientKind, executable: str, server_executable: str) -> list[str]:
@@ -56,6 +64,8 @@ class MCPClientRegistry:
                 "--",
                 server_executable,
             ]
+        if kind == MCPClientKind.GEMINI:
+            return [executable, "mcp", "add", "--scope", "user", self.server_name, server_executable]
         return [executable, "mcp", "add", self.server_name, "--", server_executable]
 
     def _run(self, command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -78,6 +88,8 @@ class MCPClientRegistry:
         except (OSError, subprocess.TimeoutExpired) as exc:
             return MCPClientStatus(kind, executable, True, False, f"status check failed: {type(exc).__name__}")
         linked = result.returncode == 0
+        if kind == MCPClientKind.GEMINI:
+            linked = linked and re.search(r"(?<![\w-])fancy-gpt(?![\w-])", result.stdout or "") is not None
         detail = (result.stdout or "").strip()
         return MCPClientStatus(kind, executable, True, linked, detail or ("linked" if linked else "not linked"))
 
@@ -105,9 +117,9 @@ class MCPClientRegistry:
     def register_detected(self, server_executable: str | Path) -> list[MCPClientStatus]:
         return [
             self.register(kind, server_executable)
-            for kind in (MCPClientKind.CODEX, MCPClientKind.CLAUDE_CODE)
+            for kind in (MCPClientKind.CODEX, MCPClientKind.CLAUDE_CODE, MCPClientKind.GEMINI)
             if self.executable(kind)
         ]
 
     def all_status(self) -> list[MCPClientStatus]:
-        return [self.status(kind) for kind in (MCPClientKind.CODEX, MCPClientKind.CLAUDE_CODE)]
+        return [self.status(kind) for kind in (MCPClientKind.CODEX, MCPClientKind.CLAUDE_CODE, MCPClientKind.GEMINI)]

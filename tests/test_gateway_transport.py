@@ -117,7 +117,7 @@ def test_one_browser_slot_serializes_two_callers(tmp_path: Path) -> None:
                 group.start_soon(
                     lambda i=index: call_app(
                         app, "POST", "/v1/responses",
-                        body={"model": "gemini-web", "input": f"turn {i}"},
+                        body={"model": "fancy-gemini", "input": f"turn {i}"},
                         headers={"x-fancy-session-id": f"gw_slot_{i}", "x-fancy-client-id": f"c{i}"},
                     )
                 )
@@ -137,7 +137,7 @@ def test_two_browser_slots_allow_genuine_overlap(tmp_path: Path) -> None:
                 group.start_soon(
                     lambda i=index: call_app(
                         app, "POST", "/v1/responses",
-                        body={"model": "gemini-web", "input": f"turn {i}"},
+                        body={"model": "fancy-gemini", "input": f"turn {i}"},
                         headers={"x-fancy-session-id": f"gw_par_{i}", "x-fancy-client-id": f"c{i}"},
                     )
                 )
@@ -170,7 +170,7 @@ def test_client_disconnect_mid_stream_stops_the_stream(tmp_path: Path) -> None:
 
     full = request(
         app, "POST", "/v1/responses",
-        body={"model": "gemini-web", "input": "hello", "stream": True},
+        body={"model": "fancy-gemini", "input": "hello", "stream": True},
         headers={"x-fancy-session-id": "gw_stream_full"},
     )
     complete = len(full.sse_events())
@@ -181,7 +181,7 @@ def test_client_disconnect_mid_stream_stops_the_stream(tmp_path: Path) -> None:
     cut = anyio.run(
         lambda: call_app(
             app2, "POST", "/v1/responses",
-            body={"model": "gemini-web", "input": "hello", "stream": True},
+            body={"model": "fancy-gemini", "input": "hello", "stream": True},
             headers={"x-fancy-session-id": "gw_stream_cut"},
             disconnect_after_chunks=2,
         )
@@ -199,7 +199,7 @@ def test_text_arrives_as_separate_deltas_not_one_block(tmp_path: Path) -> None:
 
     result = request(
         app, "POST", "/v1/responses",
-        body={"model": "gemini-web", "input": "hi", "stream": True},
+        body={"model": "fancy-gemini", "input": "hi", "stream": True},
         headers={"x-fancy-session-id": "gw_incremental"},
     )
     events = result.sse_events()
@@ -226,7 +226,7 @@ def test_anthropic_streams_text_delta_blocks(tmp_path: Path) -> None:
 
     result = request(
         app, "POST", "/v1/messages",
-        body={"model": "chatgpt-web", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        body={"model": "fancy-chatgpt", "messages": [{"role": "user", "content": "hi"}], "stream": True},
         headers={"x-fancy-session-id": "gw_anthropic_stream"},
     )
     events = result.sse_events()
@@ -247,7 +247,7 @@ def test_gemini_streams_candidate_chunks(tmp_path: Path) -> None:
     app = create_app(GatewayService(tmp_path, manager=Manager(provider)))
 
     result = request(
-        app, "POST", "/v1beta/models/gemini-web:streamGenerateContent",
+        app, "POST", "/v1beta/models/fancy-gemini:streamGenerateContent",
         body={"contents": [{"role": "user", "parts": [{"text": "hi"}]}]},
         headers={"x-fancy-session-id": "gw_gemini_stream"},
     )
@@ -274,7 +274,7 @@ def test_a_tool_call_turn_opens_no_text_block(tmp_path: Path) -> None:
     app = create_app(GatewayService(tmp_path, manager=Manager(provider)))
     result = request(
         app, "POST", "/v1/responses",
-        body={"model": "gemini-web", "input": "use it", "stream": True,
+        body={"model": "fancy-gemini", "input": "use it", "stream": True,
               "tools": [{"type": "function", "name": "read_file", "parameters": {}}]},
         headers={"x-fancy-session-id": "gw_toolstream"},
     )
@@ -291,7 +291,7 @@ def test_oversized_body_is_refused(tmp_path: Path) -> None:
     app, _service, _provider = build(tmp_path, limits=GatewayLimits(max_body_bytes=256))
     result = request(
         app, "POST", "/v1/responses",
-        body={"model": "gemini-web", "input": "x" * 2000},
+        body={"model": "fancy-gemini", "input": "x" * 2000},
     )
     assert result.status == 413
     assert "exceeds" in json.dumps(result.json())
@@ -302,7 +302,7 @@ def test_understated_content_length_is_still_refused(tmp_path: Path) -> None:
     app, _service, provider = build(tmp_path, limits=GatewayLimits(max_body_bytes=256))
     result = request(
         app, "POST", "/v1/responses",
-        body={"model": "gemini-web", "input": "x" * 2000},
+        body={"model": "fancy-gemini", "input": "x" * 2000},
         content_length=10,
     )
     assert result.status == 413
@@ -325,7 +325,7 @@ def test_unsupported_modality_is_rejected_over_http(tmp_path: Path) -> None:
     result = request(
         app, "POST", "/v1/responses",
         body={
-            "model": "chatgpt-web",
+            "model": "fancy-chatgpt",
             "input": [{"role": "user", "content": [{"type": "input_image", "image_url": "data:..."}]}],
         },
     )
@@ -340,18 +340,18 @@ def test_auth_failure_uses_each_protocol_envelope(tmp_path: Path) -> None:
     service = GatewayService(tmp_path, manager=Manager(provider))
     app = create_app(service, token="secret")
 
-    openai = request(app, "POST", "/v1/responses", body={"model": "gemini-web", "input": "x"})
+    openai = request(app, "POST", "/v1/responses", body={"model": "fancy-gemini", "input": "x"})
     assert openai.status == 401 and openai.json()["error"]["type"] == "authentication_error"
 
     gemini = request(
-        app, "POST", "/v1beta/models/gemini-web:generateContent",
+        app, "POST", "/v1beta/models/fancy-gemini:generateContent",
         body={"contents": [{"role": "user", "parts": [{"text": "x"}]}]},
     )
     assert gemini.status == 401 and gemini.json()["error"]["status"] == "UNAUTHENTICATED"
 
     ok = request(
         app, "POST", "/v1/responses",
-        body={"model": "gemini-web", "input": "x"},
+        body={"model": "fancy-gemini", "input": "x"},
         headers={"Authorization": "Bearer secret"},
     )
     assert ok.status == 200

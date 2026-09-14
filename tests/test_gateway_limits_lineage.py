@@ -53,7 +53,7 @@ class Manager:
 
 
 def turn(session: str, text: str = "go"):
-    return normalize_openai({"model": "gemini-web", "input": text, "tools": TOOLS}).model_copy(
+    return normalize_openai({"model": "fancy-gemini", "input": text, "tools": TOOLS}).model_copy(
         update={"session_id": session}
     )
 
@@ -118,7 +118,7 @@ def test_tool_loop_exhaustion_maps_to_a_client_error() -> None:
 def test_a_completed_turn_cannot_be_resurrected(tmp_path: Path) -> None:
     service = GatewayService(tmp_path, manager=Manager(Provider(False)))
     record = service.state.save_turn(
-        TurnRecord(response_id="resp_x", session_id="gw", protocol="openai", model="gemini-web", site="gemini")
+        TurnRecord(response_id="resp_x", session_id="gw", protocol="openai", model="fancy-gemini", site="gemini")
     )
     service.state.transition(record, TurnState.SUBMITTING)
     service.state.transition(record, TurnState.SUBMITTED)
@@ -133,7 +133,7 @@ def test_a_stale_copy_cannot_overwrite_a_finished_turn(tmp_path: Path) -> None:
     """The check reads disk, not the caller's possibly stale object."""
     service = GatewayService(tmp_path, manager=Manager(Provider(False)))
     record = service.state.save_turn(
-        TurnRecord(response_id="resp_y", session_id="gw", protocol="openai", model="gemini-web", site="gemini")
+        TurnRecord(response_id="resp_y", session_id="gw", protocol="openai", model="fancy-gemini", site="gemini")
     )
     stale = service.state.load_turn("resp_y")
     service.state.transition(record, TurnState.CANCELLED, "client went away")
@@ -147,7 +147,7 @@ def test_an_uncertain_turn_can_still_be_resolved(tmp_path: Path) -> None:
     """Uncertain is not terminal: we may still learn what the browser did."""
     service = GatewayService(tmp_path, manager=Manager(Provider(False)))
     record = service.state.save_turn(
-        TurnRecord(response_id="resp_z", session_id="gw", protocol="openai", model="gemini-web", site="gemini")
+        TurnRecord(response_id="resp_z", session_id="gw", protocol="openai", model="fancy-gemini", site="gemini")
     )
     service.state.transition(record, TurnState.SUBMITTING)
     service.state.transition(record, TurnState.UNCERTAIN, "browser stopped responding")
@@ -161,7 +161,7 @@ def test_an_uncertain_turn_can_still_be_resolved(tmp_path: Path) -> None:
 def test_a_retry_is_a_new_record_linked_to_the_one_it_supersedes(tmp_path: Path) -> None:
     service = GatewayService(tmp_path, manager=Manager(Provider(False)))
     first = service.state.save_turn(
-        TurnRecord(response_id="resp_1", session_id="gw", protocol="openai", model="gemini-web", site="gemini")
+        TurnRecord(response_id="resp_1", session_id="gw", protocol="openai", model="fancy-gemini", site="gemini")
     )
     second = service.state.record_retry(first, "resp_2")
     third = service.state.record_retry(second, "resp_3")
@@ -177,7 +177,7 @@ def test_a_retry_is_a_new_record_linked_to_the_one_it_supersedes(tmp_path: Path)
 def test_lineage_of_a_first_attempt_is_just_itself(tmp_path: Path) -> None:
     service = GatewayService(tmp_path, manager=Manager(Provider(False)))
     service.state.save_turn(
-        TurnRecord(response_id="resp_solo", session_id="gw", protocol="openai", model="gemini-web", site="gemini")
+        TurnRecord(response_id="resp_solo", session_id="gw", protocol="openai", model="fancy-gemini", site="gemini")
     )
     assert [item.response_id for item in service.state.retry_lineage("resp_solo")] == ["resp_solo"]
 
@@ -212,7 +212,7 @@ def test_inspection_exposes_state_transitions_and_lineage(tmp_path: Path) -> Non
     from fancy_gpt.engine import ReviewEngine
 
     service = GatewayService(tmp_path, manager=Manager(Provider(False)))
-    result = service.execute(normalize_openai({"model": "gemini-web", "input": "hello"}))
+    result = service.execute(normalize_openai({"model": "fancy-gemini", "input": "hello"}))
 
     trace = ReviewEngine(tmp_path).request_trace(result.response_id)
     summary = trace["summary"]

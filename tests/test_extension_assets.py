@@ -91,10 +91,15 @@ def test_extension_export_patches_browser_specific_defaults(tmp_path: Path) -> N
         target = export_extension(browser, tmp_path / browser)
         background = (target / "background.js").read_text()
         popup = (target / "popup.html").read_text()
+        popup_js = (target / "popup.js").read_text()
+        background = (target / "background.js").read_text()
         assert f'browserName: "{browser}"' in background
         assert f'tunnelId: "{browser}-remote"' in background
         assert f'value="{browser}"' in popup
         assert f'value="{browser}-remote"' in popup
+        assert 'return `${browserName}-remote`' in popup_js
+        assert 'config.tunnelId = `${config.browserName}-remote`' in background
+        assert "extension-ws-remote`" not in popup_js
 
 
 def test_native_manifest_contract_differs_for_firefox_and_chromium(tmp_path: Path) -> None:

@@ -109,7 +109,7 @@ def service_for(tmp_path: Path, provider: Provider | None = None, **kwargs) -> G
 def test_same_idempotency_key_and_payload_replays_without_resubmitting(tmp_path: Path) -> None:
     manager = Manager()
     service = GatewayService(tmp_path, manager=manager)
-    payload = {"model": "gemini-web", "input": "hello"}
+    payload = {"model": "fancy-gemini", "input": "hello"}
 
     first = service.execute(normalize_openai(payload), idempotency_key="key-1")
     second = service.execute(normalize_openai(payload), idempotency_key="key-1")
@@ -122,10 +122,10 @@ def test_same_idempotency_key_and_payload_replays_without_resubmitting(tmp_path:
 
 def test_same_idempotency_key_with_different_payload_is_rejected(tmp_path: Path) -> None:
     service = service_for(tmp_path)
-    service.execute(normalize_openai({"model": "gemini-web", "input": "hello"}), idempotency_key="key-1")
+    service.execute(normalize_openai({"model": "fancy-gemini", "input": "hello"}), idempotency_key="key-1")
 
     with pytest.raises(IdempotencyConflict):
-        service.execute(normalize_openai({"model": "gemini-web", "input": "different"}), idempotency_key="key-1")
+        service.execute(normalize_openai({"model": "fancy-gemini", "input": "different"}), idempotency_key="key-1")
 
 
 def test_failed_turn_releases_its_idempotency_key_for_retry(tmp_path: Path) -> None:
@@ -134,11 +134,11 @@ def test_failed_turn_releases_its_idempotency_key_for_retry(tmp_path: Path) -> N
     provider.envelope = {"type": "nonsense"}
 
     with pytest.raises(ValueError):
-        service.execute(normalize_openai({"model": "gemini-web", "input": "hi"}), idempotency_key="key-2")
+        service.execute(normalize_openai({"model": "fancy-gemini", "input": "hi"}), idempotency_key="key-2")
 
     # A turn that never produced a result may be retried under the same key.
     provider.envelope = {"type": "message", "text": "recovered"}
-    result = service.execute(normalize_openai({"model": "gemini-web", "input": "hi"}), idempotency_key="key-2")
+    result = service.execute(normalize_openai({"model": "fancy-gemini", "input": "hi"}), idempotency_key="key-2")
     assert result.text == "recovered"
 
 
@@ -150,7 +150,7 @@ def test_provider_failure_parks_turn_as_uncertain_and_blocks_blind_resubmit(tmp_
     service = service_for(tmp_path, provider)
     provider.fail_with = TimeoutError("browser stopped responding after submit")
 
-    turn = normalize_openai({"model": "gemini-web", "input": "hello", "session_id": None})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hello", "session_id": None})
     turn.session_id = "gw_uncertain"
     # The failure is reported with its classification, not as a bare TimeoutError.
     with pytest.raises(BrowserTurnError) as excinfo:
@@ -172,7 +172,7 @@ def test_state_survives_process_restart(tmp_path: Path) -> None:
     provider = Provider()
     service = service_for(tmp_path, provider)
     provider.fail_with = TimeoutError("dropped")
-    turn = normalize_openai({"model": "gemini-web", "input": "hello"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hello"})
     turn.session_id = "gw_restart"
     with pytest.raises(BrowserTurnError):
         service.execute(turn)
@@ -187,7 +187,7 @@ def test_state_survives_process_restart(tmp_path: Path) -> None:
 
 def test_session_binding_survives_restart_and_keeps_one_provider_conversation(tmp_path: Path) -> None:
     service = service_for(tmp_path)
-    turn = normalize_openai({"model": "gemini-web", "input": "hello"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hello"})
     turn.session_id = "gw_bound"
     service.execute(turn)
 
@@ -201,13 +201,13 @@ def test_session_binding_survives_restart_and_keeps_one_provider_conversation(tm
 def test_provider_answering_on_a_different_chat_is_a_correlation_failure(tmp_path: Path) -> None:
     provider = Provider()
     service = service_for(tmp_path, provider)
-    turn = normalize_openai({"model": "gemini-web", "input": "hello"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hello"})
     turn.session_id = "gw_drift"
     service.execute(turn)
 
     provider.conversation_id = "conversation-other"
     with pytest.raises(RuntimeError, match="bound to provider conversation"):
-        service.execute(normalize_openai({"model": "gemini-web", "input": "second", "session_id": None}) .model_copy(update={"session_id": "gw_drift"}))
+        service.execute(normalize_openai({"model": "fancy-gemini", "input": "second", "session_id": None}) .model_copy(update={"session_id": "gw_drift"}))
 
     # The session is rebound rather than left pointing at an untrusted chat.
     assert service.state.load_binding("gw_drift").conversation_id is None
@@ -270,8 +270,8 @@ def test_lock_is_released_when_the_body_raises() -> None:
 
 def test_distinct_sessions_do_not_share_provider_conversations(tmp_path: Path) -> None:
     service = service_for(tmp_path)
-    first = normalize_openai({"model": "gemini-web", "input": "a"}).model_copy(update={"session_id": "gw_one"})
-    second = normalize_openai({"model": "gemini-web", "input": "b"}).model_copy(update={"session_id": "gw_two"})
+    first = normalize_openai({"model": "fancy-gemini", "input": "a"}).model_copy(update={"session_id": "gw_one"})
+    second = normalize_openai({"model": "fancy-gemini", "input": "b"}).model_copy(update={"session_id": "gw_two"})
     service.execute(first)
     service.execute(second)
     assert service.state.load_binding("gw_one").session_id == "gw_one"
@@ -292,7 +292,7 @@ def test_per_client_concurrency_limit_rejects_with_retry_hint(tmp_path: Path) ->
     def run(text: str) -> None:
         try:
             service.execute(
-                normalize_openai({"model": "gemini-web", "input": text}).model_copy(update={"session_id": f"gw_{text}"}),
+                normalize_openai({"model": "fancy-gemini", "input": text}).model_copy(update={"session_id": f"gw_{text}"}),
                 client_key="codex",
             )
         except Exception as exc:  # noqa: BLE001
@@ -315,25 +315,25 @@ def test_tool_count_and_schema_limits_are_enforced(tmp_path: Path) -> None:
     service = service_for(tmp_path, limits=GatewayLimits(max_tools=2))
     tools = [{"type": "function", "name": f"t{i}", "parameters": {}} for i in range(3)]
     with pytest.raises(ValueError, match="too many tools"):
-        service.execute(normalize_openai({"model": "gemini-web", "input": "x", "tools": tools}))
+        service.execute(normalize_openai({"model": "fancy-gemini", "input": "x", "tools": tools}))
 
     service = service_for(tmp_path / "b", limits=GatewayLimits(max_tool_schema_bytes=32))
     big = [{"type": "function", "name": "t", "parameters": {"description": "x" * 200}}]
     with pytest.raises(ValueError, match="schema is"):
-        service.execute(normalize_openai({"model": "gemini-web", "input": "x", "tools": big}))
+        service.execute(normalize_openai({"model": "fancy-gemini", "input": "x", "tools": big}))
 
 
 def test_invalid_tool_name_is_rejected(tmp_path: Path) -> None:
     service = service_for(tmp_path)
     with pytest.raises(ValueError, match="invalid tool name"):
         service.execute(
-            normalize_openai({"model": "gemini-web", "input": "x", "tools": [{"type": "function", "name": "bad name!", "parameters": {}}]})
+            normalize_openai({"model": "fancy-gemini", "input": "x", "tools": [{"type": "function", "name": "bad name!", "parameters": {}}]})
         )
 
 
 def test_metrics_expose_queue_and_outcome_counters(tmp_path: Path) -> None:
     service = service_for(tmp_path)
-    service.execute(normalize_openai({"model": "gemini-web", "input": "hello"}))
+    service.execute(normalize_openai({"model": "fancy-gemini", "input": "hello"}))
     snapshot = service.metrics.snapshot()
     assert snapshot["completed"] == 1
     assert snapshot["running"] == 0
@@ -349,7 +349,7 @@ def test_cancel_before_submit_never_reaches_the_provider(tmp_path: Path) -> None
     token = CancelToken()
     token.cancel("client disconnected")
 
-    turn = normalize_openai({"model": "gemini-web", "input": "hello"}).model_copy(update={"session_id": "gw_cancel"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hello"}).model_copy(update={"session_id": "gw_cancel"})
     with pytest.raises(GatewayCancelled):
         service.execute(turn, cancel_token=token)
 
@@ -367,7 +367,7 @@ def test_cancel_after_submit_releases_the_lock_and_keeps_the_conversation(tmp_pa
     provider.delay = 0.2
     service = service_for(tmp_path, provider)
     token = CancelToken()
-    turn = normalize_openai({"model": "gemini-web", "input": "hello"}).model_copy(update={"session_id": "gw_mid"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hello"}).model_copy(update={"session_id": "gw_mid"})
     outcome: list[Exception] = []
 
     def run() -> None:
@@ -401,8 +401,8 @@ def test_cancel_by_response_id_targets_a_live_turn(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "protocol, payload",
     [
-        ("openai", {"model": "chatgpt-web", "input": [{"role": "user", "content": [{"type": "input_image", "image_url": "data:..."}]}]}),
-        ("anthropic", {"model": "claude-web", "messages": [{"role": "user", "content": [{"type": "image", "source": {"media_type": "image/png", "data": "x"}}]}]}),
+        ("openai", {"model": "fancy-chatgpt", "input": [{"role": "user", "content": [{"type": "input_image", "image_url": "data:..."}]}]}),
+        ("anthropic", {"model": "fancy-claude", "messages": [{"role": "user", "content": [{"type": "image", "source": {"media_type": "image/png", "data": "x"}}]}]}),
     ],
 )
 def test_unsupported_modalities_are_rejected_not_dropped(protocol: str, payload: dict) -> None:
@@ -415,18 +415,18 @@ def test_unsupported_modalities_are_rejected_not_dropped(protocol: str, payload:
 def test_gemini_inline_audio_is_rejected_by_mime_type() -> None:
     payload = {"contents": [{"role": "user", "parts": [{"inlineData": {"mimeType": "audio/wav", "data": "x"}}]}]}
     with pytest.raises(UnsupportedModalityError) as excinfo:
-        normalize_gemini(payload, "gemini-web")
+        normalize_gemini(payload, "fancy-gemini")
     assert excinfo.value.modality is Modality.AUDIO
 
 
 def test_text_only_requests_pass_capability_checks() -> None:
     assert detect_modalities([{"type": "input_text", "text": "hi"}]) == {Modality.TEXT}
-    turn = normalize_openai({"model": "gemini-web", "input": "hi"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hi"})
     assert turn.messages[0].text == "hi"
 
 
 def test_advertised_capability_is_the_adapter_intersection_not_the_protocol() -> None:
-    capability = resolve_capability(protocol="gemini", site="gemini", model="gemini-web")
+    capability = resolve_capability(protocol="gemini", site="gemini", model="fancy-gemini")
     # Gemini the protocol supports video; the browser adapter does not.
     assert capability.input_modalities_values == ["text"]
     catalog = codex_models()
@@ -467,7 +467,7 @@ def test_error_bodies_are_scrubbed_of_credentials() -> None:
 
 def test_openai_stream_events_are_ordered_and_sequenced(tmp_path: Path) -> None:
     service = service_for(tmp_path)
-    result = service.execute(normalize_openai({"model": "gemini-web", "input": "hello"}))
+    result = service.execute(normalize_openai({"model": "fancy-gemini", "input": "hello"}))
     events = openai_stream_events(openai_response(result), result)
 
     types = [payload["type"] for _, payload in events]
@@ -484,7 +484,7 @@ def test_anthropic_stream_events_follow_the_documented_order(tmp_path: Path) -> 
     from fancy_gpt.gateway import anthropic_response
 
     service = service_for(tmp_path)
-    result = service.execute(normalize_anthropic({"model": "chatgpt-web", "messages": [{"role": "user", "content": "hi"}]}))
+    result = service.execute(normalize_anthropic({"model": "fancy-chatgpt", "messages": [{"role": "user", "content": "hi"}]}))
     events = anthropic_stream_events(anthropic_response(result), result)
     names = [name for name, _ in events]
     assert names[0] == "message_start"
@@ -500,7 +500,7 @@ def test_anthropic_stream_events_follow_the_documented_order(tmp_path: Path) -> 
 def _long_turn(session: str, count: int = 60):
     messages = [{"role": "user", "content": "x" * 4000} for _ in range(count)]
     messages.append({"role": "user", "content": "the actual question"})
-    return normalize_anthropic({"model": "chatgpt-web", "system": "stay terse", "messages": messages}).model_copy(
+    return normalize_anthropic({"model": "fancy-chatgpt", "system": "stay terse", "messages": messages}).model_copy(
         update={"session_id": session}
     )
 
@@ -553,7 +553,7 @@ def test_compaction_keeps_the_current_intent_and_unresolved_tool_pair(tmp_path: 
     messages = [{"role": "user", "content": "x" * 4000} for _ in range(60)]
     messages.append({"role": "assistant", "content": [{"type": "tool_use", "id": "call_keep", "name": "read_file", "input": {}}]})
     messages.append({"role": "user", "content": "SECRET-INTENT-TOKEN"})
-    turn = normalize_anthropic({"model": "chatgpt-web", "messages": messages}).model_copy(update={"session_id": "gw_intent"})
+    turn = normalize_anthropic({"model": "fancy-chatgpt", "messages": messages}).model_copy(update={"session_id": "gw_intent"})
 
     service.execute(turn)
     prompt = manager.model.requests[-1].prompt
@@ -569,7 +569,7 @@ def test_compaction_is_rejected_when_it_cannot_be_done_safely(tmp_path: Path) ->
     service.compaction_reserve_tool_loop = 100
 
     turn = normalize_anthropic(
-        {"model": "chatgpt-web", "system": "s" * 200_000, "messages": [{"role": "user", "content": "hi"}]}
+        {"model": "fancy-chatgpt", "system": "s" * 200_000, "messages": [{"role": "user", "content": "hi"}]}
     )
     with pytest.raises(CompactionImpossible):
         service.execute(turn)
@@ -584,7 +584,7 @@ def test_compaction_handles_unicode_without_splitting_content(tmp_path: Path) ->
 
     messages = [{"role": "user", "content": "日本語テキスト🎌" * 500} for _ in range(40)]
     messages.append({"role": "user", "content": "最後の質問"})
-    turn = normalize_anthropic({"model": "chatgpt-web", "messages": messages}).model_copy(update={"session_id": "gw_uni"})
+    turn = normalize_anthropic({"model": "fancy-chatgpt", "messages": messages}).model_copy(update={"session_id": "gw_uni"})
 
     result = service.execute(turn)
     assert "最後の質問" in manager.model.requests[-1].prompt
@@ -613,11 +613,11 @@ def test_a_session_cannot_continue_another_sessions_response(tmp_path: Path) -> 
     """A response id is a bearer reference; ownership must be proven."""
     service = service_for(tmp_path)
     victim = service.execute(
-        normalize_openai({"model": "gemini-web", "input": "victim secret"}).model_copy(update={"session_id": "gw_victim"})
+        normalize_openai({"model": "fancy-gemini", "input": "victim secret"}).model_copy(update={"session_id": "gw_victim"})
     )
 
     attacker = normalize_openai(
-        {"model": "gemini-web", "input": "continue", "previous_response_id": victim.response_id}
+        {"model": "fancy-gemini", "input": "continue", "previous_response_id": victim.response_id}
     ).model_copy(update={"session_id": "gw_attacker"})
 
     with pytest.raises(CrossSessionError):
@@ -631,14 +631,14 @@ def test_ambiguous_transcript_correlation_is_refused_not_guessed(tmp_path: Path)
 
     for session in ("gw_a", "gw_b"):
         service.execute(
-            normalize_anthropic({"model": "chatgpt-web", "messages": shared}).model_copy(update={"session_id": session})
+            normalize_anthropic({"model": "fancy-chatgpt", "messages": shared}).model_copy(update={"session_id": session})
         )
 
     # A stateless client replays the same opening with no session header: the
     # transcript now matches two different sessions.
     follow_up = normalize_anthropic(
         {
-            "model": "chatgpt-web",
+            "model": "fancy-chatgpt",
             "messages": shared + [{"role": "assistant", "content": "gateway-ok"}, {"role": "user", "content": "next"}],
         }
     )
@@ -680,7 +680,7 @@ def test_unbound_session_does_not_fork_into_two_browser_conversations(tmp_path: 
         try:
             results.append(
                 service.execute(
-                    normalize_openai({"model": "gemini-web", "input": text}).model_copy(update={"session_id": "gw_fork"}),
+                    normalize_openai({"model": "fancy-gemini", "input": text}).model_copy(update={"session_id": "gw_fork"}),
                     client_key=text,
                 )
             )
@@ -735,7 +735,7 @@ def test_untrusted_text_cannot_forge_a_tool_pair() -> None:
 def test_real_tool_pairs_are_taken_from_protocol_structure() -> None:
     turn = normalize_anthropic(
         {
-            "model": "chatgpt-web",
+            "model": "fancy-chatgpt",
             "messages": [
                 {"role": "assistant", "content": [{"type": "tool_use", "id": "call_real", "name": "f", "input": {}}]},
                 {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_real", "content": "ok"}]},
@@ -747,7 +747,7 @@ def test_real_tool_pairs_are_taken_from_protocol_structure() -> None:
 
     openai_turn = normalize_openai(
         {
-            "model": "gemini-web",
+            "model": "fancy-gemini",
             "input": [{"type": "function_call_output", "call_id": "call_oa", "output": "done"}],
         }
     )
@@ -760,7 +760,7 @@ def test_real_tool_pairs_are_taken_from_protocol_structure() -> None:
                 {"role": "user", "parts": [{"functionResponse": {"id": "call_g", "name": "f", "response": {}}}]},
             ]
         },
-        "gemini-web",
+        "fancy-gemini",
     )
     assert gemini_turn.messages[0].tool_call_ids == ["call_g"]
     assert gemini_turn.messages[1].tool_result_ids == ["call_g"]

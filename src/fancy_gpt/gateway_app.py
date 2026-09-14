@@ -87,7 +87,13 @@ class GatewayResources:
         return {
             "browser_slots": self.browser_slots,
             "in_use": limiter.borrowed_tokens,
-            "waiting": len(limiter.statistics().tasks_waiting),
+            # AnyIO 4 reports this as an integer. Older compatible releases
+            # exposed a collection, so accept both shapes.
+            "waiting": (
+                limiter.statistics().tasks_waiting
+                if isinstance(limiter.statistics().tasks_waiting, int)
+                else len(limiter.statistics().tasks_waiting)
+            ),
         }
 
 

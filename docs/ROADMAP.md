@@ -76,8 +76,8 @@ Deliverables:
 
 Exit gate:
 
-- Codex completes a multi-turn repository task through `gemini-web` and
-  `chatgpt-web`, including at least two tool calls and one failed tool result.
+- Codex completes a multi-turn repository task through `fancy-gemini` and
+  `fancy-chatgpt`, including at least two tool calls and one failed tool result.
 - Streaming, cancellation, malformed tool arguments, context reconstruction, and
   process restart pass recorded conformance tests.
 

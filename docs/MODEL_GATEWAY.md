@@ -21,31 +21,53 @@ fancy-gpt gateway serve --host 127.0.0.1 --port 8787
 ```
 
 Loopback access needs no token. Binding to another interface requires `--token`.
-The supported aliases are `chatgpt-web`, `gemini-web`, and `claude-web`; aliases
+The supported aliases are `fancy-chatgpt`, `fancy-gemini`, and `fancy-claude`; aliases
 select the site, while `x-fancy-tunnel-id` is an optional, independent browser
 route hint.
 
 Codex configuration:
 
 ```toml
-model = "gemini-web"
+model = "fancy-gemini"
 model_provider = "fancy-local"
 
 [model_providers.fancy-local]
 name = "FancyGPT Local"
 base_url = "http://127.0.0.1:8787/v1"
-env_key = "FANCY_GPT_LOCAL_KEY"
 wire_api = "responses"
 ```
+
+The installer writes this shared provider to `~/.codex/config.toml` and creates
+`~/.codex/fancy-*.config.toml` profile files for Codex 0.134.0 and later. It also
+creates an isolated Claude Code gateway settings file and configures the Gemini
+CLI environment. Choose a web model at launch time:
+
+```bash
+codex --profile fancy-gemini
+fancy-claude              # then /model -> FancyGPT · ChatGPT
+gemini --model fancy-claude
+```
+
+Claude Code 2.1.242 or newer reads the gateway-scoped `modelPicker` when launched
+through `fancy-claude`. Plain `claude` keeps claude.ai authentication and its
+built-in models unchanged. This separation is necessary because
+`ANTHROPIC_BASE_URL` applies to an entire Claude process, not to one picker row.
+Codex loads the gateway's model catalog after a `fancy-*` profile selects the
+`fancy-local` provider; its picker then shows the same gateway model list.
+
+Run `fancy-gpt gateway configure-clients` to refresh these settings, or install
+with `--no-gateway-config` to leave all client configuration untouched. Existing
+Codex and Gemini files are preserved outside a marked FancyGPT block; existing
+Claude settings are merged.
 
 Claude Code and Gemini CLI can be launched directly against the same process:
 
 ```bash
 ANTHROPIC_BASE_URL=http://127.0.0.1:8787 ANTHROPIC_API_KEY=local \
-  claude --bare --model chatgpt-web
+  claude --bare --model fancy-chatgpt
 
 GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8787 GEMINI_API_KEY=local \
-  gemini --model gemini-web
+  gemini --model fancy-gemini
 ```
 
 `FANCY_GPT_GATEWAY_MAX_INPUT_UNITS` sets the conservative character-based input
@@ -82,7 +104,7 @@ A public model name resolves to an explicit site and site model profile. Browser
 routing is resolved separately.
 
 ```text
-model=gemini-web-pro  -> site=gemini, profile=pro
+model=fancy-gemini-pro  -> site=gemini, profile=pro
 tunnel=edge-remote    -> browser route only
 ```
 
@@ -441,9 +463,9 @@ Model alias to site (the alias selects the **website**, never the browser route)
 
 | Alias | Site | Notes |
 |---|---|---|
-| `chatgpt-web` | chatgpt | |
-| `claude-web` | chatgpt | Served by the ChatGPT site adapter |
-| `gemini-web` | gemini | |
+| `fancy-chatgpt` | chatgpt | |
+| `fancy-claude` | chatgpt | Served by the ChatGPT site adapter |
+| `fancy-gemini` | gemini | |
 
 The browser route is chosen independently by `x-fancy-tunnel-id` (for example
 `edge-remote`). Site and tunnel are never coupled: a single `edge-remote` route

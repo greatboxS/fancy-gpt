@@ -60,7 +60,7 @@ class Manager:
 
 
 def anthropic(messages: list[dict]):
-    return normalize_anthropic({"model": "chatgpt-web", "messages": messages})
+    return normalize_anthropic({"model": "fancy-chatgpt", "messages": messages})
 
 
 # -- the case that used to fragment long sessions ----------------------------
@@ -108,7 +108,7 @@ def test_a_tool_call_id_anchors_the_correlation(tmp_path: Path) -> None:
     tools = [{"name": "read_file", "input_schema": {"type": "object"}}]
 
     first = service.execute(
-        normalize_anthropic({"model": "chatgpt-web", "tools": tools,
+        normalize_anthropic({"model": "fancy-chatgpt", "tools": tools,
                              "messages": [{"role": "user", "content": LONG_A}]})
     )
     assert first.tool_calls[0].id == "call_anchor_1"
@@ -117,7 +117,7 @@ def test_a_tool_call_id_anchors_the_correlation(tmp_path: Path) -> None:
     # result, because the tool call is unresolved.
     follow_up = service.execute(
         normalize_anthropic({
-            "model": "chatgpt-web", "tools": tools,
+            "model": "fancy-chatgpt", "tools": tools,
             "messages": [
                 {"role": "user", "content": "[client summary replacing earlier turns]"},
                 {"role": "assistant", "content": [
@@ -212,5 +212,5 @@ def test_usage_is_reported_and_over_counts_rather_than_under(tmp_path: Path) -> 
 def test_capability_declares_usage_as_estimated() -> None:
     from fancy_gpt.gateway_capabilities import resolve_capability
 
-    capability = resolve_capability(protocol="anthropic", site="chatgpt", model="claude-web")
+    capability = resolve_capability(protocol="anthropic", site="chatgpt", model="fancy-claude")
     assert capability.as_dict()["usage_is_estimated"] is True

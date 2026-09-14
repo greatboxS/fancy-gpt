@@ -53,3 +53,24 @@ def test_missing_client_is_reported_not_installed(monkeypatch) -> None:
     monkeypatch.setattr(registry, "executable", lambda kind: None)
     status = registry.status(MCPClientKind.CLAUDE_CODE)
     assert status == MCPClientStatus(MCPClientKind.CLAUDE_CODE, None, False, False, "client executable not found")
+
+
+def test_gemini_registration_uses_user_scope_and_list_for_idempotency(tmp_path: Path, monkeypatch) -> None:
+    server = tmp_path / "fancy-gpt-mcp"
+    server.write_text("#!/bin/sh\n", encoding="utf-8")
+    registry = MCPClientRegistry()
+    monkeypatch.setattr(registry, "executable", lambda kind: "/usr/bin/gemini")
+    calls: list[list[str]] = []
+
+    def run(command: list[str]):
+        import subprocess
+        calls.append(command)
+        output = "fancy-gpt (stdio)" if len(calls) > 1 else "No MCP servers configured"
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    monkeypatch.setattr(registry, "_run", run)
+    status = registry.register(MCPClientKind.GEMINI, server)
+    assert status.linked
+    assert calls[1] == [
+        "/usr/bin/gemini", "mcp", "add", "--scope", "user", "fancy-gpt", str(server.resolve())
+    ]

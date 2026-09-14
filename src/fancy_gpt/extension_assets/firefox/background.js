@@ -118,7 +118,15 @@ async function releaseSurface(lease) {
 
 async function getConfig() {
   const value = await ext.storage.local.get(DEFAULTS);
-  return {...DEFAULTS, ...value};
+  const config = {...DEFAULTS, ...value};
+  // v0.8 pre-build popup briefly derived tunnel identity from transport and
+  // persisted e.g. edge-extension-ws-remote. Migrate that value on worker
+  // startup so merely reloading an updated unpacked extension repairs it.
+  if (/^(chrome|edge|firefox)-extension-(native-local|ws-remote)$/.test(config.tunnelId)) {
+    config.tunnelId = `${config.browserName}-remote`;
+    await ext.storage.local.set({tunnelId: config.tunnelId});
+  }
+  return config;
 }
 
 async function sendToContent(tabId, message, retries = 50) {

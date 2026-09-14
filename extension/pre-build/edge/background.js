@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "d24479aaa9bd";
+const EXTENSION_BUILD = "f064f81dc873";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -118,7 +118,15 @@ async function releaseSurface(lease) {
 
 async function getConfig() {
   const value = await ext.storage.local.get(DEFAULTS);
-  return {...DEFAULTS, ...value};
+  const config = {...DEFAULTS, ...value};
+  // v0.8 pre-build popup briefly derived tunnel identity from transport and
+  // persisted e.g. edge-extension-ws-remote. Migrate that value on worker
+  // startup so merely reloading an updated unpacked extension repairs it.
+  if (/^(chrome|edge|firefox)-extension-(native-local|ws-remote)$/.test(config.tunnelId)) {
+    config.tunnelId = `${config.browserName}-remote`;
+    await ext.storage.local.set({tunnelId: config.tunnelId});
+  }
+  return config;
 }
 
 async function sendToContent(tabId, message, retries = 50) {

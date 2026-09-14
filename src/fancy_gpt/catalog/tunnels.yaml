@@ -1,4 +1,21 @@
 tunnels:
+  - id: chromium-local
+    description: Local persistent Chromium controlled directly by Playwright.
+    runtime: playwright
+    transport: local-process
+    scope: local
+    browser: chromium
+    priority: 30
+    tags: [local, chromium, fallback]
+    capabilities:
+      automatic: true
+      remote_capable: false
+      existing_session: false
+      persistent_session: true
+      headless: true
+      requires_browser_install: true
+      browser_families: [chromium]
+
   - id: chrome-remote
     description: Remote Google Chrome browser connected to the FancyGPT bridge.
     runtime: extension

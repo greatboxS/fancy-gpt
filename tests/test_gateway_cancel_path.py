@@ -73,7 +73,7 @@ def test_cancellation_is_carried_into_the_browser(tmp_path: Path) -> None:
     provider = CancellableProvider()
     service = GatewayService(tmp_path, manager=Manager(provider))
     token = CancelToken()
-    turn = normalize_openai({"model": "gemini-web", "input": "hello"}).model_copy(
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hello"}).model_copy(
         update={"session_id": "gw_cancel_browser"}
     )
     outcome: list[BaseException] = []
@@ -114,7 +114,7 @@ def test_a_provider_without_cancel_support_is_not_an_error(tmp_path: Path) -> No
     service = GatewayService(tmp_path, manager=Manager(provider))
     token = CancelToken()
     token.cancel("client disconnected")
-    turn = normalize_openai({"model": "gemini-web", "input": "hi"}).model_copy(update={"session_id": "gw_nocancel"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hi"}).model_copy(update={"session_id": "gw_nocancel"})
     with pytest.raises(GatewayCancelled):
         service.execute(turn, cancel_token=token)
 
@@ -200,7 +200,7 @@ def test_a_stopped_turn_is_cancelled_not_uncertain(tmp_path: Path) -> None:
     service = GatewayService(tmp_path, manager=Manager(provider))
     token = CancelToken()
     token.cancel("client disconnected")
-    turn = normalize_openai({"model": "gemini-web", "input": "hi"}).model_copy(update={"session_id": "gw_stopped"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hi"}).model_copy(update={"session_id": "gw_stopped"})
 
     with pytest.raises(GatewayCancelled):
         service.execute(turn, cancel_token=token)

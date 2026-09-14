@@ -18,6 +18,7 @@ src/fancy_gpt/focused.py
 src/fancy_gpt/gateway.py
 src/fancy_gpt/gateway_app.py
 src/fancy_gpt/gateway_capabilities.py
+src/fancy_gpt/gateway_clients.py
 src/fancy_gpt/gateway_compaction.py
 src/fancy_gpt/gateway_execution.py
 src/fancy_gpt/gateway_state.py
@@ -146,6 +147,7 @@ tests/test_extension_assets.py
 tests/test_extension_behaviour.py
 tests/test_gateway.py
 tests/test_gateway_cancel_path.py
+tests/test_gateway_clients.py
 tests/test_gateway_correlation.py
 tests/test_gateway_execution.py
 tests/test_gateway_hardening.py

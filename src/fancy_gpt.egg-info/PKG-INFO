@@ -51,10 +51,20 @@ The current delivery order and acceptance gates are tracked in [ROADMAP.md](docs
 ./install.sh
 ```
 
-The default install is lightweight: it installs the CLI/MCP/bridge and extension assets, but does **not** download a private Chromium runtime. Playwright remains an optional fallback:
+This installs directly from either the bundled wheel or the source checkout,
+registers the MCP server with detected Codex/Claude Code/Gemini CLI clients, and configures
+the local model gateway globally for Codex, Claude Code, and Gemini CLI. On Linux
+with a user systemd session, the bridge and gateway are installed and started as
+login services. Select a site with Codex's model picker after
+`codex --profile fancy-gemini`, the `fancy-claude` launcher's `/model` picker, or
+`gemini --model fancy-claude`. Use `--no-mcp-register`, `--no-gateway-config`,
+or `--no-services` to opt out of an integration.
+
+The default install includes Playwright Chromium as a ready-to-use local fallback.
+For an extension-only or minimal CI installation, opt out explicitly:
 
 ```bash
-./install.sh --with-playwright
+./install.sh --without-playwright --no-services
 ```
 
 After installation:

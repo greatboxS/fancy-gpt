@@ -49,7 +49,7 @@ class Manager:
 
 
 def a_turn(session: str):
-    return normalize_openai({"model": "gemini-web", "input": "hello"}).model_copy(
+    return normalize_openai({"model": "fancy-gemini", "input": "hello"}).model_copy(
         update={"session_id": session}
     )
 

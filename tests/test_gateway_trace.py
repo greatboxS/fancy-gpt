@@ -119,7 +119,7 @@ def test_the_trace_is_bounded() -> None:
 
 def test_a_completed_turn_records_every_stage(tmp_path: Path) -> None:
     service = GatewayService(tmp_path, manager=Manager(Provider()))
-    result = service.execute(normalize_openai({"model": "gemini-web", "input": "hello"}))
+    result = service.execute(normalize_openai({"model": "fancy-gemini", "input": "hello"}))
 
     events = read_trace(service.requests.request_dir(result.response_id) / "trace.jsonl")
     stages = [event["stage"] for event in events]
@@ -137,7 +137,7 @@ def test_a_failed_turn_records_the_classified_reason(tmp_path: Path) -> None:
     provider.fail_with = RuntimeError("You've reached your limit. Try again in 3 hours")
     service = GatewayService(tmp_path, manager=Manager(provider))
 
-    turn = normalize_openai({"model": "gemini-web", "input": "hi"}).model_copy(update={"session_id": "gw_limit"})
+    turn = normalize_openai({"model": "fancy-gemini", "input": "hi"}).model_copy(update={"session_id": "gw_limit"})
     with pytest.raises(BrowserTurnError) as excinfo:
         service.execute(turn)
 
@@ -155,7 +155,7 @@ def test_the_engine_exposes_the_trace(tmp_path: Path) -> None:
     from fancy_gpt.engine import ReviewEngine
 
     service = GatewayService(tmp_path, manager=Manager(Provider()))
-    result = service.execute(normalize_openai({"model": "gemini-web", "input": "hello"}))
+    result = service.execute(normalize_openai({"model": "fancy-gemini", "input": "hello"}))
 
     engine = ReviewEngine(tmp_path)
     trace = engine.request_trace(result.response_id)

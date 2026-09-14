@@ -57,9 +57,9 @@ class Manager:
 
 
 def test_protocol_normalization_and_output_mapping() -> None:
-    openai = normalize_openai({"model": "gemini-web", "instructions": "system", "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}]})
-    anthropic = normalize_anthropic({"model": "chatgpt-web", "system": "system", "messages": [{"role": "user", "content": "hello"}]})
-    gemini = normalize_gemini({"systemInstruction": {"parts": [{"text": "system"}]}, "contents": [{"role": "user", "parts": [{"text": "hello"}]}]}, "gemini-web")
+    openai = normalize_openai({"model": "fancy-gemini", "instructions": "system", "input": [{"role": "user", "content": [{"type": "input_text", "text": "hello"}]}]})
+    anthropic = normalize_anthropic({"model": "fancy-chatgpt", "system": "system", "messages": [{"role": "user", "content": "hello"}]})
+    gemini = normalize_gemini({"systemInstruction": {"parts": [{"text": "system"}]}, "contents": [{"role": "user", "parts": [{"text": "hello"}]}]}, "fancy-gemini")
     assert openai.messages[0].text == anthropic.messages[0].text == gemini.messages[0].text == "hello"
     assert openai.instructions == anthropic.instructions == gemini.instructions == "system"
 
@@ -67,7 +67,7 @@ def test_protocol_normalization_and_output_mapping() -> None:
 def test_gateway_prompt_keeps_exact_output_requests_inside_json_envelope(tmp_path: Path) -> None:
     manager = Manager()
     service = GatewayService(tmp_path, manager=manager)
-    service.execute(normalize_gemini({"contents": [{"role": "user", "parts": [{"text": "Return exactly HELLO"}]}]}, "gemini-web"))
+    service.execute(normalize_gemini({"contents": [{"role": "user", "parts": [{"text": "Return exactly HELLO"}]}]}, "fancy-gemini"))
     prompt = manager.model.requests[0].prompt
     assert "Return exactly one valid JSON object" in prompt
     assert "exact output in the `text` field" in prompt
@@ -76,8 +76,8 @@ def test_gateway_prompt_keeps_exact_output_requests_inside_json_envelope(tmp_pat
 def test_gateway_context_ledger_and_tool_calls(tmp_path: Path) -> None:
     manager = Manager()
     service = GatewayService(tmp_path, manager=manager)
-    first = service.execute(normalize_openai({"model": "gemini-web", "input": "hello"}))
-    second = service.execute(normalize_openai({"model": "gemini-web", "previous_response_id": first.response_id, "input": "Use the read_file tool", "tools": [{"type": "function", "name": "read_file", "parameters": {"type": "object"}}]}))
+    first = service.execute(normalize_openai({"model": "fancy-gemini", "input": "hello"}))
+    second = service.execute(normalize_openai({"model": "fancy-gemini", "previous_response_id": first.response_id, "input": "Use the read_file tool", "tools": [{"type": "function", "name": "read_file", "parameters": {"type": "object"}}]}))
     assert second.session_id == first.session_id
     assert second.tool_calls[0].name == "read_file"
     assert manager.model.requests[1].metadata["conversation_id"] == "conversation-1"
@@ -92,8 +92,8 @@ def test_gateway_context_ledger_and_tool_calls(tmp_path: Path) -> None:
 def test_gateway_tool_result_continues_existing_browser_conversation(tmp_path: Path) -> None:
     manager = Manager()
     service = GatewayService(tmp_path, manager=manager)
-    first = service.execute(normalize_openai({"model": "gemini-web", "input": "Use the read_file tool", "tools": [{"type": "function", "name": "read_file", "parameters": {"type": "object"}}]}))
-    final = service.execute(normalize_openai({"model": "gemini-web", "previous_response_id": first.response_id, "input": [{"type": "function_call_output", "call_id": "call_1", "output": "contents"}], "tools": [{"type": "function", "name": "read_file", "parameters": {"type": "object"}}]}))
+    first = service.execute(normalize_openai({"model": "fancy-gemini", "input": "Use the read_file tool", "tools": [{"type": "function", "name": "read_file", "parameters": {"type": "object"}}]}))
+    final = service.execute(normalize_openai({"model": "fancy-gemini", "previous_response_id": first.response_id, "input": [{"type": "function_call_output", "call_id": "call_1", "output": "contents"}], "tools": [{"type": "function", "name": "read_file", "parameters": {"type": "object"}}]}))
     assert final.text == "gateway-ok"
     assert manager.model.requests[-1].metadata["conversation_id"] == "conversation-1"
 
@@ -101,8 +101,8 @@ def test_gateway_tool_result_continues_existing_browser_conversation(tmp_path: P
 def test_gateway_correlates_full_transcript_to_one_provider_chat(tmp_path: Path) -> None:
     manager = Manager()
     service = GatewayService(tmp_path, manager=manager)
-    first = service.execute(normalize_anthropic({"model": "chatgpt-web", "messages": [{"role": "user", "content": "remember alpha"}]}))
-    second = service.execute(normalize_anthropic({"model": "chatgpt-web", "messages": [
+    first = service.execute(normalize_anthropic({"model": "fancy-chatgpt", "messages": [{"role": "user", "content": "remember alpha"}]}))
+    second = service.execute(normalize_anthropic({"model": "fancy-chatgpt", "messages": [
         {"role": "user", "content": "remember alpha"},
         {"role": "assistant", "content": "gateway-ok"},
         {"role": "user", "content": "what was it?"},
@@ -114,18 +114,18 @@ def test_gateway_correlates_full_transcript_to_one_provider_chat(tmp_path: Path)
 
 def test_codex_model_catalog_shape() -> None:
     catalog = codex_models()
-    assert [model["slug"] for model in catalog["models"]] == ["chatgpt-web", "gemini-web", "claude-web"]
+    assert [model["slug"] for model in catalog["models"]] == ["fancy-chatgpt", "fancy-gemini", "fancy-claude"]
     assert catalog["models"][0]["truncation_policy"]["mode"] == "tokens"
 
 
 def test_gemini_function_response_is_normalized_as_tool_result() -> None:
-    turn = normalize_gemini({"contents": [{"role": "user", "parts": [{"functionResponse": {"id": "call_1", "name": "read_file", "response": {"output": "contents"}}}]}]}, "gemini-web")
+    turn = normalize_gemini({"contents": [{"role": "user", "parts": [{"functionResponse": {"id": "call_1", "name": "read_file", "response": {"output": "contents"}}}]}]}, "fancy-gemini")
     assert "TOOL RESULT call_1" in turn.messages[0].text
     assert "contents" in turn.messages[0].text
 
 
 def test_gemini_model_role_is_canonicalized_for_context_matching() -> None:
-    turn = normalize_gemini({"contents": [{"role": "model", "parts": [{"text": "acknowledged"}]}]}, "gemini-web")
+    turn = normalize_gemini({"contents": [{"role": "model", "parts": [{"text": "acknowledged"}]}]}, "fancy-gemini")
     assert turn.messages[0].role == "assistant"
 
 
@@ -133,7 +133,7 @@ def test_gateway_rejects_oversized_input_and_audits_failure(tmp_path: Path) -> N
     service = GatewayService(tmp_path, manager=Manager())
     service.max_input_units = 10
     with pytest.raises(ValueError, match="context budget"):
-        service.execute(normalize_openai({"model": "gemini-web", "input": "x" * 1000}))
+        service.execute(normalize_openai({"model": "fancy-gemini", "input": "x" * 1000}))
     status = service.requests.list_statuses()[0]
     assert status.kind == "gateway"
     assert status.state == RequestState.FAILED
@@ -148,20 +148,20 @@ def test_gateway_http_three_protocols_streaming_and_auth(tmp_path: Path) -> None
             headers["Authorization"] = "Bearer secret"
         return request(app, "POST", path, body=payload, headers=headers)
 
-    assert post("/v1/responses", {"model": "gemini-web", "input": "hello"}, auth=False).status == 401
+    assert post("/v1/responses", {"model": "fancy-gemini", "input": "hello"}, auth=False).status == 401
 
-    streamed = post("/v1/responses", {"model": "gemini-web", "input": "hello", "stream": True})
+    streamed = post("/v1/responses", {"model": "fancy-gemini", "input": "hello", "stream": True})
     assert streamed.status == 200
     assert streamed.headers["content-type"].startswith("text/event-stream")
     names = [event.get("event") for event in streamed.sse_events()]
     assert "response.completed" in names
     assert names.index("response.output_item.added") < names.index("response.output_text.delta")
 
-    messages = post("/v1/messages", {"model": "chatgpt-web", "messages": [{"role": "user", "content": "hello"}]})
+    messages = post("/v1/messages", {"model": "fancy-chatgpt", "messages": [{"role": "user", "content": "hello"}]})
     assert messages.json()["content"][0]["text"] == "gateway-ok"
 
     gemini = post(
-        "/v1beta/models/gemini-web:generateContent",
+        "/v1beta/models/fancy-gemini:generateContent",
         {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
     )
     assert gemini.json()["candidates"][0]["content"]["parts"][0]["text"] == "gateway-ok"

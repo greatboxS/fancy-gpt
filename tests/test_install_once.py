@@ -37,7 +37,7 @@ def test_browser_profile_is_user_global(monkeypatch, tmp_path: Path) -> None:
     assert default_browser_profile() == tmp_path / "data" / "browser-profile"
 
 
-def test_install_script_uses_bundled_tool_flow_without_forcing_playwright(tmp_path: Path) -> None:
+def test_install_script_sets_up_complete_runtime_by_default(tmp_path: Path) -> None:
     import os
     import subprocess
 
@@ -62,6 +62,7 @@ case "${1:-}" in
   verify) echo '{"ok":true}' ;;
   bridge) echo '{"pair_token":"fake"}' ;;
   browser-setup) echo '{"ok":true}' ;;
+  gateway) echo '[]' ;;
 esac
 EOF
   chmod +x "$FAKE_BIN/fancy-gpt"
@@ -81,15 +82,16 @@ exit 0
         "FAKE_LOG": str(log),
         "FAKE_BIN": str(fake_bin),
     })
-    completed = subprocess.run(["bash", "install.sh"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
+    completed = subprocess.run(["bash", "install.sh", "--no-services"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
     assert '"pair_token":"fake"' in completed.stdout
     calls = log.read_text(encoding="utf-8")
     assert "uv:tool install --force" in calls
-    assert "--with playwright" not in calls
+    assert "--with playwright>=1.55,<2" in calls
     assert "fg:test" in calls
     assert "fg:verify" in calls
     assert "fg:bridge init" in calls
-    assert "browser-setup" not in calls
+    assert "fg:gateway configure-clients" in calls
+    assert "fg:browser-setup" in calls
 
 
 def test_install_script_playwright_is_explicit_opt_in(tmp_path: Path) -> None:
@@ -128,7 +130,7 @@ exit 0
         "FAKE_LOG": str(log),
         "FAKE_BIN": str(fake_bin),
     })
-    subprocess.run(["bash", "install.sh", "--with-playwright", "--skip-verify"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
+    subprocess.run(["bash", "install.sh", "--with-playwright", "--skip-verify", "--no-services"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
     assert "fg:browser-setup" in log.read_text(encoding="utf-8")
     assert "--with playwright>=1.55,<2" in log.read_text(encoding="utf-8")
 
@@ -152,7 +154,7 @@ if [[ "$1 $2" == "tool install" ]]; then
 #!/usr/bin/env bash
 set -eu
 if [[ "$1" == bridge ]]; then echo '{"pair_token":"preset-secret"}'; fi
-if [[ "$1 $2" == "extension export" ]]; then mkdir -p "$4"; echo '{}' > "$4/manifest.json"; fi
+    if [[ "$1 ${2:-}" == "extension export" ]]; then mkdir -p "$4"; echo '{}' > "$4/manifest.json"; fi
 EOF
   chmod +x "$FAKE_BIN/fancy-gpt"
 fi
@@ -171,7 +173,7 @@ fi
         "FANCY_GPT_EXTENSION_BUNDLE_DIR": str(bundle), "FAKE_BIN": str(fake_bin),
         "FAKE_LOG": str(log), "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
-    result = subprocess.run(["bash", "install.sh", "--preset", f"{deployment}-extension", "--browser", browser, "--skip-verify"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
+    result = subprocess.run(["bash", "install.sh", "--preset", f"{deployment}-extension", "--browser", browser, "--skip-verify", "--no-services", "--without-playwright"], cwd=Path(__file__).resolve().parents[1], env=env, check=True, capture_output=True, text=True)
     assert "preset-secret" not in result.stdout
     if deployment == "remote":
         assert "preset-secret" in (bundle / "PAIRING.txt").read_text(encoding="utf-8")

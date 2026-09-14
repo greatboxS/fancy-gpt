@@ -3,7 +3,9 @@ const ids = ["transport", "endpoint", "token", "tunnelId", "browserName"];
 const checkboxIds = ["autoConnect"];
 
 function expectedTunnel(browserName, transport) {
-  return `${browserName}-extension-${transport === "native" ? "native-local" : "ws-remote"}`;
+  // Tunnel identity is the browser route. Transport is an independent layer,
+  // so switching WebSocket/native must never rename the route.
+  return `${browserName}-remote`;
 }
 
 function normalizeTunnel() {

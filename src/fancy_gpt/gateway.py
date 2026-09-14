@@ -410,7 +410,7 @@ def _guard_modalities(payload: Any, *, protocol: str, model: str, where: str) ->
 
 
 def normalize_openai(payload: dict[str, Any], session_id: str | None = None) -> NormalizedTurn:
-    model = payload.get("model", "chatgpt-web")
+    model = payload.get("model", "fancy-chatgpt")
     _guard_modalities(payload.get("input"), protocol="openai", model=model, where="input")
     messages: list[GatewayContent] = []
     input_value = payload.get("input", "")
@@ -439,7 +439,7 @@ def normalize_openai(payload: dict[str, Any], session_id: str | None = None) -> 
 
 
 def normalize_anthropic(payload: dict[str, Any], session_id: str | None = None) -> NormalizedTurn:
-    model = payload.get("model", "chatgpt-web")
+    model = payload.get("model", "fancy-chatgpt")
     _guard_modalities(payload.get("messages"), protocol="anthropic", model=model, where="messages")
     messages = [_content(str(item.get("role", "user")), item.get("content")) for item in payload.get("messages") or []]
     tools = [GatewayTool(name=item.get("name", ""), description=item.get("description"), parameters=item.get("input_schema") or {}) for item in payload.get("tools") or []]
@@ -647,9 +647,12 @@ class GatewayService:
     def resolve_site(model: str) -> str:
         """Map a model alias to a model website. Never consults the tunnel."""
         name = model.lower()
-        if name.startswith("gemini"):
+        # Public aliases are namespaced so they cannot be confused with a
+        # vendor model accidentally sent to this local gateway. Keep the old
+        # suffix form readable for existing saved sessions during migration.
+        if name.startswith("fancy-gemini") or name.startswith("gemini-web"):
             return "gemini"
-        if name.startswith("chatgpt") or name.startswith("gpt") or name.startswith("claude"):
+        if name.startswith(("fancy-chatgpt", "fancy-claude", "chatgpt-web", "claude-web")):
             return "chatgpt"
         raise ValueError(f"unsupported gateway model: {model}")
 
@@ -1523,7 +1526,7 @@ class GeminiStream:
         return [(None, {"error": {"code": 500, "message": _scrub(message), "status": "INTERNAL"}})]
 
 
-GATEWAY_MODELS = ("chatgpt-web", "gemini-web", "claude-web")
+GATEWAY_MODELS = ("fancy-chatgpt", "fancy-gemini", "fancy-claude")
 
 
 def codex_models() -> dict[str, Any]:

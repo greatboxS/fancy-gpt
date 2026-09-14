@@ -35,6 +35,7 @@ from .web.transport import TransportRegistry
 from .self_test import run_self_test
 from . import __version__
 from .gateway import serve_gateway
+from .gateway_clients import configure_gateway_clients, configs_json
 
 
 def _truncate(text: str, width: int) -> str:
@@ -1013,6 +1014,19 @@ def gateway_serve(
 ) -> None:
     """Run the direct model-provider gateway."""
     serve_gateway(host, port, workdir or Path(os.getenv("FANCY_GPT_WORKDIR", ".fancy-gpt")), token)
+
+
+@gateway_app.command("configure-clients")
+def gateway_configure_clients(
+    home: Annotated[Path, typer.Option("--home")] = Path.home(),
+    base_url: Annotated[str, typer.Option("--base-url")] = "http://127.0.0.1:8787",
+) -> None:
+    """Configure user-global Codex, Claude Code, and Gemini CLI gateway access."""
+    try:
+        typer.echo(configs_json(configure_gateway_clients(home.expanduser(), base_url.rstrip("/"))))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        typer.echo(f"Could not configure model clients: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 @project_app.command("init")
