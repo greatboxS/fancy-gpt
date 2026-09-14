@@ -366,6 +366,7 @@ def test_extra_sites_have_current_composer_and_submit_fallbacks(tmp_path: Path) 
     assert "composed: true" in engine
     assert 'selectors.join(",")' in engine
     assert '12000, "composer unavailable"' in engine
+    assert "conversation history did not settle" in engine
 
 
 def test_the_adapter_reports_a_stall_before_the_bridge_gives_up(tmp_path: Path) -> None:

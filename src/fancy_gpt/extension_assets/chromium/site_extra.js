@@ -78,6 +78,20 @@
     async function executeTurn(prompt, timeoutMs, onProgress, options = {}) {
       if (!hostOk()) throw new Error(`FancyGPT ${id} adapter loaded on unexpected host`);
       const composer = await waitFor(() => firstVisible(config.composer), 20000, `${id} composer unavailable; sign in first`);
+      if (options?.continuing) {
+        // On a resumed conversation the composer hydrates before the old
+        // messages. Taking the baseline immediately made the previous answer
+        // appear "new" and return its old request_id. Wait until history has
+        // stopped changing before submitting the continuation.
+        let signature = null;
+        let stableSince = Date.now();
+        await waitFor(() => {
+          const nodes = responseNodes();
+          const next = `${nodes.length}:${nodes.map(node => textOf(node).length).join(",")}`;
+          if (next !== signature) { signature = next; stableSince = Date.now(); }
+          return Date.now() - stableSince >= 1200;
+        }, 10000, `${id} conversation history did not settle`);
+      }
       const baseline = responseNodes().length;
       setComposer(composer, prompt);
       await submitComposer(composer, config.send);
