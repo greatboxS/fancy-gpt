@@ -284,7 +284,10 @@ class ProjectService:
             # resuming a ChatGPT thread on Gemini would open a URL that does not
             # exist there.
             candidates = [session for session in candidates if session.site == site]
-            real = [session for session in candidates if is_chatgpt_conversation(str(session.conversation_binding))]
+            real = [
+                session for session in candidates
+                if self._valid_conversation_binding(session.site, str(session.conversation_binding))
+            ]
             if real:
                 real.sort(key=lambda session: session.started_at, reverse=True)
                 conversation_binding = real[0].conversation_binding
@@ -316,12 +319,22 @@ class ProjectService:
         return existing
 
     def bind_session_conversation(self, project_id: str, session_id: str, binding: str) -> SessionRecord:
-        if not is_chatgpt_conversation(binding):
-            raise ValueError("conversation binding must be a resumable ChatGPT conversation")
         existing = self.session(project_id, session_id)
+        if not self._valid_conversation_binding(existing.site, binding):
+            raise ValueError(f"conversation binding is not resumable for site {existing.site or 'chatgpt'}")
         updated = existing.model_copy(update={"conversation_binding": binding})
         self.store.append(project_id, ProjectEventType.SESSION_CONVERSATION_BOUND, updated.model_dump(mode="json"))
         return updated
+
+    @staticmethod
+    def _valid_conversation_binding(site: str | None, binding: str) -> bool:
+        """Validate a site-owned opaque id without imposing ChatGPT's format."""
+        value = binding.strip()
+        if not value or len(value) > 2048 or value.startswith("project:"):
+            return False
+        if any(ord(char) < 32 for char in value):
+            return False
+        return is_chatgpt_conversation(value) if (site or "chatgpt") == "chatgpt" else True
 
     def finish_session(
         self,
@@ -713,6 +726,37 @@ class ProjectService:
         if session.state != SessionState.OPEN:
             raise ValueError("agent outcome session is not open")
 
+        # Validate every cross-reference before writing to the append-only
+        # journal. A malformed outcome must not become a half-applied outcome.
+        snapshot = self.snapshot(project_id)
+        evidence_refs = [item.ref for item in outcome.evidence if item.ref]
+        if len(evidence_refs) != len(set(evidence_refs)):
+            raise ValueError("duplicate evidence ref in agent outcome")
+        finding_ids = {item.finding_id for item in snapshot.findings}
+        unknown_findings = [item.finding_id for item in outcome.finding_resolutions if item.finding_id not in finding_ids]
+        if unknown_findings:
+            raise ValueError(f"unknown finding ids in agent outcome: {unknown_findings}")
+        criterion_ids = {item.id for item in snapshot.project.target.acceptance_criteria}
+        if outcome.criterion_assessments and outcome.role != AgentRole.VERIFIER:
+            raise ValueError("only verifier outcomes may update acceptance criteria")
+        for assessment in outcome.criterion_assessments:
+            if assessment.criterion_id not in criterion_ids:
+                raise ValueError(f"unknown acceptance criterion: {assessment.criterion_id}")
+            unknown_refs = [ref for ref in assessment.evidence_refs if ref not in evidence_refs]
+            if unknown_refs:
+                raise ValueError(f"unknown evidence refs in criterion assessment: {unknown_refs}")
+        if outcome.conversation_binding and not self._valid_conversation_binding(session.site, outcome.conversation_binding):
+            raise ValueError(f"conversation binding is not resumable for site {session.site or 'chatgpt'}")
+
+        # A refused patch is a failed assignment. Apply it before publishing
+        # any claims from that assignment to the append-only project history.
+        if outcome.code_change is not None:
+            try:
+                self.apply_code_change(project_id, outcome.code_change, source_session_id=session.session_id)
+            except PatchRejected as exc:
+                self.finish_session(project_id, session.session_id, summary=f"code change refused: {exc}", failed=True)
+                raise
+
         if outcome.conversation_binding:
             self.bind_session_conversation(project_id, session.session_id, outcome.conversation_binding)
         for item in outcome.decisions:
@@ -756,23 +800,6 @@ class ProjectService:
                 )
         for action in outcome.next_actions:
             self.add_next_action(project_id, action)
-
-        if outcome.code_change is not None:
-            try:
-                self.apply_code_change(
-                    project_id, outcome.code_change, source_session_id=session.session_id
-                )
-            except PatchRejected as exc:
-                # A refused patch is a failed assignment, not a quiet no-op: the
-                # teammate believes it changed the repository and every later
-                # role would reason from that belief.
-                self.finish_session(
-                    project_id,
-                    session.session_id,
-                    summary=f"code change refused: {exc}",
-                    failed=True,
-                )
-                raise
 
         if outcome.status == AgentOutcomeStatus.BLOCKED:
             work_state = WorkItemState.BLOCKED

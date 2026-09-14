@@ -95,7 +95,11 @@ src/fancy_gpt/extension_assets/chromium/page_hook.js
 src/fancy_gpt/extension_assets/chromium/popup.html
 src/fancy_gpt/extension_assets/chromium/popup.js
 src/fancy_gpt/extension_assets/chromium/site_chatgpt.js
+src/fancy_gpt/extension_assets/chromium/site_extra.js
 src/fancy_gpt/extension_assets/chromium/site_gemini.js
+src/fancy_gpt/extension_assets/chromium/site_glm.js
+src/fancy_gpt/extension_assets/chromium/site_grok.js
+src/fancy_gpt/extension_assets/chromium/site_kimi.js
 src/fancy_gpt/extension_assets/chromium/site_kit.js
 src/fancy_gpt/extension_assets/firefox/background.js
 src/fancy_gpt/extension_assets/firefox/bridge_transport.js
@@ -106,7 +110,11 @@ src/fancy_gpt/extension_assets/firefox/page_hook.js
 src/fancy_gpt/extension_assets/firefox/popup.html
 src/fancy_gpt/extension_assets/firefox/popup.js
 src/fancy_gpt/extension_assets/firefox/site_chatgpt.js
+src/fancy_gpt/extension_assets/firefox/site_extra.js
 src/fancy_gpt/extension_assets/firefox/site_gemini.js
+src/fancy_gpt/extension_assets/firefox/site_glm.js
+src/fancy_gpt/extension_assets/firefox/site_grok.js
+src/fancy_gpt/extension_assets/firefox/site_kimi.js
 src/fancy_gpt/extension_assets/firefox/site_kit.js
 src/fancy_gpt/providers/__init__.py
 src/fancy_gpt/providers/base.py
@@ -130,6 +138,9 @@ src/fancy_gpt/web/sites/base.py
 src/fancy_gpt/web/sites/chatgpt.py
 src/fancy_gpt/web/sites/chatgpt_browser.py
 src/fancy_gpt/web/sites/gemini.py
+src/fancy_gpt/web/sites/glm.py
+src/fancy_gpt/web/sites/grok.py
+src/fancy_gpt/web/sites/kimi.py
 src/fancy_gpt/web/transport/__init__.py
 src/fancy_gpt/web/transport/contracts.py
 tests/test_bridge_concurrency.py

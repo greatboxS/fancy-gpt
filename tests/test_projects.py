@@ -111,6 +111,15 @@ def test_session_conversation_binding_is_persisted(tmp_path: Path) -> None:
     assert reloaded.conversation_binding == "https://chatgpt.com/c/test-thread"
 
 
+def test_non_chatgpt_conversation_binding_is_an_opaque_site_id(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    project = service.create_project(project_id="gemini-binding", name="Binding", target="Keep a Gemini thread")
+    work = service.add_work_item(project.project_id, title="Implement", objective="Continue", role=AgentRole.IMPLEMENTER, site="gemini")
+    session = service.start_session(project.project_id, work.work_item_id)
+    service.bind_session_conversation(project.project_id, session.session_id, "short_id")
+    assert service.session(project.project_id, session.session_id).conversation_binding == "short_id"
+
+
 def test_acceptance_criteria_default_to_evidence_backed_completion(tmp_path: Path) -> None:
     service = _service(tmp_path)
     project = service.create_project(

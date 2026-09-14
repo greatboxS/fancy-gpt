@@ -214,6 +214,7 @@
     const idleLimitMs = Math.max(15000, Number(options?.idleTimeoutMs ?? 90000));
     const hardDeadline = Date.now() + timeoutMs;
     let lastActivityAt = Date.now();
+    let lastNetworkActivityAt = null;
     let lastSeenText = null;
     let lastReported = null;
     const gate = createCompletionGate({stabilityMs: 1200});
@@ -235,6 +236,11 @@
     const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const evaluateStartedAt = Date.now();
+      const networkAt = options?.networkActivityAt?.();
+      if (networkAt != null && networkAt !== lastNetworkActivityAt) {
+        lastNetworkActivityAt = networkAt;
+        lastActivityAt = Math.max(lastActivityAt, networkAt);
+      }
       if (options?.isCancelled?.()) {
         const stopped = stopGeneration(SELECTORS.stop);
         release();
@@ -287,6 +293,7 @@
       + JSON.stringify({
         ticksReceived: tickCount, loopIterations, maxEvaluateMs,
         waiter: activity.stats(), candidatePending: gate.pending,
+        lastNetworkActivityAgeMs: lastNetworkActivityAt == null ? null : Date.now() - lastNetworkActivityAt,
         completionCandidateAgeMs: gate.candidateAgeMs,
       }));
   }

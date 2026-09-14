@@ -79,6 +79,7 @@ const CAPTURES = 6;
 let streamedEvents = [];
 let streamedBody = [];
 let streamFinishedAt = null;
+let networkActivityAt = null;
 
 function sizeOf(report) {
   if (Array.isArray(report.events)) return report.events.join("").length;
@@ -108,6 +109,7 @@ window.addEventListener("message", event => {
   // A response body that grew while it loaded, which is how a site answering
   // over XHR rather than a server-sent stream delivers its reply.
   if (report.kind === "body") { remember(streamedBody, report); return; }
+  if (report.kind === "activity") { networkActivityAt = Date.now(); return; }
   // A reply-shaped response has ended. Recorded rather than acted on here: the
   // adapter decides what to do with it, and the runtime decides what the bytes
   // meant.
@@ -144,7 +146,12 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return false;
   }
   let closeTickPort = () => {};
-  if (message.type === "fancy_execute_turn") { streamFinishedAt = null; streamedEvents = []; streamedBody = []; }
+  if (message.type === "fancy_execute_turn") {
+    streamFinishedAt = null;
+    networkActivityAt = null;
+    streamedEvents = [];
+    streamedBody = [];
+  }
   const task = message.type === "fancy_site_health"
     ? adapter.healthCheck()
     : adapter.executeTurn(
@@ -166,6 +173,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
            * place that does not depend on rendering.
            */
           streamFinishedAt: () => streamFinishedAt,
+          networkActivityAt: () => networkActivityAt,
           onSubmitted: () => ext.runtime.sendMessage({
             type: "fancy_turn_submitted", jobId: message.jobId, leaseId: message.leaseId,
             generationEpoch: message.generationEpoch,

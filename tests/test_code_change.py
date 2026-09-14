@@ -195,12 +195,20 @@ def test_a_refused_change_fails_the_session_instead_of_passing_silently(tmp_path
         edits=[edit(path="src/alpha.py", base_sha256=sha(ALPHA), old="not present", new="x")],
     )
     assignment, outcome = _outcome(service, project.project_id, item.work_item_id, change)
+    outcome = AgentOutcome.model_validate({
+        **outcome.model_dump(),
+        "decisions": [{"statement": "Ship the refused edit", "rationale": "exercise atomicity"}],
+        "evidence": [{"claim": "The refused edit works", "source": "failed teammate"}],
+    })
     with pytest.raises(PatchRejected):
         service.apply_agent_outcome(project.project_id, outcome)
 
     assert (repo / "src" / "alpha.py").read_text(encoding="utf-8") == ALPHA
     session = service.session(project.project_id, assignment.session.session_id)
     assert session.state.value == "failed"
+    snapshot = service.snapshot(project.project_id)
+    assert snapshot.decisions == []
+    assert snapshot.evidence == []
 
 
 def test_implementer_prompt_carries_the_code_change_contract(tmp_path: Path) -> None:

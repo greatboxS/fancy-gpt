@@ -339,6 +339,14 @@ def test_a_turn_stalls_on_inactivity_not_on_elapsed_time(tmp_path: Path) -> None
         assert "hardDeadline" in source
 
 
+def test_glm_thinking_is_activity_not_a_response(tmp_path: Path) -> None:
+    exported = export_extension("edge", tmp_path / "edge-glm-thinking")
+    source = (exported / "site_extra.js").read_text(encoding="utf-8")
+    assert "excludeResponses" in source
+    assert '[class*="thinking" i]' in source
+    assert "node.closest?.(selector)" in source
+
+
 def test_the_adapter_reports_a_stall_before_the_bridge_gives_up(tmp_path: Path) -> None:
     """Otherwise the bridge wins the race and reports a generic timeout."""
     exported = export_extension("edge", tmp_path / "edge-margin")

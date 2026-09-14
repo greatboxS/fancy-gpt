@@ -80,6 +80,18 @@
     try { window.postMessage({source: CHANNEL, ...payload}, location.origin); } catch (_) {}
   };
 
+  // Network traffic is activity even when a hidden page stops painting its
+  // DOM. Keep this heartbeat metadata-only and throttled.
+  const activityReporter = (transport, path) => {
+    let lastReportedAt = 0;
+    return () => {
+      const now = Date.now();
+      if (now - lastReportedAt < 250) return;
+      lastReportedAt = now;
+      report({kind: "activity", transport, path});
+    };
+  };
+
   const describeStream = async (response, shape) => {
     // A clone, so the page's own consumption is untouched: the hook must be
     // invisible to the application it is watching.
@@ -96,12 +108,14 @@
       sawDone: false, firstChunkMs: null,
     };
     const startedAt = Date.now();
+    const reportActivity = activityReporter("fetch", shape);
     const captured = summary.contentType.includes("event-stream") ? [] : null;
     let pending = "";
     try {
       for (;;) {
         const {done, value} = await reader.read();
         if (done) break;
+        reportActivity();
         summary.chunks += 1;
         summary.bytes += value?.byteLength ?? 0;
         if (summary.firstChunkMs === null) summary.firstChunkMs = Date.now() - startedAt;
@@ -209,6 +223,7 @@
         const watched = this.__fancyGpt;
         if (watched && watched.method === "POST") {
           const startedAt = Date.now();
+          const reportActivity = activityReporter("xhr", shapeOfPath(watched.url));
           /* Whether the body arrives in pieces or all at once.
            *
            * A total size cannot tell those apart, and the difference decides
@@ -222,6 +237,7 @@
             if (this.readyState !== 3 || growth.length >= 40) return;
             let length = 0;
             try { length = (this.responseText ?? "").length; } catch (_) { return; }
+            reportActivity();
             growth.push({ms: Date.now() - startedAt, chars: length});
           });
           this.addEventListener("loadend", () => {
@@ -296,6 +312,7 @@
         ? new NativeWebSocket(url)
         : new NativeWebSocket(url, protocols);
       const summary = {path: shapeOfPath(String(url)), frames: 0, bytes: 0, startedAt: Date.now()};
+      const reportActivity = activityReporter("websocket", summary.path);
       let reported = false;
       const flush = () => {
         if (reported || summary.frames === 0) return;
@@ -309,6 +326,7 @@
         });
       };
       socket.addEventListener("message", event => {
+        reportActivity();
         summary.frames += 1;
         const data = event?.data;
         summary.bytes += typeof data === "string" ? data.length : (data?.byteLength ?? data?.size ?? 0);

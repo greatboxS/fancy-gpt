@@ -92,6 +92,8 @@ async function main() {
     const shape = posted.find(item => item.kind === "stream");
     assert(shape, "the shape report accompanies them");
     assertEqual(shape.sawDone, true, "the stream's own terminator is noticed");
+    assert(posted.some(item => item.kind === "activity" && item.transport === "fetch"),
+      "an arriving chunk refreshes the turn's idle clock");
   });
 
   await test("identifying path segments never leave the page", async () => {
@@ -143,6 +145,8 @@ async function main() {
     assertEqual(seen.frames, 2, "frames are counted");
     assert(!seen.path.includes("abc123def456"), "and identifiers still never leave the page");
     assert(!JSON.stringify(seen).includes("frame one"), "frames are measured, not carried out");
+    assert(posted.some(item => item.kind === "activity" && item.transport === "websocket"),
+      "socket frames refresh the turn's idle clock");
   });
 
   await test("a site that answers over XHR is not invisible", async () => {
@@ -189,6 +193,8 @@ async function main() {
     assertEqual(reports[0].progressive, true, "a growing body is recognised");
     assertEqual(reports[1].progressive, false, "one that was already complete is not");
     assert(!JSON.stringify(reports).includes("the rest"), "growth is measured, never carried out");
+    assert(posted.some(item => item.kind === "activity" && item.transport === "xhr"),
+      "XHR growth refreshes the turn's idle clock");
   });
 
   await test("only a body that grew is carried out of the page", async () => {

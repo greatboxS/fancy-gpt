@@ -244,6 +244,7 @@
     let wakeCount = 0;
     const hardDeadline = Date.now() + timeoutMs;
     let lastActivityAt = Date.now();
+    let lastNetworkActivityAt = null;
     let lastSeenText = null;
     let boundId = null;
     // Progress is reported by a DOM observer rather than by this loop, because
@@ -275,6 +276,11 @@
     const release = () => { activity.stop(); visibility.stop(); if (stopObserving) stopObserving(); };
     while (Date.now() < hardDeadline && Date.now() - lastActivityAt < idleLimitMs) {
       const evaluateStartedAt = Date.now();
+      const networkAt = options?.networkActivityAt?.();
+      if (networkAt != null && networkAt !== lastNetworkActivityAt) {
+        lastNetworkActivityAt = networkAt;
+        lastActivityAt = Math.max(lastActivityAt, networkAt);
+      }
       /* A turn this job created, or an old one that only just finished drawing.
        *
        * A continued conversation renders its earlier turns lazily, so a turn
@@ -424,6 +430,7 @@
       newTurnCount: newTurns.length,
       newTurnsWithText: newTurns.filter(id => assistantText(id)).length,
       generating: isGenerating(),
+      lastNetworkActivityAgeMs: lastNetworkActivityAt == null ? null : Date.now() - lastNetworkActivityAt,
       candidatePending: gate.pending,
       completionCandidateAgeMs: gate.candidateAgeMs,
       ticksReceived: tickCount,

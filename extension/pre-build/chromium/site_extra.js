@@ -25,6 +25,9 @@
       send: ['button[type="submit"]', 'button[aria-label*="Send" i]', 'button[class*="send"]'],
       stop: ['button[aria-label*="Stop" i]', 'button[class*="stop"]'],
       responses: ['div[class*="assistant"] div[class*="markdown"]', 'div[class*="message-content"]', 'div[class*="markdown"]'],
+      // GLM renders chain-of-thought in markdown-shaped containers too. It is
+      // progress, not the assistant's final answer.
+      excludeResponses: ['[class*="thinking" i]', '[class*="reasoning" i]', '[data-testid*="thinking" i]', '[data-testid*="reasoning" i]'],
     },
   };
 
@@ -39,7 +42,9 @@
 
   function createAdapter(id, config) {
     const hostOk = () => config.hosts.includes(location.hostname);
-    const responseNodes = () => visibleNodes(config.responses);
+    const responseNodes = () => visibleNodes(config.responses).filter(node =>
+      !(config.excludeResponses ?? []).some(selector => node.closest?.(selector))
+    );
     const isGenerating = () => Boolean(firstVisible(config.stop) || document.querySelector('[aria-busy="true"]'));
     const conversationId = () => location.pathname.split('/').filter(Boolean).at(-1) || null;
 
@@ -61,6 +66,7 @@
       const activity = createActivityWaiter();
       let lastText = null;
       let lastActivity = Date.now();
+      let lastNetworkActivityAt = null;
       if (options?.onTick) options.onTick(() => activity.notify());
       const latest = () => {
         const nodes = responseNodes();
@@ -70,6 +76,11 @@
       const release = () => { activity.stop(); if (stopObserving) stopObserving(); };
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline && Date.now() - lastActivity < 90000) {
+        const networkAt = options?.networkActivityAt?.();
+        if (networkAt != null && networkAt !== lastNetworkActivityAt) {
+          lastNetworkActivityAt = networkAt;
+          lastActivity = Math.max(lastActivity, networkAt);
+        }
         if (options?.isCancelled?.()) {
           const stopped = stopGeneration(config.stop);
           release();
