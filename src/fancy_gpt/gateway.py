@@ -460,10 +460,46 @@ def normalize_gemini(payload: dict[str, Any], model: str, session_id: str | None
     return NormalizedTurn(protocol="gemini", model=model, instructions=_text(payload.get("systemInstruction") or payload.get("system_instruction")), messages=messages, tools=tools, session_id=session_id, stream=bool(config.get("stream")))
 
 
+def _clip_web_text(value: str, limit: int, *, label: str) -> str:
+    """Bound metadata copied into a browser composer, preserving both ends."""
+    if len(value) <= limit:
+        return value
+    head = max(0, limit // 3)
+    tail = max(0, limit - head)
+    omitted = len(value) - head - tail
+    return f"{value[:head]}\n[{label}: {omitted} chars omitted]\n{value[-tail:]}"
+
+
+def _web_tool_catalog(tools: list[GatewayTool]) -> list[dict[str, Any]]:
+    """Describe callable tools without pasting full client-owned JSON schemas."""
+    catalog: list[dict[str, Any]] = []
+    for tool in tools:
+        properties = tool.parameters.get("properties") if isinstance(tool.parameters, dict) else None
+        parameters = []
+        if isinstance(properties, dict):
+            required = set(tool.parameters.get("required") or [])
+            for name, schema in list(properties.items())[:8]:
+                kind = schema.get("type", "any") if isinstance(schema, dict) else "any"
+                parameters.append({"name": name, "type": kind, "required": name in required})
+        catalog.append({
+            "name": tool.name,
+            "description": _clip_web_text(tool.description or "", 80, label="description"),
+            "parameters": parameters,
+        })
+    return catalog
+
+
 def _gateway_prompt(turn: NormalizedTurn, *, include_history: bool) -> str:
     messages = turn.messages if include_history else turn.messages[-1:]
-    transcript = "\n\n".join(f"{message.role.upper()}: {message.text}" for message in messages)
-    tools = [tool.model_dump(mode="json") for tool in turn.tools]
+    if len(messages) > 4:
+        summaries = [message for message in messages[:-3] if message.role == "context"]
+        messages = ([summaries[-1]] if summaries else []) + messages[-3:]
+    transcript = "\n\n".join(
+        f"{message.role.upper()}: {_clip_web_text(message.text, 4_000, label='message')}"
+        for message in messages
+    )
+    tools = _web_tool_catalog(turn.tools)
+    tools_json = _clip_web_text(json.dumps(tools, ensure_ascii=False), 12_000, label="tool catalog")
     contract = {
         "type": "message",
         "text": "final assistant text",
@@ -473,12 +509,12 @@ def _gateway_prompt(turn: NormalizedTurn, *, include_history: bool) -> str:
         "calls": [{"id": "call_unique", "name": "exact tool name", "arguments": {}}],
     }
     return f"""Respond to this conversation.
-SYSTEM: {turn.instructions or '(none)'}
+SYSTEM: {_clip_web_text(turn.instructions, 2_000, label='system metadata') if turn.instructions else '(none)'}
 {transcript}
 
 Return exactly one valid JSON object and no Markdown.
 For a final answer: {json.dumps(contract)}
-Available tools: {json.dumps(tools, ensure_ascii=False)}
+Available tools: {tools_json}
 If a tool is needed: {json.dumps(tool_contract)}
 Put any requested exact output in the `text` field. Never invent tool results.
 """
@@ -1100,7 +1136,14 @@ class GatewayService:
                     raise BrowserTurnError(_scrub(str(exc)), failure) from exc
                 finally:
                     provider.stop()
-            value = parse_json_object(raw.raw_text)
+            try:
+                value = parse_json_object(raw.raw_text)
+            except ValueError:
+                # Browser models occasionally ignore the envelope instruction
+                # and answer in plain text. Treating that as final prose is
+                # safe: only a validated JSON tool_calls envelope can cause a
+                # client-side tool execution.
+                value = {"type": "message", "text": raw.raw_text.strip()}
         except (GatewayCancelled, UncertainSubmitError):
             raise
         except Exception as exc:
