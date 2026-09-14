@@ -188,6 +188,24 @@ const SITES = {
     persistent: "https://gemini.google.com/app",
     fresh: "https://gemini.google.com/app",
   },
+  grok: {
+    hosts: ["grok.com", "x.com"],
+    conversation: id => `https://grok.com/c/${id}`,
+    persistent: "https://grok.com/",
+    fresh: "https://grok.com/",
+  },
+  kimi: {
+    hosts: ["www.kimi.com", "kimi.com", "www.kimi.ai", "kimi.ai"],
+    conversation: id => `https://www.kimi.com/chat/${id}`,
+    persistent: "https://www.kimi.com/",
+    fresh: "https://www.kimi.com/",
+  },
+  glm: {
+    hosts: ["chat.z.ai", "z.ai"],
+    conversation: id => `https://chat.z.ai/c/${id}`,
+    persistent: "https://chat.z.ai/",
+    fresh: "https://chat.z.ai/",
+  },
 };
 
 function taskUrlFor(site, conversation) {

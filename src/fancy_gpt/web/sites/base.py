@@ -22,7 +22,10 @@ class SiteRegistry:
         if contracts is None:
             from .chatgpt import CHATGPT_SITE
             from .gemini import GEMINI_SITE
-            contracts = [CHATGPT_SITE, GEMINI_SITE]
+            from .grok import GROK_SITE
+            from .kimi import KIMI_SITE
+            from .glm import GLM_SITE
+            contracts = [CHATGPT_SITE, GEMINI_SITE, GROK_SITE, KIMI_SITE, GLM_SITE]
         self._items = {item.id: item for item in contracts}
 
     def get(self, site_id: str) -> SiteContract:

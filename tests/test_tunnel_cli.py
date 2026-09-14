@@ -30,7 +30,7 @@ def test_tunnel_components_command_default_output_is_a_readable_table() -> None:
 def test_sites_are_listed_outside_the_tunnel_surface() -> None:
     result = runner.invoke(app, ["sites", "list", "--json"])
     assert result.exit_code == 0, result.stdout
-    assert {item["id"] for item in json.loads(result.stdout)} == {"chatgpt", "gemini"}
+    assert {item["id"] for item in json.loads(result.stdout)} == {"chatgpt", "gemini", "grok", "kimi", "glm"}
 
 
 def test_tunnel_explain_reports_layered_health() -> None:

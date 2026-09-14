@@ -42,6 +42,17 @@ function stopControl() {
 }
 
 async function main() {
+  // -- MCP-only adapters: site_extra.js, site_grok.js, site_kimi.js,
+  // site_glm.js --------------------------------------------------------------
+  for (const [site, host] of [["grok", "grok.com"], ["kimi", "www.kimi.com"], ["glm", "chat.z.ai"]]) {
+    await test(`${site} exposes a healthy composer adapter`, async () => {
+      loadAdapters(["site_extra.js", `site_${site}.js`], host);
+      document.body.append(new StubElement("textarea"));
+      const result = await globalThis.FancyGPTSites[site].healthCheck();
+      assert(result.ok, `${site} composer should be detected`);
+    });
+  }
+
   // -- ChatGPT: a normal turn ------------------------------------------------
   await test("chatgpt submits the prompt and returns the settled reply", async () => {
     loadAdapters(["site_chatgpt.js"]);

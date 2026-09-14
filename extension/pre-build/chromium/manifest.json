@@ -16,6 +16,12 @@
     "https://x.com/i/grok*",
     "https://copilot.microsoft.com/*",
     "https://m365.cloud.microsoft/*"
+    ,"https://www.kimi.com/*"
+    ,"https://kimi.com/*"
+    ,"https://www.kimi.ai/*"
+    ,"https://kimi.ai/*"
+    ,"https://chat.z.ai/*"
+    ,"https://z.ai/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -27,12 +33,23 @@
   "content_scripts": [
     {
       "matches": [
+        "https://grok.com/*", "https://x.com/i/grok*",
+        "https://www.kimi.com/*", "https://kimi.com/*", "https://www.kimi.ai/*", "https://kimi.ai/*",
+        "https://chat.z.ai/*", "https://z.ai/*"
+      ],
+      "js": ["site_kit.js", "site_extra.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://chatgpt.com/*",
         "https://gemini.google.com/*",
         "https://grok.com/*",
         "https://x.com/i/grok*",
         "https://copilot.microsoft.com/*",
         "https://m365.cloud.microsoft/*"
+        ,"https://www.kimi.com/*", "https://kimi.com/*", "https://www.kimi.ai/*", "https://kimi.ai/*"
+        ,"https://chat.z.ai/*", "https://z.ai/*"
       ],
       "js": [
         "page_hook.js"
@@ -64,8 +81,6 @@
     },
     {
       "matches": [
-        "https://grok.com/*",
-        "https://x.com/i/grok*",
         "https://copilot.microsoft.com/*",
         "https://m365.cloud.microsoft/*"
       ],

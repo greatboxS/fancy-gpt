@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "f064f81dc873";
+const EXTENSION_BUILD = "19010a157e70";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -187,6 +187,24 @@ const SITES = {
     // conversation is the same page in both modes.
     persistent: "https://gemini.google.com/app",
     fresh: "https://gemini.google.com/app",
+  },
+  grok: {
+    hosts: ["grok.com", "x.com"],
+    conversation: id => `https://grok.com/c/${id}`,
+    persistent: "https://grok.com/",
+    fresh: "https://grok.com/",
+  },
+  kimi: {
+    hosts: ["www.kimi.com", "kimi.com", "www.kimi.ai", "kimi.ai"],
+    conversation: id => `https://www.kimi.com/chat/${id}`,
+    persistent: "https://www.kimi.com/",
+    fresh: "https://www.kimi.com/",
+  },
+  glm: {
+    hosts: ["chat.z.ai", "z.ai"],
+    conversation: id => `https://chat.z.ai/c/${id}`,
+    persistent: "https://chat.z.ai/",
+    fresh: "https://chat.z.ai/",
   },
 };
 
