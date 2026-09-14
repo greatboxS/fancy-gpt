@@ -9,4 +9,10 @@ globalThis.FancyGPTCreateGenericSite("glm", {
     '[class*="thinking" i]', '[class*="reasoning" i]',
     '[data-testid*="thinking" i]', '[data-testid*="reasoning" i]',
   ],
+  // The current Z.ai DOM sometimes places this UI heading in the same text
+  // node as the final JSON instead of wrapping it in the reasoning element.
+  cleanResponse: text => String(text ?? "").replace(
+    /^(?:Thought Process|Thinking|Reasoning)\s*(?=\{|\[)/i,
+    "",
+  ).trim(),
 });

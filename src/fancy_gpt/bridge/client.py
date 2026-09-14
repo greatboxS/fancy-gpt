@@ -150,7 +150,9 @@ class BridgeBrowserDriver:
         if not isinstance(payload, dict):
             raise RuntimeError("site health response is malformed")
         if not payload.get("ok"):
-            raise RuntimeError(f"site not ready: {payload.get('reason', 'unknown')}")
+            detail = payload.get("probe")
+            suffix = f"; probe={json.dumps(detail, sort_keys=True)}" if isinstance(detail, dict) else ""
+            raise RuntimeError(f"site not ready: {payload.get('reason', 'unknown')}{suffix}")
         return payload
 
     def begin_turn(

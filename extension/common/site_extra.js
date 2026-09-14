@@ -6,11 +6,17 @@
          createCompletionGate, createActivityWaiter} = kit;
 
   const visibleNodes = selectors => {
-    for (const selector of selectors) {
-      const nodes = [...document.querySelectorAll(selector)].filter(node => node.getClientRects().length);
-      if (nodes.length) return nodes;
+    // One site can change markup between old and new messages during a UI
+    // rollout. Returning only the first selector that matched meant an old
+    // message hid the new response forever (observed on Kimi). A combined CSS
+    // query keeps every matching response in document order and deduplicates
+    // nodes matched by more than one fallback.
+    try {
+      return [...document.querySelectorAll(selectors.join(","))]
+        .filter(node => node.getClientRects().length);
+    } catch (_) {
+      return [];
     }
-    return [];
   };
   const textOf = node => (node?.innerText ?? node?.textContent ?? "").trim();
   const thinkingOnly = text => {
@@ -47,7 +53,19 @@
 
     async function healthCheck() {
       const composer = hostOk() && firstVisible(config.composer);
-      return {ok: Boolean(composer), reason: composer ? "ready" : "composer-unavailable", build: kit.build};
+      const genericInputs = [...document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]')];
+      const visibleGenericInputs = genericInputs.filter(node => node.getClientRects().length);
+      const loginControls = document.querySelectorAll(
+        'a[href*="login" i], a[href*="sign-in" i], button[data-testid*="login" i], button[data-testid*="sign-in" i]'
+      ).length;
+      return {
+        ok: Boolean(composer), reason: composer ? "ready" : "composer-unavailable", build: kit.build,
+        probe: {
+          path: location.pathname, readyState: document.readyState,
+          genericInputs: genericInputs.length, visibleGenericInputs: visibleGenericInputs.length,
+          loginControls,
+        },
+      };
     }
 
     async function executeTurn(prompt, timeoutMs, onProgress, options = {}) {
@@ -67,7 +85,8 @@
       const latest = () => {
         const nodes = responseNodes();
         if (nodes.length <= baseline) return null;
-        const text = textOf(nodes[nodes.length - 1]);
+        const raw = textOf(nodes[nodes.length - 1]);
+        const text = config.cleanResponse ? config.cleanResponse(raw) : raw;
         return text && !thinkingOnly(text) ? text : null;
       };
       const stopObserving = onProgress ? observeText(latest, onProgress) : null;
