@@ -61,7 +61,7 @@
         catch (_) {}
       }
       const genericInputs = [...document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]')];
-      const visibleGenericInputs = genericInputs.filter(node => node.getClientRects().length);
+      const visibleGenericInputs = genericInputs.filter(node => Boolean(node.getClientRects?.().length));
       const loginControls = document.querySelectorAll(
         'a[href*="login" i], a[href*="sign-in" i], button[data-testid*="login" i], button[data-testid*="sign-in" i]'
       ).length;
@@ -78,6 +78,9 @@
     async function executeTurn(prompt, timeoutMs, onProgress, options = {}) {
       if (!hostOk()) throw new Error(`FancyGPT ${id} adapter loaded on unexpected host`);
       const composer = await waitFor(() => firstVisible(config.composer), 20000, `${id} composer unavailable; sign in first`);
+      if (config.prepareConversation) {
+        await config.prepareConversation({options, waitFor, firstVisible});
+      }
       if (options?.continuing) {
         // On a resumed conversation the composer hydrates before the old
         // messages. Taking the baseline immediately made the previous answer
@@ -139,7 +142,8 @@
           const stopped = stopGeneration(config.stop);
           release();
           return {text: latest() ?? "", responseIdentity: `${id}-${baseline + 1}`,
-                  conversationId: conversationId(), cancelled: true, stoppedGeneration: stopped};
+                  conversationId: options?.temporary ? null : conversationId(),
+                  cancelled: true, stoppedGeneration: stopped};
         }
         const text = latest();
         // Some sites replace or rename their Stop control frequently. Bytes
@@ -151,7 +155,8 @@
         if (active || text !== lastText) { lastActivity = Date.now(); lastText = text; }
         if (gate.observe({text, active, complete: Boolean(text)})) {
           release();
-          return {text, responseIdentity: `${id}-${baseline + 1}`, conversationId: conversationId()};
+          return {text, responseIdentity: `${id}-${baseline + 1}`,
+                  conversationId: options?.temporary ? null : conversationId()};
         }
         await activity.wait(gate.remainingMs == null ? 500 : Math.max(1, Math.min(500, gate.remainingMs)));
       }

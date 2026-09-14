@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "2a1f68045040";
+const EXTENSION_BUILD = "aa8df0f0f8bc";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -192,7 +192,9 @@ const SITES = {
     hosts: ["grok.com", "x.com"],
     conversation: id => `https://grok.com/c/${id}`,
     persistent: "https://grok.com/",
-    fresh: "https://grok.com/",
+    // The hash is Grok's native Private Chat route. The bare homepage creates
+    // a normal conversation which remains in the account history.
+    fresh: "https://grok.com/chat#private",
   },
   kimi: {
     hosts: ["www.kimi.com", "kimi.com", "www.kimi.ai", "kimi.ai"],
@@ -374,6 +376,7 @@ async function executeJob(job) {
       leaseId: lease.leaseId,
       generationEpoch: entry.epoch,
       continuing: job.conversation?.mode === "continue",
+      temporary: job.conversation?.mode !== "persistent" && job.conversation?.mode !== "continue",
       // Deliberately short of the job's own deadline. If the adapter and the
       // bridge time out together, the bridge wins the race and reports a
       // generic "worker timed out", throwing away the adapter's account of what

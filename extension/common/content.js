@@ -163,6 +163,7 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }).catch(() => {}),
         {
           continuing: Boolean(message.continuing),
+          temporary: Boolean(message.temporary),
           isCancelled: () => cancelledJobs.has(String(message.jobId ?? "")),
           onTick: handler => { closeTickPort = openTickPort(String(message.jobId ?? ""), handler); },
           /* When the network said this turn's reply was over.

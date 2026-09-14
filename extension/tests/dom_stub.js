@@ -201,7 +201,7 @@ function resetDom() {
     display: element.hidden ? "none" : "block",
   });
   globalThis.window = {getSelection: () => ({removeAllRanges() {}, addRange() {}})};
-  globalThis.location = {pathname: "/", href: "https://chatgpt.com/", hostname: "chatgpt.com"};
+  globalThis.location = {pathname: "/", hash: "", href: "https://chatgpt.com/", hostname: "chatgpt.com"};
   globalThis.navigator = {onLine: true};
   installEditingApis();
   return globalThis.document;

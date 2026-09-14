@@ -1,6 +1,19 @@
 /* FancyGPTSites.grok policy. Shared mechanics live in site_extra.js. */
 globalThis.FancyGPTCreateGenericSite("grok", {
-  hosts: ["grok.com", "x.com"], freshUrl: "https://grok.com/",
+  hosts: ["grok.com", "x.com"], freshUrl: "https://grok.com/chat#private",
+  // Temporary means Grok Private Chat, not merely "do not bind locally".
+  // Fail closed if the private route did not stick, so a transient SPA change
+  // cannot accidentally leave a supposedly temporary request in chat history.
+  prepareConversation: async ({options, waitFor}) => {
+    if (!options?.temporary) return;
+    await waitFor(
+      () => location.hostname === "grok.com"
+        && location.pathname.replace(/\/$/, "") === "/chat"
+        && location.hash === "#private",
+      10000,
+      "Grok Private Chat was not activated; refusing to send a persistent turn",
+    );
+  },
   composer: [
     'div.ProseMirror[role="textbox"]', '[data-testid="chat-input"] [contenteditable="true"]',
     'textarea[data-testid="grok-compose-input"]', 'textarea[placeholder*="Grok" i]',
