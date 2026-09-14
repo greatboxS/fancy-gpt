@@ -62,8 +62,13 @@ async function main() {
     document.body.append(send);
     document.body.append(privateChat);
     document._composerTarget = composer;
+    let privateComposer = null;
     privateChat.onclick = () => {
       privateChat.remove();
+      composer.remove();
+      privateComposer = new StubElement("textarea");
+      document.body.append(privateComposer);
+      document._composerTarget = privateComposer;
       document.body.append(new StubElement("div", {
         text: "This chat won't appear in your history and will not be used to train models.",
       }));
@@ -75,6 +80,8 @@ async function main() {
       "PROMPT", 3000, null, {temporary: true},
     );
     assertEqual(privateChat.clicks, 1, "native Private Chat control is clicked once");
+    assertEqual(composer.innerText, "", "detached normal composer is not used");
+    assertEqual(privateComposer.innerText, "PROMPT", "prompt reaches the replacement private composer");
     assertEqual(result.conversationId, null, "a private turn is never persisted as a binding");
   });
 

@@ -77,9 +77,14 @@
 
     async function executeTurn(prompt, timeoutMs, onProgress, options = {}) {
       if (!hostOk()) throw new Error(`FancyGPT ${id} adapter loaded on unexpected host`);
-      const composer = await waitFor(() => firstVisible(config.composer), 20000, `${id} composer unavailable; sign in first`);
+      let composer = await waitFor(() => firstVisible(config.composer), 20000, `${id} composer unavailable; sign in first`);
       if (config.prepareConversation) {
         await config.prepareConversation({options, waitFor, firstVisible});
+        // Mode switches are SPA navigations on Grok. React replaces the whole
+        // composer while the old element remains a valid-looking JS object;
+        // writing to that detached node submits an empty turn. Resolve it again
+        // only after the requested conversation mode has settled.
+        composer = await waitFor(() => firstVisible(config.composer), 10000, `${id} composer unavailable after mode switch`);
       }
       if (options?.continuing) {
         // On a resumed conversation the composer hydrates before the old
