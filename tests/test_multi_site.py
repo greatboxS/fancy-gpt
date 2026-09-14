@@ -369,6 +369,8 @@ def test_extra_sites_have_current_composer_and_submit_fallbacks(tmp_path: Path) 
     assert "conversation history did not settle" in engine
     assert "baselineNodes = new Map" in engine
     assert "textOf(node) !== baselineNodes.get(node)" in engine
+    assert "expectedRequestId" in engine
+    assert "textOf(node).includes(expectedRequestId)" in engine
 
 
 def test_the_adapter_reports_a_stall_before_the_bridge_gives_up(tmp_path: Path) -> None:

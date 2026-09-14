@@ -94,6 +94,7 @@
       }
       const baselineNodes = new Map(responseNodes().map(node => [node, textOf(node)]));
       const baseline = baselineNodes.size;
+      const expectedRequestId = String(prompt).match(/"request_id"\s*:\s*"([A-Za-z0-9_-]+)"/)?.[1] ?? null;
       setComposer(composer, prompt);
       await submitComposer(composer, config.send);
       options?.onSubmitted?.();
@@ -106,6 +107,17 @@
       if (options?.onTick) options.onTick(() => activity.notify());
       const latest = () => {
         const nodes = responseNodes();
+        // Structured FancyGPT prompts carry a unique request id. Prefer it
+        // over DOM identity because Grok virtualizes/reuses assistant nodes in
+        // resumed threads. This cannot bind to an earlier response.
+        if (expectedRequestId) {
+          const exact = nodes.filter(node => textOf(node).includes(expectedRequestId));
+          if (exact.length) {
+            const raw = textOf(exact[exact.length - 1]);
+            const text = config.cleanResponse ? config.cleanResponse(raw) : raw;
+            return text && !thinkingOnly(text) ? text : null;
+          }
+        }
         const candidates = nodes.filter(node =>
           !baselineNodes.has(node) || textOf(node) !== baselineNodes.get(node)
         );
