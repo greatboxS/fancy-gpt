@@ -46,6 +46,11 @@
       const ws = new WebSocket(config.endpoint);
       socket = ws;
       let acknowledged = false;
+      const handshakeTimer = setTimeout(() => {
+        if (acknowledged || ownerGeneration !== generation || socket !== ws) return;
+        try { ws.close(); } catch (_) {}
+        reject(new Error("FancyGPT WebSocket bridge handshake timed out"));
+      }, 10000);
       const fail = error => {
         if (!acknowledged) reject(error instanceof Error ? error : new Error(String(error)));
       };
@@ -65,6 +70,7 @@
         const message = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
         if (!acknowledged && message?.type === "hello_ack") {
           acknowledged = true;
+          clearTimeout(handshakeTimer);
           connectedGeneration = ownerGeneration;
           clearHeartbeat();
           heartbeatTimer = setInterval(() => {
@@ -79,6 +85,7 @@
       };
       ws.onerror = () => fail(new Error("FancyGPT WebSocket connection failed"));
       ws.onclose = () => {
+        clearTimeout(handshakeTimer);
         if (ownerGeneration !== generation || socket !== ws) return;
         clearHeartbeat();
         socket = null;

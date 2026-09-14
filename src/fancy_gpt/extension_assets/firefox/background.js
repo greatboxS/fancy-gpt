@@ -17,6 +17,8 @@ const DEFAULTS = {
 };
 
 let nextLeaseId = 1;
+const RECONNECT_ALARM = "fancy-gpt-bridge-reconnect";
+let bridgeConnectInFlight = null;
 const surfaceLeases = new Map();
 const SURFACE_SESSION_KEY = "fancyGptSurfaceLeases";
 let surfaceStateTail = Promise.resolve();
@@ -478,8 +480,24 @@ async function connectBridge() {
   });
 }
 
-ext.runtime.onInstalled.addListener(() => connectBridge().catch(console.error));
-ext.runtime.onStartup?.addListener(() => connectBridge().catch(console.error));
+function ensureBridgeConnection() {
+  if (globalThis.FancyGPTTransport.status().connected) return Promise.resolve();
+  if (bridgeConnectInFlight) return bridgeConnectInFlight;
+  bridgeConnectInFlight = connectBridge().finally(() => { bridgeConnectInFlight = null; });
+  return bridgeConnectInFlight;
+}
+
+// Timers vanish with an MV3 service worker. An alarm is persisted by the
+// browser and wakes a fresh worker, so bridge downtime cannot permanently
+// strand the extension. One minute is supported by every declared Chromium
+// version; the transport's 2s retry remains the fast path while the worker lives.
+try { ext.alarms?.create(RECONNECT_ALARM, {periodInMinutes: 1}); } catch (_) {}
+ext.alarms?.onAlarm.addListener(alarm => {
+  if (alarm?.name === RECONNECT_ALARM) ensureBridgeConnection().catch(console.error);
+});
+
+ext.runtime.onInstalled.addListener(() => ensureBridgeConnection().catch(console.error));
+ext.runtime.onStartup?.addListener(() => ensureBridgeConnection().catch(console.error));
 ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "fancy_reconnect") {
     globalThis.FancyGPTTransport.disconnect();
@@ -513,4 +531,4 @@ if (globalThis.__FANCYGPT_TEST__) {
   };
 }
 
-connectBridge().catch(console.error);
+ensureBridgeConnection().catch(console.error);

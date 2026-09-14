@@ -30,6 +30,7 @@ async function main() {
   const removed = event();
   let handler;
   let reloads = 0;
+  let connects = 0;
   let autoSubmit = true;
 
   const browser = {
@@ -73,10 +74,11 @@ async function main() {
       onConnect: event(), onInstalled: event(), onStartup: event(), onMessage: event(),
       reload() { reloads += 1; },
     },
+    alarms: {onAlarm: event(), create() {}},
   };
   const transport = {
     setHandler(fn) { handler = fn; },
-    async connect() {}, disconnect() {}, status() { return {}; },
+    async connect() { connects += 1; }, disconnect() {}, status() { return {connected: false}; },
     send(message) { sent.push(message); },
   };
   windows.set(9, {id: 9, tabs: [{id: 99}]});
@@ -90,6 +92,11 @@ async function main() {
   context.globalThis = context;
   const source = fs.readFileSync(path.join(__dirname, "../common/background.js"), "utf8");
   vm.runInNewContext(source, context, {filename: "background.js"});
+
+  await waitUntil(() => connects === 1);
+  browser.alarms.onAlarm.emit({name: "fancy-gpt-bridge-reconnect"});
+  await waitUntil(() => connects === 2);
+  assert.strictEqual(connects, 2, "a browser alarm wakes a disconnected MV3 worker and reconnects it");
 
   await waitUntil(() => !windows.has(9));
   assert(!windows.has(9), "a restarted worker quarantines its recorded orphan window");
