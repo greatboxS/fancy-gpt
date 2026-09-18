@@ -8,6 +8,7 @@ the resource that is actually scarce.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -76,6 +77,32 @@ class StreamingProvider(TimedProvider):
             raw_text=json.dumps({"type": "message", "text": final}),
             response_identity="response-1", conversation_id="conversation-1",
         )
+
+
+
+
+class DisconnectAwareProvider(TimedProvider):
+    """Blocks until the gateway forwards a client disconnect to cancel()."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_turn_id: str | None = None
+        self.cancelled = threading.Event()
+        self.cancel_reasons: list[str] = []
+
+    def cancel(self, turn_id: str, *, generation_epoch: int = 0, reason: str = "cancelled") -> bool:
+        self.cancel_reasons.append(reason)
+        self.cancelled.set()
+        return True
+
+    def execute(self, request, *, on_progress=None):
+        self.requests.append(request)
+        self.active_turn_id = f"browser-{request.request_id}"
+        if on_progress is not None:
+            on_progress(json.dumps({"type": "message", "text": "partial"}))
+        if not self.cancelled.wait(timeout=5.0):
+            raise RuntimeError("disconnect was not forwarded to browser provider")
+        raise RuntimeError("generation stopped by client disconnect")
 
 
 class Manager:
@@ -188,6 +215,29 @@ def test_client_disconnect_mid_stream_stops_the_stream(tmp_path: Path) -> None:
     )
     # The stream stopped early instead of running to completion for a dead socket.
     assert len(cut.sse_events()) < complete
+
+
+def test_stream_generator_teardown_cancels_blocking_browser_turn(tmp_path: Path) -> None:
+    """EventSourceResponse may consume http.disconnect before Request sees it."""
+    provider = DisconnectAwareProvider()
+    app = create_app(GatewayService(tmp_path, manager=Manager(provider)))
+
+    result = anyio.run(
+        lambda: call_app(
+            app,
+            "POST",
+            "/v1/responses",
+            body={"model": "fancy-chatgpt", "input": "hello", "stream": True},
+            headers={"x-fancy-session-id": "gw_disconnect_cancel"},
+            disconnect_after_chunks=2,
+        )
+    )
+
+    deadline = time.monotonic() + 2
+    while not provider.cancel_reasons and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert result.sse_events(), "stream should begin before disconnect"
+    assert provider.cancel_reasons == ["client disconnected"]
 
 
 # -- real incremental streaming ----------------------------------------------

@@ -81,6 +81,7 @@ GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:8787 GEMINI_API_KEY=local \
 
 `FANCY_GPT_GATEWAY_MAX_INPUT_UNITS` sets the conservative character-based input
 budget (default `200000`). Oversized inputs are rejected before browser dispatch.
+`FANCY_GPT_BROWSER_MAX_PROMPT_CHARS` bounds one compiled browser submission (default `700000`). The extension writes large submissions incrementally in 16 KiB editor chunks; this is transport chunking, not content truncation. Context is preserved while it fits the gateway/model budget, and semantic compaction handles true overflow.
 Each turn is visible through `fancy-gpt requests list/inspect/raw` and persists a
 context ledger without browser authentication state.
 

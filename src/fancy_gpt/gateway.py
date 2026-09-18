@@ -162,6 +162,7 @@ class NormalizedTurn(BaseModel):
     tools: list[GatewayTool] = Field(default_factory=list)
     previous_response_id: str | None = None
     session_id: str | None = None
+    tool_choice: str = "auto"
     stream: bool = False
     idempotency_key: str | None = None
 
@@ -265,7 +266,7 @@ class GatewayStore:
         anchors = {
             _message_digest(message)
             for message in turn.messages
-            if _is_distinctive(message.text)
+            if message.role == "user" and _is_distinctive(message.text)
         }
         joined = "\n".join(message.text for message in turn.messages)
         matches: list[ContextLedger] = []
@@ -409,6 +410,67 @@ def _guard_modalities(payload: Any, *, protocol: str, model: str, where: str) ->
     enforce_modalities(payload, capability, where=where)
 
 
+_SESSION_HINT_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_TOOL_REQUEST_VERBS = r"(?:use|run|call|invoke|execute|apply)"
+
+
+def _openai_session_hint(payload: dict[str, Any]) -> str | None:
+    """Use Codex's stable thread key when the caller did not send our header."""
+    candidates = [payload.get("prompt_cache_key")]
+    metadata = payload.get("client_metadata")
+    if isinstance(metadata, dict):
+        candidates.extend([metadata.get("thread_id"), metadata.get("session_id")])
+    for value in candidates:
+        if isinstance(value, str) and _SESSION_HINT_RE.fullmatch(value):
+            return value
+    return None
+
+
+def _normalize_openai_tool_choice(value: Any) -> str:
+    if isinstance(value, str) and value in {"auto", "none", "required"}:
+        return value
+    if isinstance(value, dict):
+        kind = value.get("type")
+        if kind == "function":
+            name = value.get("name")
+            if not name and isinstance(value.get("function"), dict):
+                name = value["function"].get("name")
+            if isinstance(name, str) and name:
+                return f"function:{name}"
+    return "auto"
+
+
+def _explicit_tool_requests(turn: NormalizedTurn) -> list[str]:
+    """Find unsatisfied user instructions that explicitly command a tool to run."""
+    last_result = max(
+        (index for index, message in enumerate(turn.messages) if message.tool_result_ids),
+        default=-1,
+    )
+    user_text = "\n".join(
+        message.text
+        for index, message in enumerate(turn.messages)
+        if index > last_result and message.role == "user"
+    )
+    requested: list[str] = []
+    for tool in turn.tools:
+        name = re.escape(tool.name)
+        before = rf"\b{_TOOL_REQUEST_VERBS}\b[^\n]{{0,96}}\b{name}\b"
+        after = rf"\b{name}\b[^\n]{{0,96}}\b{_TOOL_REQUEST_VERBS}\b"
+        if re.search(before, user_text, flags=re.IGNORECASE) or re.search(after, user_text, flags=re.IGNORECASE):
+            requested.append(tool.name)
+    return requested
+
+
+def _required_tool_names(turn: NormalizedTurn) -> list[str]:
+    if turn.tool_choice.startswith("function:"):
+        return [turn.tool_choice.split(":", 1)[1]]
+    return _explicit_tool_requests(turn)
+
+
+def _tool_call_required(turn: NormalizedTurn) -> bool:
+    return bool(turn.tools) and (turn.tool_choice == "required" or bool(_required_tool_names(turn)))
+
+
 def normalize_openai(payload: dict[str, Any], session_id: str | None = None) -> NormalizedTurn:
     model = payload.get("model", "fancy-chatgpt")
     _guard_modalities(payload.get("input"), protocol="openai", model=model, where="input")
@@ -435,7 +497,17 @@ def normalize_openai(payload: dict[str, Any], session_id: str | None = None) -> 
     for tool in payload.get("tools") or []:
         if tool.get("type") == "function":
             tools.append(GatewayTool(name=tool.get("name", ""), description=tool.get("description"), parameters=tool.get("parameters") or {}))
-    return NormalizedTurn(protocol="openai", model=model, instructions=_text(payload.get("instructions")), messages=messages, tools=tools, previous_response_id=payload.get("previous_response_id"), session_id=session_id, stream=bool(payload.get("stream")))
+    return NormalizedTurn(
+        protocol="openai",
+        model=model,
+        instructions=_text(payload.get("instructions")),
+        messages=messages,
+        tools=tools,
+        previous_response_id=payload.get("previous_response_id"),
+        session_id=session_id or _openai_session_hint(payload),
+        tool_choice=_normalize_openai_tool_choice(payload.get("tool_choice", "auto")),
+        stream=bool(payload.get("stream")),
+    )
 
 
 def normalize_anthropic(payload: dict[str, Any], session_id: str | None = None) -> NormalizedTurn:
@@ -489,35 +561,126 @@ def _web_tool_catalog(tools: list[GatewayTool]) -> list[dict[str, Any]]:
     return catalog
 
 
-def _gateway_prompt(turn: NormalizedTurn, *, include_history: bool) -> str:
-    messages = turn.messages if include_history else turn.messages[-1:]
-    if len(messages) > 4:
-        summaries = [message for message in messages[:-3] if message.role == "context"]
-        messages = ([summaries[-1]] if summaries else []) + messages[-3:]
-    transcript = "\n\n".join(
-        f"{message.role.upper()}: {_clip_web_text(message.text, 4_000, label='message')}"
-        for message in messages
-    )
+TOOL_PROTOCOL_BEGIN = "<<<FANCY_GPT_TOOL_PROTOCOL:fancy-tool-v1>>>"
+TOOL_PROTOCOL_END = "<<<END_FANCY_GPT_TOOL_PROTOCOL>>>"
+BROWSER_PROMPT_MAX_CHARS = int(os.getenv("FANCY_GPT_BROWSER_MAX_PROMPT_CHARS", "700000"))
+
+
+def _tool_protocol_block(turn: NormalizedTurn) -> str:
+    """Render the versioned client-tool contract appended to every web turn."""
     tools = _web_tool_catalog(turn.tools)
     tools_json = _clip_web_text(json.dumps(tools, ensure_ascii=False), 12_000, label="tool catalog")
-    contract = {
-        "type": "message",
-        "text": "final assistant text",
-    }
+    final_contract = {"type": "message", "text": "final assistant text"}
     tool_contract = {
         "type": "tool_calls",
         "calls": [{"id": "call_unique", "name": "exact tool name", "arguments": {}}],
     }
-    return f"""Respond to this conversation.
-SYSTEM: {_clip_web_text(turn.instructions, 2_000, label='system metadata') if turn.instructions else '(none)'}
-{transcript}
-
+    required_names = _required_tool_names(turn)
+    required_note = (
+        f"THIS TURN REQUIRES a tool call. Required offered tool(s): {', '.join(required_names)}."
+        if required_names
+        else ("THIS TURN REQUIRES at least one offered tool call." if turn.tool_choice == "required" else "")
+    )
+    return f"""{TOOL_PROTOCOL_BEGIN}
 Return exactly one valid JSON object and no Markdown.
-For a final answer: {json.dumps(contract)}
+For a final answer: {json.dumps(final_contract)}
 Available tools: {tools_json}
-If a tool is needed: {json.dumps(tool_contract)}
-Put any requested exact output in the `text` field. Never invent tool results.
-"""
+Tool choice policy: {turn.tool_choice}. {required_note}
+Tool protocol: fancy-tool-v1.
+Tool execution contract:
+- Tools are real client-side functions. You never execute or simulate them yourself.
+- If the user explicitly asks to use/run/call an offered tool, you MUST return `tool_calls`.
+- EVIDENCE RULE: if the requested answer depends on current/local/external state that is not already present in the conversation, and an offered tool can retrieve that evidence, you MUST call a tool before giving a final answer.
+- Continue calling tools for as many turns as needed while evidence is insufficient. A tool result is not automatically the end of the tool loop.
+- Prefer the tool that directly retrieves the needed evidence over a discovery/listing tool. Use discovery tools only when they are actually needed to locate a capability or resource.
+- If answering depends on local files, source code, shell commands, git, build/test state, or another offered tool, call the tool instead of guessing or asking the user to paste data that the tool can retrieve.
+- Do not claim a tool ran and do not provide the requested post-tool final answer until a real tool-result record appears in the conversation.
+- Tool arguments must satisfy the offered parameter names and required fields.
+Tool-loop state machine:
+- NEED_EVIDENCE -> return `tool_calls`.
+- TOOL_RESULT_RECEIVED_BUT_INSUFFICIENT -> return more `tool_calls`.
+- SUFFICIENT_EVIDENCE -> return `message`.
+For a tool call: {json.dumps(tool_contract)}
+Put any requested exact output in the `text` field only after required tool results are present. Never invent tool results.
+{TOOL_PROTOCOL_END}"""
+
+
+def _append_tool_protocol(
+    prompt: str,
+    turn: NormalizedTurn,
+    *,
+    max_chars: int = BROWSER_PROMPT_MAX_CHARS,
+) -> str:
+    """Append one complete tool contract while reserving its tail budget.
+
+    Browser transport rejects prompts above ``max_chars``. The protocol suffix
+    must therefore be reserved before the conversation body is admitted. A
+    long body is clipped first; the tool contract itself is never truncated.
+    If an earlier/incomplete append marker is present, discard that suffix and
+    rebuild one complete block.
+    """
+    begin = prompt.find(TOOL_PROTOCOL_BEGIN)
+    end = prompt.find(TOOL_PROTOCOL_END)
+    if begin >= 0 and end > begin:
+        existing_end = end + len(TOOL_PROTOCOL_END)
+        before = prompt[:begin].rstrip()
+        after = prompt[existing_end:].strip()
+        if not after:
+            existing = prompt[:existing_end].rstrip() + "\n"
+            if len(existing) <= max_chars:
+                return existing
+            prompt = before
+        else:
+            # Content appended after an older contract must be preserved. Move
+            # that content back into the conversation body, then rebuild the
+            # protocol as the final suffix.
+            prompt = f"{before}\n\n{after}" if before else after
+    elif begin >= 0:
+        prompt = prompt[:begin]
+
+    block = _tool_protocol_block(turn)
+    separator = "\n\n"
+    suffix = f"{separator}{block}\n"
+    if len(suffix) > max_chars:
+        raise ValueError(
+            f"tool protocol requires {len(suffix)} characters; browser prompt limit is {max_chars}"
+        )
+
+    body_budget = max_chars - len(suffix)
+    base = prompt.rstrip()
+    if len(base) > body_budget:
+        base = _clip_web_text(base, body_budget, label="conversation body")
+        if len(base) > body_budget:
+            base = base[:body_budget]
+    compiled = f"{base}{suffix}"
+    if len(compiled) > max_chars:
+        raise ValueError(
+            f"compiled gateway prompt has {len(compiled)} characters; browser prompt limit is {max_chars}"
+        )
+    return compiled
+
+
+def _gateway_prompt(turn: NormalizedTurn, *, include_history: bool) -> str:
+    """Compile the browser prompt without per-message data loss.
+
+    Context compaction happens before this renderer and is the only layer that
+    may deliberately remove semantic transcript units.  The renderer therefore
+    keeps every surviving message byte-for-byte instead of imposing the old
+    4k-per-message / 2k-system caps.  The browser writer handles large prompts
+    in chunks; ``_append_tool_protocol`` reserves the final protocol tail and
+    applies the absolute browser safety bound only if the already-compacted
+    request still cannot fit.
+    """
+    messages = turn.messages if include_history else turn.messages[-1:]
+    transcript = "\n\n".join(
+        f"{message.role.upper()}: {message.text}"
+        for message in messages
+    )
+    instructions = turn.instructions if turn.instructions else "(none)"
+    body = f"""Respond to this conversation.
+SYSTEM: {instructions}
+{transcript}"""
+    return _append_tool_protocol(body, turn)
 
 
 class GatewayOverloaded(RuntimeError):
@@ -1217,7 +1380,7 @@ class GatewayService:
                 anchor_digests=[
                     _message_digest(message)
                     for message in turn.messages
-                    if _is_distinctive(message.text)
+                    if message.role == "user" and _is_distinctive(message.text)
                 ],
                 client_key=client_key,
                 output_digest=_message_digest(GatewayContent(role="assistant", text=text)) if text else "",
@@ -1335,8 +1498,13 @@ class GatewayService:
         """Interpret the model envelope. Model output is untrusted input."""
         calls: list[GatewayToolCall] = []
         if value.get("type") == "message" and isinstance(value.get("text"), str):
+            if _tool_call_required(turn):
+                required = ", ".join(_required_tool_names(turn)) or "an offered tool"
+                raise ValueError(f"model returned a final message when tool call was required: {required}")
             return value["text"], calls
         if value.get("type") == "tool_calls" and isinstance(value.get("calls"), list):
+            if turn.tool_choice == "none":
+                raise ValueError("model requested a tool call while tool_choice forbids tools")
             allowed = {tool.name for tool in turn.tools}
             if not allowed:
                 raise ValueError("model requested a tool call but no tools were offered")
@@ -1344,6 +1512,18 @@ class GatewayService:
                 call = GatewayToolCall.model_validate(item)
                 if call.name not in allowed:
                     raise ValueError(f"model requested unavailable tool: {call.name}")
+                required_names = _required_tool_names(turn)
+                if required_names and call.name not in required_names:
+                    raise ValueError(
+                        f"model requested {call.name!r} but this turn requires: {', '.join(required_names)}"
+                    )
+                tool = next(item for item in turn.tools if item.name == call.name)
+                required_args = tool.parameters.get("required", []) if isinstance(tool.parameters, dict) else []
+                missing = [name for name in required_args if name not in call.arguments]
+                if missing:
+                    raise ValueError(
+                        f"tool {call.name} is missing required argument(s): {', '.join(map(str, missing))}"
+                    )
                 if not _VALID_TOOL_CALL_ID.match(call.id):
                     raise ValueError(f"model returned an invalid tool call id: {call.id!r}")
                 size = len(json.dumps(call.arguments, ensure_ascii=False))

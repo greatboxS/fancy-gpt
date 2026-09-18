@@ -143,7 +143,13 @@ class StubDocument extends StubElement {
     this.children.push(this.body);
   }
   _notifyObservers() { for (const observer of [...this.observers]) observer._fire(); }
-  createRange() { return {selectNodeContents() {}}; }
+  createRange() {
+    return {
+      target: null, atEnd: false,
+      selectNodeContents(element) { this.target = element; this.atEnd = false; },
+      collapse(toEnd) { this.atEnd = Boolean(toEnd); },
+    };
+  }
 
   /* Page visibility, because it decides whether a reply renders at all.
    *
@@ -189,7 +195,9 @@ function installEditingApis() {
     if (command !== "insertText") return false;
     const target = globalThis.document._composerTarget;
     if (!target) return false;
-    target.setText(value);
+    const range = globalThis.document._selectionRange;
+    if (range?.target === target && range.atEnd) target.setText((target.textContent ?? "") + value);
+    else target.setText(value);
     return true;
   };
 }
@@ -201,7 +209,10 @@ function resetDom() {
     visibility: element.hidden ? "hidden" : "visible",
     display: element.hidden ? "none" : "block",
   });
-  globalThis.window = {getSelection: () => ({removeAllRanges() {}, addRange() {}})};
+  globalThis.window = {getSelection: () => ({
+    removeAllRanges() { globalThis.document._selectionRange = null; },
+    addRange(range) { globalThis.document._selectionRange = range; },
+  })};
   globalThis.location = {pathname: "/", hash: "", href: "https://chatgpt.com/", hostname: "chatgpt.com"};
   globalThis.navigator = {onLine: true};
   installEditingApis();

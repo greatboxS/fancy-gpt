@@ -55,24 +55,60 @@
    * goes through the same input path a keystroke takes, so the editor updates
    * itself. Selecting first replaces existing text rather than appending on a retry.
    */
+  const COMPOSER_CHUNK_CHARS = 16 * 1024;
+
+  function promptChunks(prompt) {
+    const chunks = [];
+    for (let offset = 0; offset < prompt.length; offset += COMPOSER_CHUNK_CHARS) {
+      chunks.push(prompt.slice(offset, offset + COMPOSER_CHUNK_CHARS));
+    }
+    return chunks.length ? chunks : [""];
+  }
+
+  function placeCaretAtEnd(element) {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
   function setComposer(composer, prompt) {
     composer.focus();
+    const chunks = promptChunks(String(prompt ?? ""));
     if (composer.tagName.toLowerCase() === "textarea") {
       const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
-      descriptor?.set?.call(composer, prompt);
-      composer.dispatchEvent(new Event("input", {bubbles: true}));
+      let written = "";
+      for (const chunk of chunks) {
+        written += chunk;
+        descriptor?.set?.call(composer, written);
+        composer.dispatchEvent(new Event("input", {bubbles: true}));
+      }
       composer.dispatchEvent(new Event("change", {bubbles: true}));
       return;
     }
+
     selectAll(composer);
-    const inserted = document.execCommand("insertText", false, prompt);
-    if (!inserted || !(composer.textContent ?? "").includes(prompt.slice(0, 32))) {
-      composer.textContent = prompt;
+    let written = "";
+    for (let index = 0; index < chunks.length; ++index) {
+      const chunk = chunks[index];
+      if (index > 0) placeCaretAtEnd(composer);
+      const inserted = document.execCommand("insertText", false, chunk);
+      written += chunk;
+      if (!inserted) composer.textContent = written;
+      // Rich editors update their internal state only through the input path.
+      // Emit one event per chunk so a large prompt is appended incrementally
+      // instead of relying on one huge editor mutation.
+      composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: chunk}));
     }
-    // execCommand updates Grok's ProseMirror DOM but does not consistently
-    // notify its React state after switching to Private Chat. Always emit the
-    // input event, otherwise the text is visible while Send remains disabled.
-    composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
+    const rendered = composer.textContent ?? "";
+    const head = prompt.slice(0, Math.min(32, prompt.length));
+    const tail = prompt.slice(Math.max(0, prompt.length - Math.min(32, prompt.length)));
+    if ((head && !rendered.includes(head)) || (tail && !rendered.includes(tail))) {
+      composer.textContent = prompt;
+      composer.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "insertText", data: prompt}));
+    }
   }
 
   // The fence is restored when a rendered code block is read, so the label may

@@ -85,8 +85,10 @@ def test_browser_prompt_compacts_large_claude_metadata() -> None:
     assert "ACTUAL-QUESTION" in prompt
     assert "tool_89" in prompt
     assert '"name": "path"' in prompt
-    assert "system metadata:" in prompt
-    assert len(prompt) < 40_000
+    assert "system metadata system metadata" in prompt
+    assert "[system metadata:" not in prompt
+    assert len(prompt) > 70_000
+    assert len(prompt) < 700_000
 
 
 def test_gateway_prompt_keeps_exact_output_requests_inside_json_envelope(tmp_path: Path) -> None:
@@ -190,3 +192,41 @@ def test_gateway_http_three_protocols_streaming_and_auth(tmp_path: Path) -> None
         {"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
     )
     assert gemini.json()["candidates"][0]["content"]["parts"][0]["text"] == "gateway-ok"
+
+
+def test_codex_prompt_cache_key_becomes_gateway_session() -> None:
+    turn = normalize_openai({
+        "model": "fancy-chatgpt",
+        "prompt_cache_key": "01a0b542-1691-7432-8400-d934626596b6",
+        "input": "hello",
+    })
+    assert turn.session_id == "01a0b542-1691-7432-8400-d934626596b6"
+
+
+def test_gateway_prompt_requires_explicitly_requested_tool() -> None:
+    turn = normalize_openai({
+        "model": "fancy-chatgpt",
+        "input": "Use the exec_command tool exactly once to run printf OK",
+        "tools": [{
+            "type": "function", "name": "exec_command",
+            "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]},
+        }],
+    })
+    prompt = _gateway_prompt(turn, include_history=True)
+    assert "THIS TURN REQUIRES a tool call" in prompt
+    assert "Required offered tool(s): exec_command" in prompt
+    assert "do not provide the requested post-tool final answer" in prompt
+
+
+def test_gateway_rejects_final_message_when_explicit_tool_was_required(tmp_path: Path) -> None:
+    service = GatewayService(tmp_path, manager=Manager())
+    turn = normalize_openai({
+        "model": "fancy-chatgpt",
+        "input": "Use the exec_command tool to run printf OK",
+        "tools": [{
+            "type": "function", "name": "exec_command",
+            "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]},
+        }],
+    })
+    with pytest.raises(ValueError, match="tool call was required"):
+        service._parse_envelope({"type": "message", "text": "OK"}, turn)

@@ -145,7 +145,7 @@ class ChatGPTWebAutomationProvider:
         driver: BrowserDriver,
         *,
         timeout_s: float = 300.0,
-        max_prompt_chars: int = 300_000,
+        max_prompt_chars: int = int(os.getenv("FANCY_GPT_BROWSER_MAX_PROMPT_CHARS", "700000")),
         tunnel_id: str | None = None,
         progress_interval_s: float = 1.5,
     ) -> None:

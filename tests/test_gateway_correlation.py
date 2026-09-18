@@ -214,3 +214,25 @@ def test_capability_declares_usage_as_estimated() -> None:
 
     capability = resolve_capability(protocol="anthropic", site="chatgpt", model="fancy-claude")
     assert capability.as_dict()["usage_is_estimated"] is True
+
+
+def test_common_developer_metadata_never_correlates_unrelated_codex_threads(tmp_path: Path) -> None:
+    service = GatewayService(tmp_path, manager=Manager(Provider()))
+    shared = "Developer instructions that are intentionally long and identical across every Codex process in this workspace."
+    first = normalize_anthropic({
+        "model": "fancy-chatgpt",
+        "messages": [
+            {"role": "developer", "content": shared},
+            {"role": "user", "content": LONG_A},
+        ],
+    })
+    second = normalize_anthropic({
+        "model": "fancy-chatgpt",
+        "messages": [
+            {"role": "developer", "content": shared},
+            {"role": "user", "content": LONG_B},
+        ],
+    })
+    first_result = service.execute(first)
+    second_result = service.execute(second)
+    assert second_result.session_id != first_result.session_id

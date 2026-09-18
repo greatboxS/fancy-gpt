@@ -241,15 +241,11 @@ async def _stream_turn(
     idempotency_key: str | None,
     client_key: str,
 ) -> AsyncIterator[ServerSentEvent]:
-    """Emit protocol events as the answer arrives, not after it is complete.
-
-    The turn runs on a worker thread and pushes text deltas onto a queue; this
-    generator drains them into the client's own event shape. A caller that
-    disconnects stops the stream and cancels the turn.
-    """
+    """Emit protocol events as the answer arrives, cancelling orphaned work."""
     token = CancelToken()
     events: queue.Queue = queue.Queue()
     emitter: Any = None
+    finished = False
 
     def on_start(response_id: str) -> None:
         events.put(("start", response_id))
@@ -273,71 +269,79 @@ async def _stream_turn(
         except BaseException as exc:  # noqa: BLE001 - surfaced as a protocol error
             events.put(("error", exc))
 
-    async with anyio.create_task_group() as group:
-        group.start_soon(execute)
-        while True:
-            try:
-                kind, payload = events.get_nowait()
-            except queue.Empty:
-                if await request.is_disconnected():
-                    token.cancel("client disconnected")
-                    group.cancel_scope.cancel()
-                    return
-                await anyio.sleep(0.05)
-                continue
+    try:
+        async with anyio.create_task_group() as group:
+            group.start_soon(execute)
+            while True:
+                try:
+                    kind, payload = events.get_nowait()
+                except queue.Empty:
+                    if await request.is_disconnected():
+                        token.cancel("client disconnected")
+                        group.cancel_scope.cancel()
+                        return
+                    await anyio.sleep(0.05)
+                    continue
 
-            if kind == "start":
-                if protocol == "openai":
-                    emitter = OpenAIStream(payload, turn.model)
-                elif protocol == "anthropic":
-                    emitter = AnthropicStream(payload, turn.model)
-                else:
-                    emitter = GeminiStream(turn.model)
-                for event in emitter.open():
-                    yield _sse(event)
-            elif kind == "delta":
-                if emitter is not None:
-                    for event in emitter.delta(payload):
-                        yield _sse(event)
-            elif kind == "done":
-                result = payload
-                if emitter is None:
-                    emitter = (
-                        OpenAIStream(result.response_id, turn.model) if protocol == "openai"
-                        else AnthropicStream(result.response_id, turn.model) if protocol == "anthropic"
-                        else GeminiStream(turn.model)
-                    )
+                if kind == "start":
+                    if protocol == "openai":
+                        emitter = OpenAIStream(payload, turn.model)
+                    elif protocol == "anthropic":
+                        emitter = AnthropicStream(payload, turn.model)
+                    else:
+                        emitter = GeminiStream(turn.model)
                     for event in emitter.open():
                         yield _sse(event)
-                if result.stream_failed:
-                    # Deltas already sent contradict the authoritative text, and
-                    # they cannot be retracted, so say so rather than finish as
-                    # though the client holds the right answer.
-                    for event in emitter.fail(
-                        "streamed text was rewritten past the point already sent; "
-                        "re-request without streaming for the authoritative reply"
-                    ):
-                        yield _sse(event)
-                else:
-                    body = (
-                        openai_response(result) if protocol == "openai"
-                        else anthropic_response(result) if protocol == "anthropic"
-                        else gemini_response(result)
-                    )
-                    for event in emitter.close(body, result):
-                        yield _sse(event)
-                group.cancel_scope.cancel()
-                return
-            elif kind == "error":
-                exc = payload
-                status, body, _ = classify_error(exc, protocol)
-                if emitter is not None:
-                    for event in emitter.fail(str(body.get("error", {}).get("message", "gateway error"))):
-                        yield _sse(event)
-                else:
-                    yield _sse((None, body))
-                group.cancel_scope.cancel()
-                return
+                elif kind == "delta":
+                    if emitter is not None:
+                        for event in emitter.delta(payload):
+                            yield _sse(event)
+                elif kind == "done":
+                    result = payload
+                    if emitter is None:
+                        emitter = (
+                            OpenAIStream(result.response_id, turn.model) if protocol == "openai"
+                            else AnthropicStream(result.response_id, turn.model) if protocol == "anthropic"
+                            else GeminiStream(turn.model)
+                        )
+                        for event in emitter.open():
+                            yield _sse(event)
+                    if result.stream_failed:
+                        for event in emitter.fail(
+                            "streamed text was rewritten past the point already sent; "
+                            "re-request without streaming for the authoritative reply"
+                        ):
+                            yield _sse(event)
+                    else:
+                        body = (
+                            openai_response(result) if protocol == "openai"
+                            else anthropic_response(result) if protocol == "anthropic"
+                            else gemini_response(result)
+                        )
+                        for event in emitter.close(body, result):
+                            yield _sse(event)
+                    finished = True
+                    group.cancel_scope.cancel()
+                    return
+                elif kind == "error":
+                    exc = payload
+                    _status, body, _ = classify_error(exc, protocol)
+                    if emitter is not None:
+                        for event in emitter.fail(str(body.get("error", {}).get("message", "gateway error"))):
+                            yield _sse(event)
+                    else:
+                        yield _sse((None, body))
+                    finished = True
+                    group.cancel_scope.cancel()
+                    return
+    finally:
+        if not finished:
+            # EventSourceResponse consumes http.disconnect itself and may cancel
+            # this generator before request.is_disconnected() sees the message.
+            # Signal the blocking service thread during generator teardown so its
+            # browser cancel watcher stops the in-flight remote job.
+            token.cancel("client disconnected")
+
 
 
 def _sse(event: tuple[str | None, dict[str, Any]]) -> ServerSentEvent:
