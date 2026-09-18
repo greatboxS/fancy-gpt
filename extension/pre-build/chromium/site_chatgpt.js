@@ -126,7 +126,6 @@
      * "not mine" then skips the reply forever and the turn stalls with the
      * answer visible - a false timeout on exactly the quickest replies.
      */
-    const baseline = new Map(turnIds().map(id => [id, assistantText(id) ?? ""]));
     // Resuming an existing conversation lands on a page that is still hydrating:
     // the composer is already visible, but the app has not attached to it yet, so
     // a single write is silently dropped and the send button never appears. Keep
@@ -145,6 +144,18 @@
     if (!send) {
       throw new Error("ChatGPT send control unavailable: " + describeControls(target));
     }
+
+    /* Capture history only after the resumed composer is submit-ready.
+     *
+     * The composer becomes visible before a continued conversation finishes
+     * hydrating. If the baseline is taken at first composer visibility, older
+     * assistant turns that materialize while we wait for the send control look
+     * indistinguishable from the reply created by this job. That is especially
+     * common on a tool-result continuation, where reopening the existing chat
+     * races its virtualized history. Snapshotting here means every turn the page
+     * loaded before our click is history, not a candidate response.
+     */
+    const baseline = new Map(turnIds().map(id => [id, assistantText(id) ?? ""]));
 
     /* Clicking send is not the same as the page accepting the prompt.
      *

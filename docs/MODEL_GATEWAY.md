@@ -40,13 +40,22 @@ wire_api = "responses"
 The installer writes this shared provider to `~/.codex/config.toml` and creates
 `~/.codex/fancy-*.config.toml` profile files for Codex 0.134.0 and later. It also
 creates an isolated Claude Code gateway settings file and configures the Gemini
-CLI environment. Choose a web model at launch time:
+CLI environment. Choose a web model at launch time. `fancy-codex` is the direct path for the
+primary local-Codex / remote-reasoning use case and defaults to ChatGPT Web:
 
 ```bash
-codex --profile fancy-gemini
+fancy-codex
+fancy-codex --model fancy-gemini
+codex --profile fancy-chatgpt
 fancy-claude              # then /model -> FancyGPT · ChatGPT
 gemini --model fancy-claude
 ```
+
+`fancy-codex` injects only the `fancy-local` Responses provider for that process;
+it does not edit `~/.codex/config.toml`. It checks `/v1/models` before exec so a
+stopped gateway or stale model alias fails immediately instead of after Codex has
+started an agent session. Codex remains the owner of local tool execution and sends
+function results back through the gateway for the next remote reasoning turn.
 
 Claude Code 2.1.242 or newer reads the gateway-scoped `modelPicker` when launched
 through `fancy-claude`. Plain `claude` keeps claude.ai authentication and its

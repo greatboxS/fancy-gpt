@@ -128,9 +128,9 @@ fi
 if (( CONFIGURE_GATEWAY )); then
   echo "[fancy-gpt] Configuring global model gateway access (Codex / Claude Code / Gemini CLI)..."
   "$FG" gateway configure-clients
-  if command -v claude >/dev/null 2>&1; then
+  CLAUDE_SETTINGS="${HOME}/.claude/fancy-gpt-settings.json"
+  if command -v claude >/dev/null 2>&1 && [[ -f "$CLAUDE_SETTINGS" ]]; then
     CLAUDE_BIN="$(command -v claude)"
-    CLAUDE_SETTINGS="${HOME}/.claude/fancy-gpt-settings.json"
     python3 - "$BIN_DIR/fancy-claude" "$CLAUDE_BIN" "$CLAUDE_SETTINGS" <<'PY'
 from pathlib import Path
 import shlex, sys
@@ -142,9 +142,9 @@ target.write_text(
 target.chmod(0o755)
 PY
   fi
-  if command -v gemini >/dev/null 2>&1; then
+  GEMINI_ENV="${HOME}/.gemini/fancy-gpt.env"
+  if command -v gemini >/dev/null 2>&1 && [[ -f "$GEMINI_ENV" ]]; then
     GEMINI_BIN="$(command -v gemini)"
-    GEMINI_ENV="${HOME}/.gemini/fancy-gpt.env"
     python3 - "$BIN_DIR/fancy-gemini-cli" "$GEMINI_BIN" "$GEMINI_ENV" <<'PY'
 from pathlib import Path
 import shlex, sys
@@ -280,7 +280,8 @@ if (( CONFIGURE_GATEWAY )); then
   echo "Claude FancyGPT:  fancy-claude, then run /model"
   echo "Gemini native:    gemini (unchanged auth and default model)"
   echo "Gemini FancyGPT:  fancy-gemini-cli --model fancy-gemini"
-  echo "Codex:            start a fancy-* profile, then use the model selector"
+  echo "Codex direct:     fancy-codex (defaults to fancy-chatgpt)"
+  echo "Codex profiles:   codex --profile fancy-chatgpt|fancy-gemini|fancy-claude"
 fi
 if (( WITH_PLAYWRIGHT )); then
   echo "Browser auth:     REQUIRED once: $FG browser login"

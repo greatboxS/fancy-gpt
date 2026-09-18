@@ -207,6 +207,32 @@ async function main() {
     assertEqual(result.text, ENVELOPE, "and return its text");
   });
 
+  await test("chatgpt baselines resumed history after the composer becomes submit-ready", async () => {
+    globalThis.FANCY_GPT_RAW_TEXT_PROBE = false;
+    loadAdapters(["site_chatgpt.js"]);
+    const composer = new StubElement("div", {contentEditable: "true", id: "prompt-textarea"});
+    document.body.append(composer);
+    document._composerTarget = composer;
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+    const running = adapter.executeTurn("PROMPT-A6", 8000, null, {});
+
+    setTimeout(() => {
+      // The existing conversation hydrates while executeTurn is waiting for a
+      // usable send control. This is history and must be inside the baseline.
+      assistantTurn("turn-hydrated-old", '{"type":"message","text":"old answer"}');
+      const send = new StubElement("button", {"data-testid": "send-button"});
+      send.onclick = () => {
+        composer.setText("");
+        setTimeout(() => assistantTurn("turn-new", ENVELOPE), 40);
+      };
+      document.body.append(send);
+    }, 60);
+
+    const result = await running;
+    assertEqual(result.responseIdentity, "turn-new", "hydrated history must not become a reply candidate");
+    assertEqual(result.text, ENVELOPE, "the new assistant turn is returned");
+  });
+
   await test("chatgpt streams partial text through the observer", async () => {
     loadAdapters(["site_chatgpt.js"]);
     chatgptPage();

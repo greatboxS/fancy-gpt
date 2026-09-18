@@ -1,7 +1,13 @@
 import json
 from pathlib import Path
 
-from fancy_gpt.gateway_clients import configure_gateway_clients
+import pytest
+
+from fancy_gpt.gateway_clients import (
+    codex_command,
+    configure_gateway_clients,
+    ensure_codex_gateway,
+)
 
 
 def test_configure_gateway_clients_preserves_existing_settings_and_is_idempotent(tmp_path: Path) -> None:
@@ -70,3 +76,29 @@ def test_codex_migration_repairs_duplicate_managed_fragments(tmp_path: Path) -> 
     assert text.count("# >>> fancy-gpt model gateway >>>") == 1
     assert text.count("[model_providers.fancy-local]") == 1
     assert "keep = true" in text
+
+
+def test_codex_launcher_defaults_to_chatgpt_without_persisted_profile() -> None:
+    command = codex_command(["exec", "hello"], executable="/usr/bin/codex")
+
+    assert command[0] == "/usr/bin/codex"
+    assert 'model_provider="fancy-local"' in command
+    assert 'model_providers.fancy-local.base_url="http://127.0.0.1:8787/v1"' in command
+    assert command[command.index("--model") + 1] == "fancy-chatgpt"
+    assert command[-2:] == ["exec", "hello"]
+
+
+def test_codex_launcher_preserves_explicit_gateway_model() -> None:
+    command = codex_command(
+        ["--model", "fancy-gemini", "exec", "hello"], executable="/usr/bin/codex"
+    )
+
+    assert command.count("--model") == 1
+    assert command[command.index("--model") + 1] == "fancy-gemini"
+
+
+def test_codex_launcher_refuses_model_missing_from_gateway(monkeypatch) -> None:
+    monkeypatch.setattr("fancy_gpt.gateway_clients.gateway_models", lambda _url: {"fancy-chatgpt"})
+
+    with pytest.raises(RuntimeError, match="fancy-gemini"):
+        ensure_codex_gateway("fancy-gemini")

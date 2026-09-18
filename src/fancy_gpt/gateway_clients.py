@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
+import sys
+import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
 GATEWAY_URL = "http://127.0.0.1:8787"
+DEFAULT_CODEX_MODEL = "fancy-chatgpt"
 BEGIN = "# >>> fancy-gpt model gateway >>>"
 END = "# <<< fancy-gpt model gateway <<<"
 CLAUDE_PICKER_OPTIONS = [
@@ -165,3 +170,73 @@ def configure_gateway_clients(home: Path, base_url: str = GATEWAY_URL) -> list[G
 
 def configs_json(configs: list[GatewayClientConfig]) -> str:
     return json.dumps([asdict(item) for item in configs], indent=2)
+
+
+def _codex_model(args: list[str]) -> str:
+    for index, arg in enumerate(args):
+        if arg.startswith("--model="):
+            return arg.split("=", 1)[1]
+        if arg in {"--model", "-m"} and index + 1 < len(args):
+            return args[index + 1]
+    return os.getenv("FANCY_GPT_CODEX_MODEL", DEFAULT_CODEX_MODEL)
+
+
+def codex_command(
+    args: list[str], *, base_url: str = GATEWAY_URL, executable: str | None = None
+) -> list[str]:
+    """Build a Codex command that uses FancyGPT without mutating Codex config."""
+    binary = executable or shutil.which("codex")
+    if binary is None:
+        raise FileNotFoundError("codex executable not found")
+    api_url = base_url.rstrip("/") + "/v1"
+    command = [
+        binary,
+        "-c", 'model_provider="fancy-local"',
+        "-c", 'model_providers.fancy-local.name="FancyGPT Local"',
+        "-c", f"model_providers.fancy-local.base_url={json.dumps(api_url)}",
+        "-c", 'model_providers.fancy-local.wire_api="responses"',
+    ]
+    if not any(arg in {"--model", "-m"} or arg.startswith("--model=") for arg in args):
+        command.extend(["--model", _codex_model(args)])
+    command.extend(args)
+    return command
+
+
+def gateway_models(base_url: str = GATEWAY_URL, *, timeout_s: float = 1.0) -> set[str]:
+    """Return model aliases advertised by a running FancyGPT gateway."""
+    url = base_url.rstrip("/") + "/v1/models"
+    with urllib.request.urlopen(url, timeout=timeout_s) as response:  # nosec B310 - configured gateway
+        payload = json.loads(response.read().decode("utf-8"))
+    models = payload.get("models", []) if isinstance(payload, dict) else []
+    return {
+        str(item["slug"])
+        for item in models
+        if isinstance(item, dict) and isinstance(item.get("slug"), str)
+    }
+
+
+def ensure_codex_gateway(model: str, base_url: str = GATEWAY_URL) -> None:
+    """Fail before starting Codex when the local model gateway is not usable."""
+    try:
+        models = gateway_models(base_url)
+    except Exception as exc:
+        raise RuntimeError(
+            f"FancyGPT gateway is unavailable at {base_url}; run `fancy-gpt gateway serve`"
+        ) from exc
+    if model not in models:
+        available = ", ".join(sorted(models)) or "none"
+        raise RuntimeError(f"FancyGPT model {model!r} is unavailable; gateway advertises: {available}")
+
+
+def codex_main() -> None:
+    """Launch local Codex with FancyGPT as its Responses API model provider."""
+    args = list(sys.argv[1:])
+    base_url = os.getenv("FANCY_GPT_GATEWAY_URL", GATEWAY_URL).rstrip("/")
+    informational = any(arg in {"--help", "-h", "--version", "-V"} for arg in args)
+    if not informational:
+        try:
+            ensure_codex_gateway(_codex_model(args), base_url)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+    command = codex_command(args, base_url=base_url)
+    os.execvpe(command[0], command, os.environ.copy())

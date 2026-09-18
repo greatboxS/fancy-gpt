@@ -51,6 +51,19 @@ fancy-gpt sites list
 fancy-gpt tunnels components
 ```
 
+Run local Codex with ChatGPT Web as its remote reasoning model:
+
+```bash
+fancy-codex
+# or explicitly:
+fancy-codex --model fancy-chatgpt
+```
+
+`fancy-codex` keeps filesystem, shell, git, build, and test execution inside Codex.
+Only model turns cross the local FancyGPT Responses gateway to the selected web model.
+The launcher does not rewrite Codex configuration and fails before launch if the local
+gateway is unavailable or does not advertise the selected `fancy-*` model.
+
 ## Core reasoning model
 
 FancyGPT deliberately keeps reasoning and browser connectivity orthogonal:

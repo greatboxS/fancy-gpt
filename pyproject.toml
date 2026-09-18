@@ -34,6 +34,7 @@ automation = ["playwright>=1.55,<2"]
 fancy-gpt = "fancy_gpt.cli:app"
 fancy-gpt-mcp = "fancy_gpt.mcp_server:main"
 fancy-gpt-native-host = "fancy_gpt.bridge.native_host:main"
+fancy-codex = "fancy_gpt.gateway_clients:codex_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
