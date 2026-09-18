@@ -339,7 +339,7 @@ def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
     # would have to keep taking over the one in front of them, because a tab
     # that is not active is a hidden document that stops being drawn.
     assert "separateTaskWindow" not in background
-    assert "lease = await acquireSurface(job.job_id, entry.epoch, taskUrl)" in background
+    assert "lease = await acquireSurface(job.job_id, entry.epoch, taskUrl, requestedSurfaceKey)" in background
     # Its own window, still out of the way -- but never minimized.
     assert 'state: "minimized"' not in background
     assert 'state: "normal"' in background
@@ -349,11 +349,13 @@ def test_automation_never_drives_a_hidden_document(tmp_path: Path) -> None:
 
 
 def test_each_job_releases_only_its_own_surface(tmp_path: Path) -> None:
-    """Out-of-order completion must never close another concurrent job."""
+    """Terminal leases may cache their own surface, never another job's."""
     background = (export_extension("edge", tmp_path / "edge-window-life") / "background.js").read_text(encoding="utf-8")
     assert "const surfaceLeases = new Map()" in background
-    assert "await releaseSurface(lease)" in background
-    assert "ext.windows.remove(lease.windowId)" in background
+    assert "const idleSurfaces = new Map()" in background
+    assert "await releaseSurface(lease, {keepKey: keepSurfaceKey, config})" in background
+    assert "conversationSurfaceKey(site, resolvedConversationId)" in background
+    assert "await closeWindow(lease.windowId)" in background
 
 
 def test_site_health_is_single_flight_across_provider_instances() -> None:

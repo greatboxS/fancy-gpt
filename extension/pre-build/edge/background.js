@@ -3,7 +3,7 @@ if (typeof importScripts === "function" && !globalThis.FancyGPTTransport) {
   importScripts("bridge_transport.js");
 }
 const ext = globalThis.browser ?? globalThis.chrome;
-const EXTENSION_BUILD = "885b50698b7c";
+const EXTENSION_BUILD = "ced01f23448a";
 const DEFAULTS = {
   transport: "websocket",
   endpoint: "ws://127.0.0.1:8765",
@@ -14,12 +14,15 @@ const DEFAULTS = {
   autoConnect: true,
   reconnectIntervalMs: 2000,
   maxConcurrentTurns: 4,
+  maxIdleSurfaces: 4,
+  surfaceIdleTtlMs: 600000,
 };
 
 let nextLeaseId = 1;
 const RECONNECT_ALARM = "fancy-gpt-bridge-reconnect";
 let bridgeConnectInFlight = null;
 const surfaceLeases = new Map();
+const idleSurfaces = new Map();
 const SURFACE_SESSION_KEY = "fancyGptSurfaceLeases";
 let surfaceStateTail = Promise.resolve();
 
@@ -32,11 +35,14 @@ function withSurfaceStateLock(operation) {
 async function writeSurfaceState() {
   const area = ext.storage.session;
   if (!area) return;
-  const records = [...surfaceLeases.values()].map(lease => ({
-    leaseId: lease.leaseId, jobId: lease.jobId, epoch: lease.epoch,
+  const active = [...surfaceLeases.values()].map(lease => ({
+    kind: "active", leaseId: lease.leaseId, jobId: lease.jobId, epoch: lease.epoch,
     windowId: lease.windowId, tabId: lease.tabId,
   }));
-  await area.set({[SURFACE_SESSION_KEY]: records});
+  const idle = [...idleSurfaces.entries()].map(([key, surface]) => ({
+    kind: "idle", key, windowId: surface.windowId, tabId: surface.tabId,
+  }));
+  await area.set({[SURFACE_SESSION_KEY]: [...active, ...idle]});
 }
 
 async function quarantineOrphanSurfaces() {
@@ -70,7 +76,49 @@ async function acquireFocus() {
   };
 }
 
-async function acquireSurface(jobId, epoch, url) {
+async function closeWindow(windowId) {
+  if (!Number.isInteger(windowId)) return;
+  try { await ext.windows.remove(windowId); } catch (_) {}
+}
+
+async function evictIdleSurface(key, expectedTabId = null) {
+  const surface = idleSurfaces.get(key);
+  if (!surface) return;
+  if (expectedTabId != null && surface.tabId !== expectedTabId) return;
+  idleSurfaces.delete(key);
+  if (surface.expiryTimer) clearTimeout(surface.expiryTimer);
+  await withSurfaceStateLock(writeSurfaceState);
+  await closeWindow(surface.windowId);
+}
+
+async function takeIdleSurface(key, jobId, epoch) {
+  if (!key) return null;
+  const surface = idleSurfaces.get(key);
+  if (!surface) return null;
+  idleSurfaces.delete(key);
+  if (surface.expiryTimer) clearTimeout(surface.expiryTimer);
+  try {
+    await ext.windows.get(surface.windowId);
+    await ext.tabs.get(surface.tabId);
+    await ext.windows.update(surface.windowId, {focused: true, state: "normal"});
+    await ext.tabs.update(surface.tabId, {active: true});
+  } catch (_) {
+    await closeWindow(surface.windowId);
+    await withSurfaceStateLock(writeSurfaceState);
+    return null;
+  }
+  const lease = {
+    leaseId: nextLeaseId++, jobId, epoch, windowId: surface.windowId, tabId: surface.tabId,
+    released: false, reused: true,
+  };
+  surfaceLeases.set(lease.leaseId, lease);
+  await withSurfaceStateLock(writeSurfaceState);
+  return lease;
+}
+
+async function acquireSurface(jobId, epoch, url, reuseKey = null) {
+  const reused = await takeIdleSurface(reuseKey, jobId, epoch);
+  if (reused) return reused;
   /* Unfocused, but never minimized.
    *
    * This used to minimize the window on the assumption that a minimized window
@@ -106,14 +154,29 @@ async function acquireSurface(jobId, epoch, url) {
   return lease;
 }
 
-async function releaseSurface(lease) {
+async function releaseSurface(lease, {keepKey = null, config = null} = {}) {
   if (!lease || lease.released) return;
   lease.released = true;
   surfaceLeases.delete(lease.leaseId);
+  if (keepKey) {
+    const ttlMs = Math.max(1000, Number(config?.surfaceIdleTtlMs) || DEFAULTS.surfaceIdleTtlMs);
+    const maxIdle = Math.max(1, Math.min(32, Number(config?.maxIdleSurfaces) || DEFAULTS.maxIdleSurfaces));
+    const existing = idleSurfaces.get(keepKey);
+    if (existing && existing.windowId !== lease.windowId) await closeWindow(existing.windowId);
+    const surface = {windowId: lease.windowId, tabId: lease.tabId, lastUsedAt: Date.now(), expiryTimer: null};
+    surface.expiryTimer = setTimeout(() => { void evictIdleSurface(keepKey, surface.tabId); }, ttlMs);
+    idleSurfaces.set(keepKey, surface);
+    const overflow = [...idleSurfaces.entries()]
+      .sort((a, b) => a[1].lastUsedAt - b[1].lastUsedAt)
+      .slice(0, Math.max(0, idleSurfaces.size - maxIdle));
+    for (const [key, item] of overflow) await evictIdleSurface(key, item.tabId);
+    await withSurfaceStateLock(writeSurfaceState);
+    return;
+  }
   await withSurfaceStateLock(writeSurfaceState);
   // Close only the exact window created for this lease. A stale completion can
   // never remove another job's tab, even if jobs finish out of order.
-  try { await ext.windows.remove(lease.windowId); } catch (_) {}
+  await closeWindow(lease.windowId);
 }
 
 async function getConfig() {
@@ -220,6 +283,11 @@ function taskUrlFor(site, conversation) {
   return mode === "persistent" ? policy.persistent : policy.fresh;
 }
 
+function conversationSurfaceKey(site, conversationId) {
+  const id = String(conversationId ?? "");
+  return CONVERSATION_ID_PATTERN.test(id) ? `${site}:${id}` : null;
+}
+
 /* Which tab is serving which job, so a cancel can find it.
  * The generation epoch lets a cancel for a previous occupant of a recycled tab
  * be discarded instead of stopping the turn currently using it. */
@@ -310,6 +378,8 @@ function reloadExtension(message) {
 async function executeJob(job) {
   let lease = null;
   let releaseFocus = null;
+  let keepSurfaceKey = null;
+  let config = null;
   try {
     await surfaceRecovery;
     if (!["model.turn", "site.health"].includes(job.operation)) throw new Error(`unsupported operation: ${job.operation}`);
@@ -318,7 +388,7 @@ async function executeJob(job) {
     const site = String(job.site ?? "chatgpt");
     if (!SITES[site]) throw new Error(`unsupported site: ${site}`);
     const taskUrl = taskUrlFor(site, job.conversation);
-    const config = await getConfig();
+    config = await getConfig();
     const capacity = Math.max(1, Math.min(16, Number(config.maxConcurrentTurns) || 4));
     if (activeJobs.size >= capacity) {
       throw new Error(`browser worker is at capacity (${capacity} concurrent turns)`);
@@ -344,7 +414,9 @@ async function executeJob(job) {
       });
       return;
     }
-    lease = await acquireSurface(job.job_id, entry.epoch, taskUrl);
+    const requestedSurfaceKey = job.conversation?.mode === "continue"
+      ? conversationSurfaceKey(site, job.conversation?.conversation_id) : null;
+    lease = await acquireSurface(job.job_id, entry.epoch, taskUrl, requestedSurfaceKey);
     entry.tabId = lease.tabId;
     entry.leaseId = lease.leaseId;
     if (entry.cancelled) {
@@ -408,6 +480,10 @@ async function executeJob(job) {
       });
       return;
     }
+    const resolvedConversationId = result.conversationId ?? job.conversation?.conversation_id ?? null;
+    if (job.conversation?.mode === "persistent" || job.conversation?.mode === "continue") {
+      keepSurfaceKey = conversationSurfaceKey(site, resolvedConversationId);
+    }
     globalThis.FancyGPTTransport.send({
       type: "job_result",
       job_id: job.job_id,
@@ -427,7 +503,7 @@ async function executeJob(job) {
   } finally {
     if (releaseFocus) releaseFocus();
     activeJobs.delete(job.job_id);
-    await releaseSurface(lease);
+    await releaseSurface(lease, {keepKey: keepSurfaceKey, config});
   }
 }
 
@@ -556,7 +632,8 @@ ext.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // ownership operations, not browser credentials or transport internals.
 if (globalThis.__FANCYGPT_TEST__) {
   globalThis.FancyGPTBackgroundTest = {
-    acquireSurface, releaseSurface, surfaceLeases, activeJobs, rememberObservation, takeObservations,
+    acquireSurface, releaseSurface, surfaceLeases, idleSurfaces, activeJobs,
+    rememberObservation, takeObservations, evictIdleSurface,
   };
 }
 

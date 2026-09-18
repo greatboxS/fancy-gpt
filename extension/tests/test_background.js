@@ -42,9 +42,32 @@ async function main() {
         return value;
       },
       async remove(id) { windows.delete(id); },
+      async get(id) {
+        const value = windows.get(id);
+        if (!value) throw new Error("window not found");
+        return value;
+      },
+      async update(id, options) {
+        const value = windows.get(id);
+        if (!value) throw new Error("window not found");
+        value.options = {...value.options, ...options};
+        return value;
+      },
     },
     tabs: {
       onRemoved: removed,
+      async get(id) {
+        for (const value of windows.values()) {
+          const tab = value.tabs?.find(item => item.id === id);
+          if (tab) return tab;
+        }
+        throw new Error("tab not found");
+      },
+      async update(id, options) {
+        const tab = await this.get(id);
+        Object.assign(tab, options);
+        return tab;
+      },
       async sendMessage(tabId, message) {
         if (message.type === "fancy_cancel_turn") return {ok: true};
         if (message.type === "fancy_execute_turn" && autoSubmit) {
@@ -140,6 +163,43 @@ async function main() {
   assert.strictEqual(sessionStored.fancyGptSurfaceLeases.length, 0, "released leases leave no recovery record");
   assert.strictEqual(removed.size, 0);
   assert.deepStrictEqual(sent.filter(item => item.type === "job_result").map(item => item.job_id).sort(), ["a", "b"]);
+
+  // A persisted provider conversation keeps its rendered surface between
+  // tool-loop turns. The next continuation gets a new lease/fence but reuses
+  // the same browser window and tab, so long reviews do not flicker windows.
+  const createdBeforePersistent = createdWindows;
+  const persistent = handler({
+    type: "job", operation: "model.turn", site: "chatgpt", job_id: "persist-1", prompt: "first",
+    generation_epoch: 11, conversation: {mode: "persistent"},
+  });
+  await waitUntil(() => context.FancyGPTBackgroundTest.activeJobs.get("persist-1")?.tabId != null);
+  const persistentEntry = context.FancyGPTBackgroundTest.activeJobs.get("persist-1");
+  const persistentTab = persistentEntry.tabId;
+  const persistentWindow = [...windows.values()].find(value => value.tabs?.some(tab => tab.id === persistentTab))?.id;
+  pending.get(persistentTab).resolve({
+    ok: true, text: "tool please", responseIdentity: "persist-a1", conversationId: "conv-keep-0001",
+  });
+  await persistent;
+  assert.strictEqual(windows.size, 1, "persistent turn keeps one idle task window");
+  assert.strictEqual(context.FancyGPTBackgroundTest.idleSurfaces.size, 1);
+
+  const continued = handler({
+    type: "job", operation: "model.turn", site: "chatgpt", job_id: "persist-2", prompt: "tool result",
+    generation_epoch: 12, conversation: {mode: "continue", conversation_id: "conv-keep-0001"},
+  });
+  await waitUntil(() => context.FancyGPTBackgroundTest.activeJobs.get("persist-2")?.tabId != null);
+  const continuedEntry = context.FancyGPTBackgroundTest.activeJobs.get("persist-2");
+  assert.strictEqual(continuedEntry.tabId, persistentTab, "continuation reuses the same tab");
+  assert.strictEqual(createdWindows, createdBeforePersistent + 1, "continuation must not create another window");
+  const continuedWindow = [...windows.values()].find(value => value.tabs?.some(tab => tab.id === continuedEntry.tabId))?.id;
+  assert.strictEqual(continuedWindow, persistentWindow, "continuation reuses the same window");
+  pending.get(continuedEntry.tabId).resolve({
+    ok: true, text: "final", responseIdentity: "persist-a2", conversationId: "conv-keep-0001",
+  });
+  await continued;
+  assert.strictEqual(windows.size, 1, "surface remains idle for more conversation turns");
+  await context.FancyGPTBackgroundTest.evictIdleSurface("chatgpt:conv-keep-0001");
+  assert.strictEqual(windows.size, 0, "explicit idle cleanup closes the cached surface");
 
   // Cancellation while waiting for the focus arbiter must not allocate a
   // browser surface, much less submit a prompt after the caller has gone.

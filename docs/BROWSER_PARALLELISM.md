@@ -167,9 +167,14 @@ queued
 ```
 
 Cleanup is idempotent. It removes tab listeners, mutation observers, tick ports,
-capture buffers, cancellation tombstones, and the exact tab/window owned by the
-lease. A short bounded cancellation tombstone handles late messages; it is not
-kept forever.
+capture buffers, and cancellation tombstones. A completed persistent conversation
+may return its exact tab/window to a bounded idle-surface cache instead of closing
+it. The next serialized turn for the same provider conversation receives a new
+lease and generation fence over that same rendered surface. Fresh turns and health
+probes still close their surfaces. Idle surfaces have a bounded count and TTL, and
+an MV3 worker restart quarantines/closes every recorded surface whose ownership can
+no longer be proven. A short bounded cancellation tombstone handles late messages;
+it is not kept forever.
 
 On service-worker restart, a lease in `submitting` or `accepted` is never blindly
 resubmitted. The bridge/gateway receives an uncertain terminal state unless the
