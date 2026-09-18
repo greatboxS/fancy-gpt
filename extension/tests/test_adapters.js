@@ -35,6 +35,14 @@ function assistantTurn(id, text) {
   return turn;
 }
 
+function userTurn(id, text) {
+  const turn = new StubElement("div", {
+    "data-turn-id": id, "data-message-author-role": "user", text,
+  });
+  document.body.append(turn);
+  return turn;
+}
+
 function stopControl() {
   const stop = new StubElement("button", {"data-testid": "stop-button"});
   document.body.append(stop);
@@ -231,6 +239,28 @@ async function main() {
     const result = await running;
     assertEqual(result.responseIdentity, "turn-new", "hydrated history must not become a reply candidate");
     assertEqual(result.text, ENVELOPE, "the new assistant turn is returned");
+  });
+
+  await test("chatgpt anchors a resumed reply after the submitted user turn", async () => {
+    globalThis.FANCY_GPT_RAW_TEXT_PROBE = false;
+    loadAdapters(["site_chatgpt.js"]);
+    const {composer, send} = chatgptPage();
+    const adapter = globalThis.FancyGPTSites.chatgpt;
+
+    send.onclick = () => {
+      composer.setText("");
+      // Virtualized history can materialize only after submit. This old reply
+      // was absent from the baseline, but its DOM position is before our user
+      // turn, so it must never compete with the new answer.
+      assistantTurn("turn-old-late", '{"type":"message","text":"old hydrated answer"}');
+      userTurn("turn-current-user", "PROMPT-A7");
+      setTimeout(() => assistantTurn("turn-current-answer", ENVELOPE), 40);
+    };
+
+    const result = await adapter.executeTurn("PROMPT-A7", 8000, null, {});
+    assertEqual(result.responseIdentity, "turn-current-answer",
+      "reply attribution must be ordered after the submitted user turn");
+    assertEqual(result.text, ENVELOPE, "the current answer is returned");
   });
 
   await test("chatgpt streams partial text through the observer", async () => {

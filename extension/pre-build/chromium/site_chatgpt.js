@@ -67,10 +67,28 @@
     });
   }
 
+  function turnElements() {
+    return [...document.querySelectorAll(SELECTORS.turns)];
+  }
+
   function turnIds() {
-    return [...document.querySelectorAll(SELECTORS.turns)]
-      .map(el => el.getAttribute("data-turn-id"))
-      .filter(Boolean);
+    return turnElements().map(el => el.getAttribute("data-turn-id")).filter(Boolean);
+  }
+
+  function turnRole(turn) {
+    const direct = turn?.getAttribute?.("data-message-author-role");
+    if (direct) return direct;
+    if (turn?.querySelector?.('[data-message-author-role="user"]')) return "user";
+    if (turn?.querySelector?.('[data-message-author-role="assistant"]')) return "assistant";
+    return null;
+  }
+
+  function newestSubmittedUserTurnId(baseline) {
+    const freshUsers = turnElements().filter(turn => {
+      const id = turn.getAttribute("data-turn-id");
+      return Boolean(id) && !baseline.has(id) && turnRole(turn) === "user";
+    });
+    return freshUsers.length ? freshUsers[freshUsers.length - 1].getAttribute("data-turn-id") : null;
   }
 
   function assistantText(turnId) {
@@ -236,6 +254,22 @@
     }
     options?.onSubmitted?.();
 
+    /* Anchor this job to the user turn the page just created.
+     *
+     * Long resumed chats can continue hydrating old history even after the
+     * composer and send button are ready. Baseline-only attribution therefore
+     * still sees old assistant turns as fresh. The submitted user turn gives a
+     * stronger ordering boundary: history belongs before it, this job's reply
+     * belongs after it. If a future UI stops exposing user turns, the bounded
+     * wait falls back to the baseline logic below.
+     */
+    let submittedUserTurnId = null;
+    try {
+      submittedUserTurnId = await waitFor(
+        () => newestSubmittedUserTurnId(baseline), 1500, "submitted user turn not visible yet"
+      );
+    } catch (_) { /* baseline fallback remains available */ }
+
     /* Give up on inactivity, not on elapsed time.
      *
      * A fixed deadline is the wrong signal: a long reasoning turn can
@@ -306,9 +340,19 @@
        * needs. */
       const fresh = [];
       const changed = [];
-      for (const id of turnIds()) {
+      const turns = turnElements();
+      const anchorIndex = submittedUserTurnId == null
+        ? -1
+        : turns.findIndex(turn => turn.getAttribute("data-turn-id") === submittedUserTurnId);
+      const candidateTurns = anchorIndex >= 0 ? turns.slice(anchorIndex + 1) : turns;
+      for (const turn of candidateTurns) {
+        const id = turn.getAttribute("data-turn-id");
+        if (!id) continue;
         const text = assistantText(id);
         if (!text) continue;
+        // Once the submitted user turn is visible, DOM order is authoritative:
+        // only assistant turns after that anchor can belong to this job.
+        if (anchorIndex >= 0) { fresh.push({id, text}); continue; }
         if (!baseline.has(id)) { fresh.push({id, text}); continue; }
         if (baseline.get(id) !== text) changed.push({id, text});
       }
